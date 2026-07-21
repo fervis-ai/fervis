@@ -1,0 +1,26 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Set answer_requests_count to the number of complete requested facts in the current question plus annotations.\n",
+      "new": "",
+      "expected_count": 1
+    },
+    {
+      "old": "answer_requests_count must equal the number of answer_requests.\n",
+      "new": "",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests_count"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/required/1"
+    }
+  ]
+}

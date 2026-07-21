@@ -8,7 +8,6 @@ from fervis.lookup.answer_program.operations import (
     Predicate,
     PredicateOperator,
     OrderSpec,
-    SortDirection,
     SortKey,
 )
 from fervis.lookup.answer_program.expressions import FieldRef
@@ -81,11 +80,6 @@ def _ordered_aggregate_operations(
                     ),
                 ),
                 selection=ordering.selection,
-                tie_breakers=tuple(
-                    SortKey(field=item["field_id"], direction=SortDirection.ASC)
-                    for item in group_fields
-                    if item["field_id"] != ordering_field_id
-                ),
             ),
             output_relation=output_relation_id,
         ),

@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Use grouping_grain when a supplied unit such as day, week, month, or quarter states how source values are divided into result groups.\nA grouping_grain is neither the queried time period nor a group member. For 'events per day during March,' day is the grouping_grain and March is the time_value.",
+      "new": "A grouping_grain is a supplied temporal unit used to derive buckets from a timestamp.\nA grouping dimension is an existing source attribute used directly as the group key; it is not a grouping_grain or a question input.",
+      "expected_count": 1
+    }
+  ]
+}

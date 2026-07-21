@@ -4,7 +4,6 @@ from tests.lookup.grounding._support import (
     GroundingTurnPrompt,
     IdentifierKind,
     InputBindingCompatibility,
-    NO_SHOWN_RESOURCE_TYPE,
     RelationCatalog,
     ResourceTypeMatch,
     ValidationError,
@@ -59,10 +58,12 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
     assert "<api_read" in prompt
     assert '"binding_options":' not in prompt
     assert "Write resource_type_basis first" in prompt
-    assert "set resource_type_x to exactly one shown_resource_type" in prompt
-    assert "SAME_RESOURCE_TYPE means it exactly equals resource_type_x" in prompt
-    assert "Within each known-input review, write fields in this order: resource_type_basis, resource_type_x, identifier_kind_basis, identifier_kind, option_reviews." in prompt
-    assert "Within each option review, write fields in this order: resource_type, resource_type_match, resolver_fit_question, because, resolution." in prompt
+    assert "write resource_type_compatibility for every shown_resource_type" in prompt
+    assert "Assess each shown type independently" in prompt
+    assert "several may be SAME_RESOURCE_TYPE" in prompt
+    assert "a positive route must take lookup_text as the canonical_result component" in prompt
+    assert "Within each known-input review, write fields in this order: resource_type_basis, resource_type_compatibility, identifier_kind_basis, identifier_kind, option_reviews." in prompt
+    assert "Within each option review, write fields in this order: resource_type, resolver_fit_question, because, resolution." in prompt
     assert "returned_identity_verification_fields are returned-resource fields that may exactly equal lookup_text" in prompt
     assert "Include each selected field exactly once." not in prompt
     assert "can/cannot identify the returned" not in prompt
@@ -74,14 +75,19 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
     known_input_review = bindings_schema["properties"][task.known_input_id]
     assert list(known_input_review["properties"]) == [
         "resource_type_basis",
-        "resource_type_x",
+        "resource_type_compatibility",
         "identifier_kind_basis",
         "identifier_kind",
         "option_reviews",
     ]
-    assert known_input_review["properties"]["resource_type_x"]["enum"] == [
-        "flow",
-        NO_SHOWN_RESOURCE_TYPE,
+    compatibility_schema = known_input_review["properties"][
+        "resource_type_compatibility"
+    ]
+    assert compatibility_schema["additionalProperties"] is False
+    assert compatibility_schema["required"] == ["flow"]
+    assert compatibility_schema["properties"]["flow"]["enum"] == [
+        ResourceTypeMatch.SAME_RESOURCE_TYPE.value,
+        ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value,
     ]
     option_reviews = known_input_review["properties"]["option_reviews"]
     assert option_reviews["required"] == [option.id for option in task.options]
@@ -89,7 +95,6 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
     assert "oneOf" not in first_review
     assert list(first_review["properties"]) == [
         "resource_type",
-        "resource_type_match",
         "resolver_fit_question",
         "because",
         "resolution",
@@ -109,20 +114,16 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
     ("mutate", "message"),
     (
         (
-            lambda review: review.update(resource_type_x="staff"),
-            "resource_type_x was not shown",
+            lambda review: review["resource_type_compatibility"].update(
+                staff=ResourceTypeMatch.SAME_RESOURCE_TYPE.value
+            ),
+            "resource_type_compatibility must cover shown resource types",
         ),
         (
             lambda review: next(iter(review["option_reviews"].values())).update(
                 resource_type="staff"
             ),
             "option resource_type mismatch",
-        ),
-        (
-            lambda review: next(iter(review["option_reviews"].values())).update(
-                resource_type_match=ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value
-            ),
-            "resource_type_match contradicts resource types",
         ),
     ),
 )
@@ -154,7 +155,7 @@ def test_grounding_parser_rejects_inconsistent_resource_type_contract(
         parse_grounding_compatibility(payload, request=request)
 
 
-def test_grounding_parser_accepts_no_shown_resource_type_only_with_negative_options(
+def test_grounding_parser_accepts_all_different_resource_types_with_negative_options(
 ) -> None:
     catalog = RelationCatalog(reads=(_location_read(),))
     [task] = reference_input_binding_tasks(
@@ -174,11 +175,10 @@ def test_grounding_parser_accepts_no_shown_resource_type_only_with_negative_opti
         selected_by_input={},
     )
     review = payload["known_input_binding_reviews"][task.known_input_id]
-    review["resource_type_x"] = NO_SHOWN_RESOURCE_TYPE
-    for option_review in review["option_reviews"].values():
-        option_review["resource_type_match"] = (
-            ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value
-        )
+    review["resource_type_compatibility"] = {
+        resource_type: ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value
+        for resource_type in task.shown_resource_types
+    }
 
     result = parse_grounding_compatibility(payload, request=request)
 
@@ -187,7 +187,7 @@ def test_grounding_parser_accepts_no_shown_resource_type_only_with_negative_opti
     )
 
 
-def test_grounding_selects_one_resource_type_before_reviewing_resolver_mechanics(
+def test_grounding_classifies_each_resource_type_before_reviewing_resolver_mechanics(
 ) -> None:
     catalog = RelationCatalog(
         reads=(_staff_read(), _staff_detail_read(), _location_detail_read())
@@ -223,19 +223,7 @@ def test_grounding_selects_one_resource_type_before_reviewing_resolver_mechanics
 
     result = parse_grounding_compatibility(payload, request=request)
 
-    assert review["resource_type_x"] == "staff"
-    assert {
-        option_by_read[read_id].candidate.entity_kind: option_review[
-            "resource_type_match"
-        ]
-        for read_id, option_review in (
-            (
-                option.candidate.resolver_read_id,
-                review["option_reviews"][option.id],
-            )
-            for option in task.options
-        )
-    } == {
+    assert review["resource_type_compatibility"] == {
         "staff": ResourceTypeMatch.SAME_RESOURCE_TYPE.value,
         "location": ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value,
     }
@@ -557,5 +545,7 @@ def test_grounding_does_not_offer_related_resource_fields_as_match_fields() -> N
         "properties"
     ]["returned_identity_verification_fields"]["items"]["enum"]
     assert "data.name" in legal_match_paths
+    assert "data.location_id" not in legal_match_paths
+    assert "data.type" not in legal_match_paths
     assert "data.area.area_id" not in legal_match_paths
     assert "data.area.name" not in legal_match_paths

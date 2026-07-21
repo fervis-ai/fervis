@@ -189,6 +189,33 @@ class ResolverOptionSurface:
                 "resolver response field does not accept the lookup text"
             ) from exc
 
+    def compatible_response_match_fields(
+        self,
+        *,
+        lookup_text: str,
+    ) -> tuple[RowSourceField, ...]:
+        return tuple(
+            field
+            for field in self.response_match_fields
+            if self._response_field_accepts(field, lookup_text=lookup_text)
+        )
+
+    @staticmethod
+    def _response_field_accepts(
+        field: RowSourceField,
+        *,
+        lookup_text: str,
+    ) -> bool:
+        try:
+            parse_catalog_parameter_text(
+                lookup_text,
+                type_name=field.type.value,
+                choices=field.choices,
+            )
+        except CatalogParameterValueError:
+            return False
+        return True
+
 
 def resolver_option_surface(
     request: GroundingRequest,

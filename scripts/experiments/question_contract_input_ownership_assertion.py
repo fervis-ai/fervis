@@ -15,8 +15,15 @@ _QUESTIONS = {
     "pair_grouped": "How many sales did the staff members with ids 51515151-0000-0000-0002-000000000001 and 51515151-0000-0000-0002-000000000002 sell each today?",
     "single_staff": "How many sales did the staff with staff_id: 51515151-0000-0000-0002-000000000001 sell today?",
     "choice_and_time": "How many in-person sales happened this month?",
+    "normal_sale_predicates": "List all completed in-person sales from March 2026.",
+    "raw_sale_audit": "For an audit, list every persisted sales record from March 2026 for completed in-person sales.",
+    "raw_sale_audit_inclusive": "For an audit, list every persisted sales record from March 2026 for completed in-person sales, including records marked as deleted.",
+    "normal_sale_deleted_only": "List all deleted sales from March 2026.",
+    "normal_sale_including_deleted": "List all sales from March 2026, including deleted sales.",
     "one_input_two_tests": "How many records have both owner and reviewer equal to her?",
     "result_limit": "Which 3 stores had the most sales this month?",
+    "percent_formula": "What is 10% of sales revenue from March 2026?",
+    "subtraction_formula": "What is sales revenue from March 2026 minus 500?",
     "unresolved_prior_reference": "What were her sales last week?",
 }
 
@@ -75,7 +82,10 @@ def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
         if isinstance(item, dict)
     }
     question = _QUESTIONS.get(str(label))
-    if question is not None:
+    if question is not None and label not in {
+        "normal_sale_deleted_only",
+        "normal_sale_including_deleted",
+    }:
         try:
             parse_question_contract(
                 tool_name=QUESTION_CONTRACT_TOOL_NAME,
@@ -119,16 +129,172 @@ def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
             for use in owners_by_source.values()
         ):
             errors.append("choice/time operands are not population-test-owned")
+    elif label in {
+        "normal_sale_predicates",
+        "raw_sale_audit",
+        "raw_sale_audit_inclusive",
+    }:
+        if any(
+            use.get("owner_kind") != "POPULATION_TESTS"
+            for use in owners_by_source.values()
+        ):
+            errors.append("sale predicate operands are not population-test-owned")
+        subject = request.get("answer_subject")
+        interpretation = (
+            subject.get("instance_interpretation")
+            if isinstance(subject, dict)
+            else None
+        )
+        expected_interpretation = (
+            "RAW_DATA_RECORD"
+            if label in {"raw_sale_audit", "raw_sale_audit_inclusive"}
+            else "NORMAL_BUSINESS_INSTANCE"
+        )
+        if (
+            not isinstance(interpretation, dict)
+            or interpretation.get("kind") != expected_interpretation
+        ):
+            errors.append(
+                f"sale request is not represented as {expected_interpretation}"
+            )
+        if label in {"raw_sale_audit", "raw_sale_audit_inclusive"} and any(
+            "deleted" in source.casefold() for source in sources_by_ref.values()
+        ):
+            errors.append("inclusive deleted-state wording became a predicate input")
+        tests = request.get("answer_population", {}).get("membership_tests", [])
+        explicit_tests = [
+            test
+            for test in tests
+            if isinstance(test, dict)
+            and test.get("kind") == "EXPLICIT_USER_CONSTRAINT"
+        ]
+        for required_text in ("completed", "in-person", "march 2026"):
+            matching_tests = [
+                test
+                for test in explicit_tests
+                if required_text in str(test.get("test_question") or "").casefold()
+            ]
+            test_refs = [
+                input_ref
+                for test in matching_tests
+                for input_ref in test.get("question_input_refs", [])
+            ]
+            test_operands = " ".join(
+                sources_by_ref.get(input_ref, "").casefold()
+                for input_ref in test_refs
+            )
+            if not matching_tests or required_text not in test_operands:
+                errors.append(f"{required_text} lacks its supplied predicate operand")
+    elif label in {"normal_sale_deleted_only", "normal_sale_including_deleted"}:
+        tests = request.get("answer_population", {}).get("membership_tests", [])
+        explicit_tests = [
+            test
+            for test in tests
+            if isinstance(test, dict)
+            and test.get("kind") == "EXPLICIT_USER_CONSTRAINT"
+        ]
+        deleted_input_refs = {
+            ref
+            for ref, source in sources_by_ref.items()
+            if "deleted" in source.casefold()
+        }
+        deleted_test_refs = {
+            input_ref
+            for test in explicit_tests
+            for input_ref in test.get("question_input_refs", [])
+            if input_ref in deleted_input_refs
+        }
+        qualification = request.get("answer_population", {}).get("qualification")
+        any_of = (
+            qualification.get("any_of")
+            if isinstance(qualification, dict)
+            else None
+        )
+        clauses = [
+            {
+                str(requirement.get("test_id") or ""): str(
+                    requirement.get("required_result") or ""
+                )
+                for requirement in item.get("all_of", [])
+                if isinstance(requirement, dict)
+            }
+            for item in any_of or []
+            if isinstance(item, dict)
+        ]
+        tests_by_id = {
+            str(test.get("test_id") or ""): test
+            for test in tests
+            if isinstance(test, dict)
+        }
+        deleted_test_ids = {
+            test_id
+            for test_id, test in tests_by_id.items()
+            if "deleted" in str(test.get("test_question") or "").casefold()
+        }
+        normal_test_ids = {
+            test_id
+            for test_id, test in tests_by_id.items()
+            if test.get("kind") == "NORMAL_INSTANCE_GUARD"
+        }
+        subject_test_ids = {
+            test_id
+            for test_id, test in tests_by_id.items()
+            if test.get("kind") == "SUBJECT_IDENTITY"
+        }
+        march_test_ids = {
+            test_id
+            for test_id, test in tests_by_id.items()
+            if "march 2026" in str(test.get("test_question") or "").casefold()
+        }
+        if not clauses or any(not clause for clause in clauses):
+            errors.append("population qualification is not a non-empty any-of/all-of")
+        if any(
+            polarity
+            for test in tests
+            if isinstance(test, dict)
+            for polarity in [test.get("polarity")]
+        ):
+            errors.append("atomic membership test still owns composition polarity")
+        if any(
+            not subject_test_ids.issubset(clause)
+            or not march_test_ids.issubset(clause)
+            or any(result not in {"PASS", "FAIL"} for result in clause.values())
+            for clause in clauses
+        ):
+            errors.append("qualification clause omits shared requirements or has invalid result")
+        if label == "normal_sale_deleted_only":
+            if not deleted_input_refs or deleted_test_refs != deleted_input_refs:
+                errors.append("required deleted state is not a predicate operand")
+            if not clauses or any(
+                not any(clause.get(test_id) == "PASS" for test_id in deleted_test_ids)
+                for clause in clauses
+            ):
+                errors.append("deleted-only qualification admits a non-deleted clause")
+        else:
+            if not deleted_input_refs or deleted_test_refs != deleted_input_refs:
+                errors.append("included deleted state lacks its atomic predicate")
+            if not any(
+                any(clause.get(test_id) == "PASS" for test_id in normal_test_ids)
+                and not any(test_id in clause for test_id in deleted_test_ids)
+                for clause in clauses
+            ):
+                errors.append("inclusive qualification omits the normal population")
+            if not any(
+                any(clause.get(test_id) == "PASS" for test_id in deleted_test_ids)
+                and not any(test_id in clause for test_id in normal_test_ids)
+                for clause in clauses
+            ):
+                errors.append("inclusive qualification omits the deleted population")
     elif label == "one_input_two_tests":
         use = owners_by_source.get("Azraah")
-        use_id = use.get("use_id") if isinstance(use, dict) else None
+        input_ref = use.get("input_ref") if isinstance(use, dict) else None
         consuming_tests = [
             test
             for test in request.get("answer_population", {}).get(
                 "membership_tests", []
             )
             if isinstance(test, dict)
-            and use_id in test.get("question_input_use_refs", [])
+            and input_ref in test.get("question_input_refs", [])
         ]
         if (
             not isinstance(use, dict)
@@ -150,8 +316,21 @@ def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
             or time_use.get("owner_kind") != "POPULATION_TESTS"
         ):
             errors.append("this month is not population-test-owned")
-        if not isinstance(expression, dict) or expression.get("family") != "ranked_selection":
-            errors.append("result-limit question is not ranked_selection")
+        if not isinstance(expression, dict) or expression.get("selection") != {
+            "kind": "take"
+        }:
+            errors.append("result-limit question does not use take selection")
+    elif label in {"percent_formula", "subtraction_formula"}:
+        if set(owners_by_source) not in (
+            {"10%", "March 2026"},
+            {"500", "March 2026"},
+        ):
+            errors.append("formula inputs are not all owned by the answer request")
+        if owners_by_source.get("March 2026", {}).get("owner_kind") != "POPULATION_TESTS":
+            errors.append("formula period is not population-test-owned")
+        formula_source = "10%" if label == "percent_formula" else "500"
+        if owners_by_source.get(formula_source, {}).get("owner_kind") != "COMPUTE_EXPRESSION":
+            errors.append("formula operand is not compute-expression-owned")
     else:
         errors.append(f"unknown assertion label: {label}")
     return errors
@@ -162,7 +341,6 @@ def _contains_legacy_owner(value: object) -> bool:
         if set(value) & {
             "used_question_inputs",
             "owned_question_input_refs",
-            "question_input_refs",
         }:
             return True
         return any(_contains_legacy_owner(item) for item in value.values())

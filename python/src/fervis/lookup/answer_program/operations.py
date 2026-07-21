@@ -201,7 +201,6 @@ class OrderSpec:
     input_relation: str
     order_by: tuple[SortKey, ...]
     selection: OrderSelection
-    tie_breakers: tuple[SortKey, ...] = ()
     kind: OperationKind = field(default=OperationKind.ORDER, init=False)
 
 
@@ -299,3 +298,13 @@ def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
     if isinstance(spec, ComputeSpec):
         return ()
     assert_never(spec)
+
+
+def operation_scalar_output_ids(spec: OperationSpec) -> tuple[str, ...]:
+    """Return outputs that one operation proves are scalar-addressable."""
+
+    if isinstance(spec, ComputeSpec):
+        return (spec.output_scalar,) if spec.output_scalar else ()
+    if isinstance(spec, AggregateSpec) and not spec.group_by:
+        return tuple(aggregation.output_field for aggregation in spec.aggregations)
+    return ()

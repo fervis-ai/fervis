@@ -154,8 +154,8 @@ def test_question_contract_schema_is_decisions_only():
         "answer_required": [
             "kind",
             "answer_requests_count",
-            "question_inputs",
             "answer_requests",
+            "question_inputs",
             "question_input_inventory_check",
         ],
         "answer_kind_enum": ["question_contract"],
@@ -339,22 +339,11 @@ def _question_contract_with_time_value_input() -> dict[str, object]:
                         },
                     },
                     "answer_population": {
-                        "population_label": "sales today",
-                        "counted_unit": "sale",
                         "membership_tests": [
                             {
-                                "test_id": "test_1",
-                                "kind": "SUBJECT_IDENTITY",
-                                "polarity": "MUST_PASS",
-                                "test_question": "Is this a sale?",
-                                "question_input_use_refs": [],
-                            },
-                            {
-                                "test_id": "test_time",
-                                "kind": "EXPLICIT_USER_CONSTRAINT",
                                 "polarity": "MUST_PASS",
                                 "test_question": "Did this sale occur today?",
-                                "question_input_use_refs": ["use_time"],
+                                "population_use_refs": ["use_time_1"],
                             }
                         ],
                     },
@@ -366,7 +355,7 @@ def _question_contract_with_time_value_input() -> dict[str, object]:
                     ],
                     "question_input_uses": [
                         {
-                            "use_id": "use_time",
+                            "use_id": "use_time_1",
                             "input_ref": "time_1",
                             "owner_kind": "POPULATION_TESTS",
                         }

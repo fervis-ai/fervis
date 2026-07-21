@@ -145,12 +145,35 @@ def selected_scalar_aggregate_metric(
     )
     _validate_metric_selection(answer, metric)
     _validate_function_selection(answer, function)
-    if str(function.get("value") or "") not in tuple(
-        metric.get("allowed_functions") or ()
-    ):
+    return compiled_metric_for_choice(
+        choice,
+        metric_id=answer.metric.id,
+        function_id=answer.function.id,
+    )
+
+
+def compiled_metric_for_choice(
+    choice: dict[str, Any],
+    *,
+    metric_id: str,
+    function_id: str,
+) -> CompiledMetric:
+    """Compile one bounded metric/function pair from its owning choice set."""
+
+    metric = _selected_candidate(
+        metric_id,
+        choice.get("metric_candidates"),
+        label="metric",
+    )
+    function = _selected_candidate(
+        function_id,
+        choice.get("function_candidates"),
+        label="function",
+    )
+    function_value = str(function.get("value") or "")
+    if function_value not in tuple(metric.get("allowed_functions") or ()):
         raise ValueError("function selection is not allowed for selected metric")
-    compiled = _compiled_metric({**metric, "function": str(function["value"])})
-    return compiled
+    return _compiled_metric({**metric, "function": function_value})
 
 
 def _aggregate_field_metric_candidates(

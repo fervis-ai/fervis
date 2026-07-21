@@ -19,6 +19,9 @@ from fervis.lookup.answer_program.expressions import (
 )
 from fervis.lookup.answer_program.model import AnswerProgram
 from fervis.lookup.answer_program.operations import (
+    AggregateSpec,
+    AggregationFunction,
+    AggregationSpec,
     ComputeSpec,
     FilterSpec,
     Operation,
@@ -43,7 +46,11 @@ from fervis.lookup.plan_execution.operation_runtime import (
     RelationEngineInput,
     ScalarInput,
 )
-from fervis.lookup.plan_execution.relations import RelationRows
+from fervis.lookup.plan_execution.relations import (
+    CompletenessProof,
+    CompletenessStatus,
+    RelationRows,
+)
 
 
 def test_expression_tree_is_the_single_predicate_and_compute_language() -> None:
@@ -208,3 +215,60 @@ def test_filter_predicates_share_one_typed_runtime(
     )
 
     assert tuple(row["id"] for row in result.relation("filtered").rows) == expected_ids
+
+
+def test_compute_consumes_one_scalar_output_from_a_prior_aggregate() -> None:
+    result = execute_operations(
+        RelationEngineInput(
+            relations=(
+                RelationRows(
+                    id="sales",
+                    rows=(
+                        {"amount": Decimal("20")},
+                        {"amount": Decimal("30")},
+                    ),
+                    field_types={"amount": "decimal"},
+                    completeness=CompletenessProof(
+                        status=CompletenessStatus.COMPLETE
+                    ),
+                ),
+            ),
+            operations=(
+                ExecutableOperation(
+                    id="sales_total",
+                    spec=AggregateSpec(
+                        input_relation="sales",
+                        group_by=(),
+                        aggregations=(
+                            AggregationSpec(
+                                function=AggregationFunction.SUM,
+                                input_field="amount",
+                                output_field="total",
+                            ),
+                        ),
+                    ),
+                    output_relation="sales_total_rows",
+                ),
+                ExecutableOperation(
+                    id="fraction",
+                    spec=ComputeSpec(
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.MULTIPLY,
+                            left=NodeOutputRef("sales_total", "total"),
+                            right=ParameterRef("fraction"),
+                        ),
+                        output_scalar="fraction",
+                    ),
+                ),
+            ),
+            scalar_inputs=(
+                ScalarInput(
+                    id="parameter:fraction",
+                    value=Decimal("0.1"),
+                    value_type="number",
+                ),
+            ),
+        )
+    )
+
+    assert result.scalars["fraction"] == Decimal("5.0")

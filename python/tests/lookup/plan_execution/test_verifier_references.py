@@ -1253,9 +1253,6 @@ def test_known_limit_input_must_match_order_take_limit():
                     spec=OrderSpec(
                         input_relation="rows",
                         order_by=(SortKey(field="name", direction=SortDirection.DESC),),
-                        tie_breakers=(
-                            SortKey(field="name", direction=SortDirection.ASC),
-                        ),
                         selection=Take(limit=ParameterRef("question.result_limit")),
                     ),
                     output_relation="result",
@@ -1291,9 +1288,6 @@ def test_order_take_allows_literal_limit_without_bound_known_input():
                     spec=OrderSpec(
                         input_relation="rows",
                         order_by=(SortKey(field="name", direction=SortDirection.DESC),),
-                        tie_breakers=(
-                            SortKey(field="name", direction=SortDirection.ASC),
-                        ),
                         selection=Take(limit=_rank_limit_constant(5)),
                     ),
                     output_relation="result",
@@ -1331,12 +1325,6 @@ def test_order_take_expression_requires_positive_integer_value():
                                         direction=SortDirection.DESC,
                                     ),
                                 ),
-                                tie_breakers=(
-                                    SortKey(
-                                        field="name",
-                                        direction=SortDirection.ASC,
-                                    ),
-                                ),
                                 selection=Take(
                                     limit=_constant_expression(
                                         FactValue.literal(
@@ -1367,9 +1355,6 @@ def test_order_take_rejects_non_numeric_expression():
                     spec=OrderSpec(
                         input_relation="rows",
                         order_by=(SortKey(field="name", direction=SortDirection.DESC),),
-                        tie_breakers=(
-                            SortKey(field="name", direction=SortDirection.ASC),
-                        ),
                         selection=Take(
                             limit=_constant_expression(
                                 FactValue.literal(
@@ -3766,7 +3751,6 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
             spec=OrderSpec(
                 input_relation="rows",
                 order_by=(SortKey(field="missing", direction=SortDirection.ASC),),
-                tie_breakers=(SortKey(field="name", direction=SortDirection.ASC),),
                 selection=Take(limit=_rank_limit_constant(5)),
             ),
             output_relation="ranked",

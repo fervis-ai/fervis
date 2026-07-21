@@ -29,7 +29,6 @@ input:
         kind: order
         input_relation: items
         order_by: [{field: amount, direction: desc}]
-        tie_breakers: [{field: item_id, direction: asc}]
         selection: {kind: take, limit_input_id: limit}
 expect:
   result_contains:

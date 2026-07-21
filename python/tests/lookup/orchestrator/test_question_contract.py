@@ -14,7 +14,7 @@ from fervis.lookup.question_contract.tools import (
 )
 from tests.lookup.orchestrator._helpers import *  # noqa: F403
 from tests.testkit.question_contract_provider import (
-    provider_membership_tests,
+    provider_answer_population,
     provider_question_input_ownership,
 )
 
@@ -25,17 +25,15 @@ def _provider_answer_population(
     subject_text: str,
 ) -> dict[str, object]:
     population = default_answer_population(
-        description=description,
         subject_text=subject_text,
         instance_interpretation=RequestedFactAnswerSubject(
             subject_text=subject_text
         ).instance_interpretation,
     ).to_question_contract_dict()
-    population["membership_tests"] = provider_membership_tests(
-        population["membership_tests"],
+    return provider_answer_population(
+        population,
         ownership=provider_question_input_ownership(),
     )
-    return population
 
 
 def _question_contract_payload(
@@ -82,15 +80,15 @@ def _decision_payload(outcome: dict[str, object]) -> dict[str, object]:
     }
 
 
-def test_question_contract_schema_declares_inputs_before_answer_requests():
+def test_question_contract_schema_declares_answer_requests_before_inputs():
     schema = build_answer_request_contract_schema()
 
     assert "oneOf" not in schema
     assert list(schema["properties"]).index(  # type: ignore[index]
-        "question_inputs"
+        "answer_requests"
     ) < list(
         schema["properties"]  # type: ignore[index]
-    ).index("answer_requests")
+    ).index("question_inputs")
 
 
 def test_question_contract_accepts_semantic_answer_subject_not_copied_from_question():
@@ -694,14 +692,12 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                         "answer_expression": {"family": "scalar_aggregate"},
                         "question_input_uses": [
                             {
-                                "use_id": "use_period",
                                 "input_ref": "input_period",
                                 "owner_kind": "POPULATION_TESTS",
                             }
                         ],
                         "answer_subject": _answer_subject_payload("the day before"),
                         "answer_population": {
-                            "population_label": "sales for the day before",
                             "counted_unit": "sale",
                             "membership_tests": [
                                 {
@@ -711,7 +707,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                                     "test_question": (
                                         "Does the row/value represent a sale?"
                                     ),
-                                    "question_input_use_refs": [],
+                                    "question_input_refs": [],
                                 },
                                 {
                                     "test_id": "normal_instance",
@@ -720,7 +716,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                                     "test_question": (
                                         "Is this an ordinary domain instance of a sale?"
                                     ),
-                                    "question_input_use_refs": [],
+                                    "question_input_refs": [],
                                 },
                                 {
                                     "test_id": "period",
@@ -729,7 +725,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                                     "test_question": (
                                         "Did this sale occur during the requested period?"
                                     ),
-                                    "question_input_use_refs": ["use_period"],
+                                    "question_input_refs": ["input_period"],
                                 },
                             ],
                         },

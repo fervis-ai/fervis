@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Each membership test asks one predicate about one candidate property. Create separate EXPLICIT_USER_CONSTRAINT tests for different properties, even when they consume the same input; omit predicates already enforced by answer_expression.\nFor each EXPLICIT_USER_CONSTRAINT, copy the exact question phrase that supplies its required value as the appropriate POPULATION_TESTS input. Property-value phrases use predicate_value; time phrases retain time_value. One copied phrase may supply several tests; each test references only inputs whose values answer that test.\nWithin answer_population, question inputs are predicate operands, not separate tests; the number of inputs does not determine the number of tests.\nWithin answer_population, when multiple inputs are alternative values for the same predicate, create one membership test for that predicate.\nMultiple MUST_PASS tests mean the candidate must satisfy every test. Create separate MUST_PASS tests only when that conjunction matches the question.",
+      "new": "Each membership test is one predicate over one candidate.\nCreate one EXPLICIT_USER_CONSTRAINT for each independent user-stated predicate that can be evaluated without comparing the candidate with other candidates.\nQuestion inputs are predicate operands, not separate tests. One predicate may own one or more inputs; the number of inputs does not determine the number of tests.\nWhen multiple inputs are alternative values for the same predicate, create one test owning all those inputs.\nMultiple MUST_PASS tests mean the candidate must satisfy every test. Create separate MUST_PASS tests only when that conjunction matches the question.",
+      "expected_count": 1
+    }
+  ]
+}

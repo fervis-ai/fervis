@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Do not infer predicate meaning from parameter or field names.",
+      "new": "A request parameter receives the selected component value, not value_meaning. Choose it only when the shown target represents that component value; compatible serialization alone is not sufficient.",
+      "expected_count": 1
+    }
+  ]
+}

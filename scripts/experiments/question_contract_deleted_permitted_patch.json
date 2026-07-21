@@ -1,0 +1,14 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "List all completed in-person sale records from March 2026.",
+      "new": "List all sales from March 2026, including deleted sales.",
+      "expected_count": 1
+    },
+    {
+      "old": "After writing answer_population, inspect each EXPLICIT_USER_CONSTRAINT. When the question supplies a concrete value used by that test, declare the smallest copied value phrase as one predicate_value and reference that input from the test. Do not turn the answer subject or counted unit into an input.\nA predicate_value does not identify one particular resource.",
+      "new": "A predicate_value states a requirement every qualifying candidate must satisfy. Copy the smallest phrase that supplies that required value and reference it from the matching EXPLICIT_USER_CONSTRAINT.\nA permission that broadens which candidates may be included is not a predicate_value and creates no question input or membership test.",
+      "expected_count": 1
+    }
+  ]
+}

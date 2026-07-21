@@ -21,6 +21,7 @@ from .scalars import _operation_scalar_inputs
 from fervis.lookup.answer_program.operations import (
     Predicate,
     RelationRoleRef,
+    operation_scalar_output_ids,
 )
 from fervis.lookup.answer_program.expressions import FieldRef, expression_references
 
@@ -94,25 +95,27 @@ def _operation_field_outputs(operations: tuple[Operation, ...]) -> set[str]:
 
 def _verify_compute_scalar_availability(answer: AnswerProgram) -> None:
     available_outputs = {
-        f"parameter:{parameter.id}": parameter.id for parameter in answer.parameters
+        f"parameter:{parameter.id}": {parameter.id} for parameter in answer.parameters
     }
     for operation in answer.operations:
         spec = operation.spec
-        if not isinstance(spec, ComputeSpec):
+        if isinstance(spec, ComputeSpec):
+            _require_available_compute_outputs(operation.id, spec, available_outputs)
+        else:
             _require_available_scalar_inputs(operation, available_outputs)
-            continue
-        _require_available_compute_outputs(operation.id, spec, available_outputs)
-        available_outputs[operation.id] = spec.output_scalar
+        node_outputs = set(operation_scalar_output_ids(spec))
+        if node_outputs:
+            available_outputs[operation.id] = node_outputs
 
 
 def _require_available_compute_outputs(
     operation_id: str,
     spec: ComputeSpec,
-    available_outputs: dict[str, str],
+    available_outputs: dict[str, set[str]],
 ) -> None:
     references = expression_references(spec.expression).outputs
     if any(
-        available_outputs.get(reference.node_id) != reference.output_id
+        reference.output_id not in available_outputs.get(reference.node_id, set())
         for reference in references
     ):
         raise VerificationError(
@@ -122,9 +125,11 @@ def _require_available_compute_outputs(
 
 def _require_available_scalar_inputs(
     operation: Operation,
-    available_outputs: dict[str, str],
+    available_outputs: dict[str, set[str]],
 ) -> None:
-    available_scalar_ids = set(available_outputs.values())
+    available_scalar_ids = {
+        output_id for output_ids in available_outputs.values() for output_id in output_ids
+    }
     if any(
         scalar_input not in available_scalar_ids
         for scalar_input in _operation_scalar_inputs(operation)
@@ -295,7 +300,7 @@ def _verify_operation_field_references(
                     _field_roles(source, aggregation.input_field, "aggregate")
         elif isinstance(spec, OrderSpec):
             source = _contract(relation_contracts, spec.input_relation)
-            for sort_key in (*spec.order_by, *spec.tie_breakers):
+            for sort_key in spec.order_by:
                 _field_roles(source, sort_key.field, "order")
         elif isinstance(spec, UniversalConditionSpec):
             _verify_predicate_fields(

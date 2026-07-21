@@ -1,0 +1,10 @@
+{
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/description",
+      "value": "One predicate for every explicit property or time condition that qualifying answer_subject instances must satisfy."
+    }
+  ]
+}

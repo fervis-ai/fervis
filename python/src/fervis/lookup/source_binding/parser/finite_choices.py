@@ -47,6 +47,7 @@ def derive_finite_choice_param_decisions(
     review_scope: SourceBindingReviewScope,
     answer_population: provider_output.AnswerPopulationOutput,
     raw_param_decision_ids: tuple[str, ...],
+    resolved_input_param_values: dict[str, tuple[object, ...]],
     coverage_role: PopulationCoverageRole,
 ) -> DerivedFiniteChoiceParamDecisions:
     review_surface = source_binding_review_surface(candidate)
@@ -101,10 +102,12 @@ def derive_finite_choice_param_decisions(
             axis=axis,
             tests_by_id=tests_by_id,
         )
-        proof_refs = population_choice_proof_refs(
-            f"population_choice:{param_id}",
-            out_of_scope_decisions,
-        )
+        applied_values = resolved_input_param_values.get(param_id, ())
+        if any(value not in include_values for value in applied_values):
+            raise ValueError(
+                "resolved input application selects an excluded finite choice"
+            )
+        proof_refs = population_choice_proof_refs(f"population_choice:{param_id}")
         population_choices.append(
             DraftRelationSourcePopulationChoice(
                 controller_kind=PopulationChoiceControllerKind.QUERY_PARAM,
@@ -131,7 +134,7 @@ def derive_finite_choice_param_decisions(
                 proof_refs=proof_refs,
             )
         )
-        if axis.can_be_omitted(include_values=include_values):
+        if applied_values or axis.can_be_omitted(include_values=include_values):
             continue
         output[param_id] = NormalizedParamDecision(
             population_intent=_text(answer_population.intent_text),

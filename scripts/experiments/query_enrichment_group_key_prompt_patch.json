@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "      \"answer_outputs\": [\n        {\n          \"answer_output_id\": \"answer_1\",\n          \"description\": \"location\",\n          \"role\": \"ANSWER_VALUE\"\n        },",
+      "new": "      \"answer_outputs\": [\n        {\n          \"answer_output_id\": \"group_key\",\n          \"description\": \"location\",\n          \"role\": \"GROUP_KEY\"\n        },\n        {\n          \"answer_output_id\": \"answer_1\",\n          \"description\": \"location\",\n          \"role\": \"ANSWER_VALUE\"\n        },",
+      "expected_count": 1
+    }
+  ]
+}

@@ -47,7 +47,7 @@ class ExpressionEnvironment:
     field_types: Mapping[str, str] | None = None
     scalars: Mapping[str, RuntimeValue] | None = None
     scalar_types: Mapping[str, str] | None = None
-    computed_outputs: Mapping[str, tuple[str, RuntimeValue]] | None = None
+    node_outputs: Mapping[str, Mapping[str, RuntimeValue]] | None = None
     environment_values: Mapping[str, RuntimeValue] | None = None
     environment_types: Mapping[str, str] | None = None
 
@@ -112,10 +112,10 @@ def _output(
     *,
     environment: ExpressionEnvironment,
 ) -> EvaluatedExpression:
-    produced = (environment.computed_outputs or {}).get(expression.node_id)
-    if produced is None or produced[0] != expression.output_id:
+    produced = (environment.node_outputs or {}).get(expression.node_id)
+    if produced is None or expression.output_id not in produced:
         raise RelationEngineError(f"unknown scalar input {expression.output_id}")
-    return EvaluatedExpression(value=produced[1], value_type="decimal")
+    return EvaluatedExpression(value=produced[expression.output_id], value_type="decimal")
 
 
 def _environment(

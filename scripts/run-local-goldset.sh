@@ -34,17 +34,11 @@ EOF
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/local-runtime.sh
+. "$repo_root/scripts/lib/local-runtime.sh"
 
-load_env_file() {
-  local env_file="$1"
-  if [[ ! -f "$env_file" ]]; then
-    return 0
-  fi
-  set -a
-  # shellcheck disable=SC1090
-  . "$env_file"
-  set +a
-}
+local_profile="${FERVIS_LOCAL_GOLDSET_PROFILE:-$repo_root/.fervis/local-goldset.env}"
+fervis_load_env_file "$local_profile"
 
 case_ids="${FERVIS_GOLDSET_CASE_IDS:-}"
 project_root="${FERVIS_HOST_PROJECT_ROOT:-}"
@@ -144,14 +138,14 @@ if [[ -z "$project_root" || ! -d "$project_root" ]]; then
   exit 2
 fi
 
-load_env_file "$project_root/.env"
-load_env_file "$repo_root/.env"
+fervis_load_env_file "$project_root/.env"
+fervis_load_env_file "$repo_root/.env"
 
 case_ids="${case_ids:-${FERVIS_GOLDSET_CASE_IDS:-}}"
 suite_ref="${suite_ref:-${FERVIS_GOLDSET_SUITE:-}}"
 tenant_id="${tenant_id:-${FERVIS_GOLDSET_TENANT_ID:-}}"
 principal_id="${principal_id:-${FERVIS_GOLDSET_PRINCIPAL_ID:-}}"
-database_url="${database_url:-${FERVIS_LOCAL_DATABASE_URL:-}}"
+database_url="${database_url:-${FERVIS_LOCAL_DATABASE_URL:-${DATABASE_URL:-}}}"
 
 if [[ -z "$case_ids" ]]; then
   echo "Goldset case ids not found. Pass --case-ids or set FERVIS_GOLDSET_CASE_IDS." >&2
@@ -172,6 +166,7 @@ if [[ -z "$principal_id" ]]; then
 fi
 
 if [[ -n "$database_url" ]]; then
+  database_url="$(fervis_resolve_compose_database_url "$project_root" "$database_url")"
   export DATABASE_URL="$database_url"
   export FERVIS_DATABASE_URL="$database_url"
 fi

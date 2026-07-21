@@ -8,7 +8,7 @@ input:
     description: staff who earned the most compensation this month
     subject_text: staff
     answer_expression_family: grouped_aggregate
-    group_key: {description: staff, domain: SOURCE_RESULT_VALUES}
+    group_key: {description: staff, domain: SOURCE_RESULT_VALUES, source_kind: source_value}
   catalog:
     reads:
       - id: list_staff_list

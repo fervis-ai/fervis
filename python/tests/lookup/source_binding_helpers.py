@@ -754,8 +754,10 @@ def _first_source_binding_payload_from_prompt(prompt: str) -> dict[str, Any]:
                         "The fixture selects the first source population exposed "
                         "for the prompt."
                     ),
-                    "population_test_results": (
-                        satisfying_source_population_test_results(target)
+                    "population_test_results": _source_population_test_results(
+                        prompt,
+                        target,
+                        population_binding_id=_first_population_binding_id(candidate),
                     ),
                 },
                 "fulfillment_decisions": {
@@ -838,13 +840,23 @@ def resolved_input_applications_for_target(
     application_surface = target.payload.get("resolved_input_application")
     if not isinstance(application_surface, dict):
         raise AssertionError("source binding target has no resolved-input surface")
-    return [
+    flat_applications = [
         _resolved_input_application_from_selection(
             selection,
             application_surface=application_surface,
         )
         for selection in selections
     ]
+    return _group_resolved_input_applications(
+        tuple(
+            (
+                str(application.pop("value_id")),
+                application,
+                application.pop("population_test_results"),
+            )
+            for application in flat_applications
+        )
+    )
 
 
 def _resolved_input_application_from_selection(
@@ -876,18 +888,48 @@ def _resolved_input_application_from_selection(
     components_by_kind = value.get("components_by_target_kind") or {}
     shown_components = components_by_kind.get(selected_identity[0]) or ()
     shown_targets = tuple(
-        str(target.get("target_id") or "")
+        target
         for target in targets_by_kind.get(selected_identity[0]) or ()
         if isinstance(target, dict)
     )
-    if selected_identity[1] not in shown_targets or selected_identity[3] not in shown_components:
+    matching_targets = tuple(
+        target
+        for target in shown_targets
+        if str(target.get("target_id") or "") == selected_identity[1]
+    )
+    if len(matching_targets) != 1 or selected_identity[3] not in shown_components:
         raise AssertionError(
             "resolved-input application fixture must select shown target and component: "
             f"{selected_identity!r}"
         )
+    target = matching_targets[0]
+    application_target_id = str(target.get("application_target_id") or "")
+    if not application_target_id:
+        selectable_targets = tuple(
+            item
+            for item in target.get("application_targets") or ()
+            if isinstance(item, dict)
+        )
+        selected_application_target_id = str(
+            selection.get("application_target_id") or ""
+        )
+        if selected_application_target_id:
+            selectable_targets = tuple(
+                item
+                for item in selectable_targets
+                if item.get("application_target_id")
+                == selected_application_target_id
+            )
+        if len(selectable_targets) != 1:
+            raise AssertionError(
+                "resolved-input application fixture must select one shown "
+                "application target"
+            )
+        application_target_id = str(
+            selectable_targets[0]["application_target_id"]
+        )
     return {
-        "target_kind": selected_identity[0],
-        "target_id": selected_identity[1],
+        "application_target_id": application_target_id,
         "value_id": selected_identity[2],
         "value_component": selected_identity[3],
         "match_basis_explanation": (
@@ -921,6 +963,37 @@ def undecided_source_population_test_results(
         for test_id, test_basis in basis.items()
         if isinstance(test_basis, dict)
     }
+
+
+def _source_population_test_results(
+    prompt: str,
+    target: _PromptBindingTarget,
+    *,
+    population_binding_id: str,
+) -> dict[str, dict[str, str]]:
+    results = undecided_source_population_test_results(target)
+    binding = _source_population_binding(
+        prompt,
+        source_candidate_id=target.source_candidate_id,
+        population_binding_id=population_binding_id,
+    )
+    if binding.get("kind") != "exact_row_set":
+        return results
+    input_ref = str(binding.get("input_ref") or "")
+    if not input_ref:
+        return results
+    for test in _requested_fact_membership_tests(prompt).get(
+        target.requested_fact_id,
+        (),
+    ):
+        if input_ref not in test.get("owned_question_input_refs", ()):
+            continue
+        result = results.get(str(test["test_id"]))
+        if result is None:
+            continue
+        result["because"] = "The exact row-set binding is owned by this input."
+        result["test_effect"] = "SATISFIES_TEST"
+    return results
 
 
 def _first_source_option_with_support_set(
@@ -1022,7 +1095,13 @@ def source_binding_payload_for_one_call(
             )
         answer_population.setdefault(
             "population_test_results",
-            satisfying_source_population_test_results(target),
+            _source_population_test_results(
+                prompt,
+                target,
+                population_binding_id=str(
+                    answer_population.get("population_binding_id") or ""
+                ),
+            ),
         )
         _canonicalize_invocation_fulfillment_support_sets(
             invocation,
@@ -1563,8 +1642,6 @@ def _normal_instance_guard_result(*, included: bool) -> dict[str, object]:
                 "The choice does not decide the normal-instance guard in this "
                 "scripted source-binding payload."
             ),
-            "explicit_user_override_evidence": [],
-            "explicit_user_override_applies": False,
             "population_consequence": (
                 "The choice does not decide the normal-instance guard."
             ),
@@ -1575,8 +1652,6 @@ def _normal_instance_guard_result(*, included: bool) -> dict[str, object]:
         }
     return {
         "role_match_basis": "The choice was compared to the excluded normal-instance roles.",
-        "explicit_user_override_evidence": [],
-        "explicit_user_override_applies": False,
         "population_consequence": ("The choice satisfies the normal-instance guard."),
         "disposition": {
             "matched_excluded_role": "NONE",
@@ -1861,7 +1936,7 @@ def _source_alignment_payload_from_fact_plan(
             for answer in answers
             if str(answer.get("requested_fact_id") or "") == requested_fact_id
         )
-        direct_ids = {
+        aligned_ids = {
             candidate["source_candidate_id"]
             for candidate in candidates
             if any(
@@ -1869,22 +1944,32 @@ def _source_alignment_payload_from_fact_plan(
                 for answer in fact_answers
             )
         }
-        if not direct_ids:
-            direct_ids.update(
+        if not aligned_ids:
+            aligned_ids.update(
                 candidate["source_candidate_id"] for candidate in candidates
             )
+        partial_ids = (
+            aligned_ids
+            if len(aligned_ids) > 1
+            and any(_answer_requires_source_composition(answer) for answer in fact_answers)
+            else set()
+        )
         reviews[requested_fact_id] = {
             candidate["source_candidate_id"]: {
                 "source_candidate_id": candidate["source_candidate_id"],
                 "basis": (
                     "The fixture aligns this source with the authored fact plan."
-                    if candidate["source_candidate_id"] in direct_ids
+                    if candidate["source_candidate_id"] in aligned_ids
                     else "The fixture marks this source as not aligned with the authored fact plan."
                 ),
                 "source_alignment": (
-                    "DIRECT"
-                    if candidate["source_candidate_id"] in direct_ids
-                    else "NOT_ALIGNED"
+                    "PARTIAL"
+                    if candidate["source_candidate_id"] in partial_ids
+                    else (
+                        "DIRECT"
+                        if candidate["source_candidate_id"] in aligned_ids
+                        else "NOT_ALIGNED"
+                    )
                 ),
             }
             for candidate in candidates
@@ -2035,6 +2120,12 @@ def _answer_value_ids(answer: dict[str, Any]) -> set[str]:
         for scalar_input in answer.get("scalar_inputs") or ()
         if isinstance(scalar_input, dict) and str(scalar_input.get("value_id") or "")
     }
+
+
+def _answer_requires_source_composition(answer: dict[str, Any]) -> bool:
+    return answer.get("pattern") == "computed_scalar" or len(
+        tuple(_answer_source_entries(answer))
+    ) > 1
 
 
 def _answer_read_ids(answer: Any) -> set[str]:
@@ -2417,6 +2508,8 @@ def extract_source_bindings(
                     str(scalar_input["value_id"]),
                     prompt=prompt,
                 )
+                if source is None:
+                    continue
                 add_source(
                     source,
                     answer=answer,
@@ -2440,21 +2533,43 @@ def _unambiguous_resolved_input_applications(
             str(option.get("target_id") or ""),
         )
         options_by_target.setdefault(target_key, []).append(option)
-    return [
-        {
-            "target_kind": target_kind,
-            "target_id": target_id,
-            "value_id": str(option["value_id"]),
-            "value_component": str(option["value_component"]),
-            "match_basis_explanation": (
-                "Apply the only shown resolved input option for this target."
-            ),
-            "population_test_results": _satisfying_application_test_results(option),
-        }
+    flat_applications = [
+        (
+            str(option["value_id"]),
+            {
+                "target_kind": target_kind,
+                "target_id": target_id,
+                "value_component": str(option["value_component"]),
+                "match_basis_explanation": (
+                    "Apply the only shown resolved input option for this target."
+                ),
+            },
+            _satisfying_application_test_results(option),
+        )
         for (target_kind, target_id), target_options in options_by_target.items()
         if len(target_options) == 1
         for option in target_options
     ]
+    return _group_resolved_input_applications(tuple(flat_applications))
+
+
+def _group_resolved_input_applications(
+    applications: tuple[tuple[str, dict[str, object], dict[str, object]], ...],
+) -> list[dict[str, object]]:
+    grouped: dict[str, dict[str, object]] = {}
+    for value_id, application, test_results in applications:
+        group = grouped.setdefault(
+            value_id,
+            {
+                "value_id": value_id,
+                "applications": [],
+                "population_test_results": test_results,
+            },
+        )
+        applications = group["applications"]
+        assert isinstance(applications, list)
+        applications.append(application)
+    return list(grouped.values())
 
 
 def _satisfying_application_test_results(
@@ -2589,7 +2704,11 @@ def _answer_source_entries(
     return tuple(output)
 
 
-def _source_for_scalar_value(value_id: str, *, prompt: str) -> dict[str, Any]:
+def _source_for_scalar_value(
+    value_id: str,
+    *,
+    prompt: str,
+) -> dict[str, Any] | None:
     if not prompt:
         return {"kind": "value", "value_id": value_id}
     payload = _source_candidate_prompt_payload(prompt)
@@ -2611,7 +2730,7 @@ def _source_for_scalar_value(value_id: str, *, prompt: str) -> dict[str, Any]:
                 "kind": "memory_relation",
                 "memory_relation_id": relation_id,
             }
-    return {"kind": "value", "value_id": value_id}
+    return None
 
 
 def _bound_source_replacements_from_prompt(prompt: str) -> dict[str, str]:
@@ -3648,7 +3767,16 @@ def _answer_population(
         "intent_text": intent_text,
         "match_basis_explanation": f"{intent_text} defines the source population",
         "population_test_results": (
-            satisfying_source_population_test_results(target) if target else {}
+            _source_population_test_results(
+                prompt,
+                target,
+                population_binding_id=_source_population_binding_id(
+                    prompt,
+                    source_candidate_id,
+                ),
+            )
+            if target
+            else {}
         ),
     }
 
@@ -3682,6 +3810,28 @@ def _source_population_binding_id(prompt: str, source_candidate_id: str) -> str:
             if binding_id:
                 return binding_id
     return f"pop.{source_candidate_id}.candidate_population"
+
+
+def _source_population_binding(
+    prompt: str,
+    *,
+    source_candidate_id: str,
+    population_binding_id: str,
+) -> dict[str, Any]:
+    if not prompt or not population_binding_id:
+        return {}
+    payload = _source_candidate_prompt_payload(prompt)
+    for candidate in _all_source_candidates(payload):
+        if str(candidate.get("source_candidate_id") or "") != source_candidate_id:
+            continue
+        for binding in (
+            _candidate_binding_surface(candidate).get("population_bindings") or ()
+        ):
+            if not isinstance(binding, dict):
+                continue
+            if str(binding.get("population_binding_id") or "") == population_binding_id:
+                return binding
+    return {}
 
 
 def _current_question_text(prompt: str) -> str:
@@ -3833,7 +3983,7 @@ def _source_candidate_population_roles(
 
 def _requested_fact_membership_tests(
     prompt: str,
-) -> dict[str, tuple[dict[str, str], ...]]:
+) -> dict[str, tuple[dict[str, Any], ...]]:
     if not prompt:
         return {}
     payload = _prompt_json_section(prompt, label="Requested facts")
@@ -3853,6 +4003,11 @@ def _requested_fact_membership_tests(
                 "test_id": _source_binding_membership_test_key(test),
                 "test_question": str(test.get("test_question") or ""),
                 "kind": str(test.get("kind") or ""),
+                "owned_question_input_refs": tuple(
+                    str(input_ref)
+                    for input_ref in test.get("owned_question_input_refs") or ()
+                    if str(input_ref)
+                ),
             }
             for test in answer_population.get("membership_tests") or ()
             if isinstance(test, dict)

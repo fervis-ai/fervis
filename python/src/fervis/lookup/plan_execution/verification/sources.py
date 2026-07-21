@@ -119,9 +119,11 @@ def _verify_source_population_coverage_claims(
             else ()
         )
     }
+    mechanic_refs_by_relation: dict[str, set[str]] = {}
     for relation in answer.relations:
         seen: set[tuple[str, str, str]] = set()
         source_refs = _source_mechanic_proof_refs(relation)
+        mechanic_refs_by_relation[relation.id] = source_refs
         for claim in relation.source.population_coverage_claims:
             _verify_population_coverage_claim(
                 claim,
@@ -134,7 +136,10 @@ def _verify_source_population_coverage_claims(
         if not isinstance(spec, FilterSpec):
             continue
         seen = set()
-        mechanic_refs = set(spec.proof_refs)
+        mechanic_refs = {
+            *mechanic_refs_by_relation.get(spec.input_relation, set()),
+            *spec.proof_refs,
+        }
         references = expression_references(
             spec.predicate.left,
             *((spec.predicate.right,) if spec.predicate.right is not None else ()),
@@ -152,6 +157,8 @@ def _verify_source_population_coverage_claims(
                 seen=seen,
                 mechanic_refs=mechanic_refs,
             )
+        if operation.output_relation:
+            mechanic_refs_by_relation[operation.output_relation] = mechanic_refs
 
 
 def _verify_population_coverage_claim(
@@ -367,7 +374,8 @@ def _verify_api_relation_catalog_refs(
                 row_source_field = row_source.field(field.field_id)
             except KeyError as exc:
                 raise VerificationError(
-                    f"relation {relation.id} references unknown source field"
+                    f"relation {relation.id} references unknown source field "
+                    f"{field.field_id} on row source {row_source.id}"
                 ) from exc
             for role in field.roles:
                 if role not in row_source_field.allowed_roles:

@@ -564,29 +564,7 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                 },
                 "answer_subject": _answer_subject_payload("sales"),
                 "answer_population": {
-                    "population_label": "sales",
-                    "counted_unit": "sale",
-                    "membership_tests": [
-                        {
-                            "test_id": "pop_test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Does the row/value represent a sale?",
-                            "question_input_use_refs": [],
-                        },
-                        {
-                            "test_id": "pop_test_3",
-                            "kind": "NORMAL_INSTANCE_GUARD",
-                            "polarity": "MUST_PASS",
-                            "test_question": (
-                                "Is this an actual business sale instance rather "
-                                "than a draft, canceled, voided, failed, or raw "
-                                "storage representation unless the user explicitly "
-                                "requested that state?"
-                            ),
-                            "question_input_use_refs": [],
-                        },
-                    ],
+                    "membership_tests": [],
                 },
                 "answer_outputs": [{"description": "count", "role": "ANSWER_VALUE"}],
                 "question_input_uses": [],
@@ -761,8 +739,6 @@ def _finite_choice_review(
                             f"{choice} is compared to the excluded "
                             "normal-instance roles."
                         ),
-                        "explicit_user_override_evidence": [],
-                        "explicit_user_override_applies": False,
                         "population_consequence": (
                             f"{choice} effect for {test_id} is {test_effect}."
                         ),

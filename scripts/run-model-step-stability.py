@@ -104,7 +104,12 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--sequence", type=int)
     parser.add_argument("--runs", type=int, default=10)
     parser.add_argument("--workers", type=int, default=1)
-    parser.add_argument("--patch-file", type=Path)
+    parser.add_argument(
+        "--patch-file",
+        type=Path,
+        action="append",
+        help="Patch file to apply; repeat to layer one controlled change",
+    )
     parser.add_argument("--assertion-file", type=Path)
     parser.add_argument("--provider")
     parser.add_argument("--model-key")
@@ -119,7 +124,7 @@ def main() -> int:
     args = _arguments()
     if args.runs < 1 or args.workers < 1:
         raise SystemExit("--runs and --workers must be positive")
-    patch = _json_object(args.patch_file) if args.patch_file else {}
+    patch = _combined_patches(args.patch_file or [])
     boundary = _load_boundary(
         args.index,
         purpose=args.step,
@@ -167,10 +172,20 @@ def main() -> int:
             )
         except Exception as exc:  # provider/schema boundary is reported per run
             cause = f"; cause={exc.__cause__!r}" if exc.__cause__ is not None else ""
+            error_code = str(getattr(exc, "error_code", "") or "")
+            error_context = getattr(exc, "error_context", None)
+            provider_details = (
+                f"; error_code={error_code}; "
+                f"error_context={json.dumps(error_context, sort_keys=True, default=str)}"
+                if error_code or error_context
+                else ""
+            )
             return StabilityResult(
                 run_number=run_number,
                 arguments=None,
-                errors=(f"{type(exc).__name__}: {exc!r}{cause}",),
+                errors=(
+                    f"{type(exc).__name__}: {exc!r}{cause}{provider_details}",
+                ),
             )
 
     results: list[StabilityResult] = []
@@ -200,6 +215,16 @@ def main() -> int:
     if stability_failure:
         print("FAIL: structured outputs were not identical", flush=True)
     return 1 if failures or stability_failure else 0
+
+
+def _combined_patches(paths: list[Path]) -> dict[str, list[object]]:
+    combined: dict[str, list[object]] = {}
+    for path in paths:
+        for key, value in _json_object(path).items():
+            if not isinstance(value, list):
+                raise ValueError(f"patch section {key!r} must be an array")
+            combined.setdefault(key, []).extend(value)
+    return combined
 
 
 def _load_boundary(
@@ -237,6 +262,10 @@ def _load_boundary(
     raw_specs = [dict(item) for item in turn.get("tool_specs", [])]
     _apply_named_tool_patches(raw_specs, patch.get("tool_spec_patches", []), schema=False)
     _apply_named_tool_patches(raw_specs, patch.get("schema_patches", []), schema=True)
+    _remove_named_schema_properties(
+        raw_specs,
+        patch.get("schema_property_removals", []),
+    )
     tool_specs = tuple(_tool_spec(item) for item in raw_specs)
     if not tool_specs:
         raise ValueError("selected turn has no tool specs")
@@ -294,18 +323,75 @@ def _apply_named_tool_patches(
         _apply_json_patch(target, patch)
 
 
+def _remove_named_schema_properties(
+    specs: list[dict[str, Any]],
+    removals: object,
+) -> None:
+    items = removals if isinstance(removals, list) else []
+    specs_by_name = {str(spec.get("name") or ""): spec for spec in specs}
+    for removal in items:
+        if not isinstance(removal, dict):
+            raise ValueError("schema property removal must be an object")
+        tool_name = str(removal.get("tool_name") or "")
+        spec = specs_by_name.get(tool_name)
+        if spec is None:
+            raise ValueError(
+                f"schema property removal references unknown tool {tool_name!r}"
+            )
+        names = {
+            str(name)
+            for name in removal.get("property_names", [])
+            if str(name)
+        }
+        if not names:
+            raise ValueError("schema property removal requires property names")
+        schema = spec.get("input_schema")
+        if not isinstance(schema, dict):
+            raise ValueError("tool schema is not an object")
+        removed = _remove_schema_properties(schema, names=names)
+        if removed != names:
+            missing = ", ".join(sorted(names - removed))
+            raise ValueError(f"schema properties were not found: {missing}")
+
+
+def _remove_schema_properties(
+    value: object,
+    *,
+    names: set[str],
+) -> set[str]:
+    removed: set[str] = set()
+    if isinstance(value, dict):
+        properties = value.get("properties")
+        if isinstance(properties, dict):
+            for name in names & properties.keys():
+                del properties[name]
+                removed.add(name)
+            required = value.get("required")
+            if isinstance(required, list):
+                value["required"] = [name for name in required if name not in names]
+        for child in value.values():
+            removed.update(_remove_schema_properties(child, names=names))
+    elif isinstance(value, list):
+        for child in value:
+            removed.update(_remove_schema_properties(child, names=names))
+    return removed
+
+
 def _apply_json_patch(target: dict[str, Any] | list[Any], patch: dict[str, Any]) -> None:
     operation = str(patch.get("op") or "")
     path = str(patch.get("path") or "")
-    if operation not in {"add", "replace", "remove"}:
+    if operation not in {"add", "replace", "remove", "move", "move_before"}:
         raise ValueError(f"unsupported patch operation {operation!r}")
-    tokens = [_pointer_token(token) for token in path.split("/")[1:]] if path.startswith("/") else []
-    if not tokens:
-        raise ValueError("patch path must address a child value")
-    parent: Any = target
-    for token in tokens[:-1]:
-        parent = parent[int(token)] if isinstance(parent, list) else parent[token]
-    token = tokens[-1]
+    if operation == "move_before":
+        source_path = str(patch.get("from") or "")
+        _move_json_object_member_before(target, source_path, path)
+        return
+    if operation == "move":
+        source_path = str(patch.get("from") or "")
+        value = _remove_json_pointer(target, source_path)
+        _add_json_pointer(target, path, value)
+        return
+    parent, token = _json_pointer_parent(target, path)
     if isinstance(parent, list):
         index = len(parent) if token == "-" else int(token)
         if operation == "add":
@@ -325,6 +411,71 @@ def _apply_json_patch(target: dict[str, Any] | list[Any], patch: dict[str, Any])
         if token not in parent:
             raise ValueError(f"remove path does not exist: {path}")
         del parent[token]
+
+
+def _move_json_object_member_before(
+    target: dict[str, Any] | list[Any],
+    source_path: str,
+    before_path: str,
+) -> None:
+    source_parent, source_token = _json_pointer_parent(target, source_path)
+    before_parent, before_token = _json_pointer_parent(target, before_path)
+    if not isinstance(source_parent, dict) or source_parent is not before_parent:
+        raise ValueError("move_before requires members of the same JSON object")
+    if source_token not in source_parent or before_token not in source_parent:
+        raise ValueError("move_before path does not exist")
+    value = source_parent[source_token]
+    reordered: dict[str, Any] = {}
+    for key, item in source_parent.items():
+        if key == source_token:
+            continue
+        if key == before_token:
+            reordered[source_token] = value
+        reordered[key] = item
+    source_parent.clear()
+    source_parent.update(reordered)
+
+
+def _remove_json_pointer(
+    target: dict[str, Any] | list[Any],
+    path: str,
+) -> Any:
+    parent, token = _json_pointer_parent(target, path)
+    if isinstance(parent, list):
+        return parent.pop(int(token))
+    if token not in parent:
+        raise ValueError(f"move source path does not exist: {path}")
+    return parent.pop(token)
+
+
+def _add_json_pointer(
+    target: dict[str, Any] | list[Any],
+    path: str,
+    value: Any,
+) -> None:
+    parent, token = _json_pointer_parent(target, path)
+    if isinstance(parent, list):
+        index = len(parent) if token == "-" else int(token)
+        parent.insert(index, value)
+        return
+    parent[token] = value
+
+
+def _json_pointer_parent(
+    target: dict[str, Any] | list[Any],
+    path: str,
+) -> tuple[Any, str]:
+    tokens = (
+        [_pointer_token(token) for token in path.split("/")[1:]]
+        if path.startswith("/")
+        else []
+    )
+    if not tokens:
+        raise ValueError("patch path must address a child value")
+    parent: Any = target
+    for token in tokens[:-1]:
+        parent = parent[int(token)] if isinstance(parent, list) else parent[token]
+    return parent, tokens[-1]
 
 
 def _pointer_token(token: str) -> str:

@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Write answer_subject.subject_text as one singular catalog-blind candidate kind, without modifiers that narrow the candidates.",
+      "new": "Write answer_subject.subject_text as the complete singular catalog-blind kind of candidate being counted, listed, or measured. The kind may contain several words; preserve every word that defines the kind itself, and exclude only separate conditions candidates must satisfy.",
+      "expected_count": 1
+    }
+  ]
+}

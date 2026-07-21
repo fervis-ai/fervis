@@ -30,29 +30,18 @@ input:
     answer_expression:
       family: scalar_aggregate
     question_input_uses:
-    - {use_id: use_staff, input_ref: staff, owner_kind: POPULATION_TESTS}
-    - {use_id: use_period, input_ref: period, owner_kind: POPULATION_TESTS}
+    - {input_ref: staff, owner_kind: POPULATION_TESTS}
+    - {input_ref: period, owner_kind: POPULATION_TESTS}
     answer_subject:
       subject_text: products
       instance_interpretation:
         kind: NORMAL_BUSINESS_INSTANCE
     answer_population:
-      population_label: products
-      counted_unit: products
       membership_tests:
-      - question_input_use_refs: []
-        test_id: pop_test_1
-        kind: SUBJECT_IDENTITY
-        polarity: MUST_PASS
-        test_question: Does the row/value represent products?
-      - question_input_use_refs: [use_staff]
-        test_id: staff_scope
-        kind: EXPLICIT_USER_CONSTRAINT
+      - question_input_refs: [staff]
         polarity: MUST_PASS
         test_question: Was the product sold by Alice Smith?
-      - question_input_use_refs: [use_period]
-        test_id: period_scope
-        kind: EXPLICIT_USER_CONSTRAINT
+      - question_input_refs: [period]
         polarity: MUST_PASS
         test_question: Was the product sold yesterday?
     answer_outputs:
@@ -62,29 +51,18 @@ input:
     answer_expression:
       family: scalar_value
     question_input_uses:
-    - {use_id: use_staff, input_ref: staff, owner_kind: POPULATION_TESTS}
-    - {use_id: use_period, input_ref: period, owner_kind: POPULATION_TESTS}
+    - {input_ref: staff, owner_kind: POPULATION_TESTS}
+    - {input_ref: period, owner_kind: POPULATION_TESTS}
     answer_subject:
       subject_text: work location
       instance_interpretation:
         kind: NORMAL_BUSINESS_INSTANCE
     answer_population:
-      population_label: work location
-      counted_unit: work location
       membership_tests:
-      - question_input_use_refs: []
-        test_id: pop_test_1
-        kind: SUBJECT_IDENTITY
-        polarity: MUST_PASS
-        test_question: Does the row/value represent a work location?
-      - question_input_use_refs: [use_staff]
-        test_id: staff_scope
-        kind: EXPLICIT_USER_CONSTRAINT
+      - question_input_refs: [staff]
         polarity: MUST_PASS
         test_question: Is this Alice Smith's work location?
-      - question_input_use_refs: [use_period]
-        test_id: period_scope
-        kind: EXPLICIT_USER_CONSTRAINT
+      - question_input_refs: [period]
         polarity: MUST_PASS
         test_question: Is this the work location from yesterday?
     answer_outputs:

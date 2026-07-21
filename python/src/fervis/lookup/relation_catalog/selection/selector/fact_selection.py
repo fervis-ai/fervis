@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
+from typing import TypeVar
 
 from fervis.lookup.relation_catalog import (
     CatalogFact,
@@ -209,12 +210,12 @@ def _rank_for_source_text(
     )
     exact_rankings = _round_robin_rankings(
         tuple(
-            tuple(item.ranking for item in group if item.is_exact_resource_name)
+            tuple(item for item in group if item.is_exact_resource_name)
             for group in positive_groups
         )
     )
     positive_rankings = _round_robin_rankings(
-        tuple(tuple(item.ranking for item in group) for group in positive_groups)
+        positive_groups
     )
     return _SourceTextSelection(
         query_terms=query_terms,
@@ -348,9 +349,19 @@ def _catalog_evidence_ranking(
 
 
 def _round_robin_rankings(
-    ranking_groups: tuple[tuple[CatalogSelectionRanking, ...], ...],
+    ranking_groups: tuple[tuple[_ResourceNameRanking, ...], ...],
 ) -> tuple[CatalogSelectionRanking, ...]:
-    return _round_robin_unique_rankings(ranking_groups)
+    rankings = _round_robin_unique(
+        ranking_groups,
+        identity=lambda item: item.ranking.read_id,
+    )
+    return tuple(
+        item.ranking
+        for item in sorted(
+            rankings,
+            key=lambda item: item.requires_caller_supplied_input,
+        )
+    )
 
 
 def _round_robin_unique_rankings(
@@ -358,7 +369,23 @@ def _round_robin_unique_rankings(
     *,
     limit: int | None = None,
 ) -> tuple[CatalogSelectionRanking, ...]:
-    selected: list[CatalogSelectionRanking] = []
+    return _round_robin_unique(
+        ranking_groups,
+        identity=lambda item: item.read_id,
+        limit=limit,
+    )
+
+
+_Ranking = TypeVar("_Ranking")
+
+
+def _round_robin_unique(
+    ranking_groups: tuple[tuple[_Ranking, ...], ...],
+    *,
+    identity: Callable[[_Ranking], str],
+    limit: int | None = None,
+) -> tuple[_Ranking, ...]:
+    selected: list[_Ranking] = []
     seen: set[str] = set()
     max_rankings = max((len(group) for group in ranking_groups), default=0)
     for index in range(max_rankings):
@@ -366,9 +393,10 @@ def _round_robin_unique_rankings(
             if index >= len(group):
                 continue
             ranking = group[index]
-            if ranking.read_id in seen:
+            ranking_id = identity(ranking)
+            if ranking_id in seen:
                 continue
-            seen.add(ranking.read_id)
+            seen.add(ranking_id)
             selected.append(ranking)
             if limit is not None and len(selected) >= limit:
                 return tuple(selected)

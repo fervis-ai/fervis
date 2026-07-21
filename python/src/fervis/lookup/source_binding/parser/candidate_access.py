@@ -165,6 +165,7 @@ def candidate_source_fields(
         for item in candidate.evidence_items
         if isinstance(item, FieldEvidence)
         and item.field_id in selected_field_ids
+        and _field_belongs_to_row_source(item, row_source_id=row_source_id)
         and _candidate_field_selectable_for_planning(item)
     ]
     existing_field_ids = {field.field_id for field in fields}
@@ -177,12 +178,21 @@ def candidate_source_fields(
         for item in evidence_items
         if item.evidence_id in selected_evidence_ids
         and item.field_id
+        and _field_belongs_to_row_source(item, row_source_id=row_source_id)
         and item.type != "row_population"
         and _field_type_selectable_for_planning(item.type)
         and item.field_id not in existing_field_ids
     )
     existing_field_ids.update(field.field_id for field in fields)
     return tuple(fields)
+
+
+def _field_belongs_to_row_source(
+    field: FieldEvidence | SourceEvidenceItem,
+    *,
+    row_source_id: str,
+) -> bool:
+    return not row_source_id or field.row_source_id == row_source_id
 
 
 def _entity_evidence_field_ids(candidate: SourceCandidate) -> tuple[str, ...]:

@@ -1,0 +1,14 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Use reference_value when the input identifies one particular resource.",
+      "new": "Classify an input by what its supplied value denotes, not by how the answer uses it. Use reference_value when the value denotes one particular entity or resource, including when that identity qualifies other candidates.",
+      "expected_count": 1
+    },
+    {
+      "old": "After writing answer_population, inspect each EXPLICIT_USER_CONSTRAINT. A predicate_value is an explicit word or phrase that states which property value qualifying candidates must have. This includes adjectival and compound modifiers; copy the user's phrase without inferring catalog field boundaries.\nEach predicate_value supplies the membership test or tests whose required property value it states. A compound phrase may supply several tests. Do not turn the answer subject into an input.",
+      "new": "Use predicate_value only when the supplied value denotes a property that may be shared by many candidates; it does not denote one particular entity or resource.\nCopy the user's property-value phrase without inferring catalog field boundaries. One compound phrase may supply several membership tests. Do not turn the answer subject into an input.",
+      "expected_count": 1
+    }
+  ]
+}

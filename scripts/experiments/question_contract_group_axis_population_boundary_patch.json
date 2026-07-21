@@ -1,0 +1,14 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Each membership test asks one predicate about one candidate property. Create separate EXPLICIT_USER_CONSTRAINT tests for different properties, even when they consume the same input; omit predicates already enforced by answer_expression.",
+      "new": "Each membership test is one independent candidate condition not already enforced by answer_expression. Specified group members are enforced by group_key and are not membership tests.",
+      "expected_count": 1
+    },
+    {
+      "old": "GROUP_KEY inputs are not candidate-row predicates; create no EXPLICIT_USER_CONSTRAINT for them.\n",
+      "new": "",
+      "expected_count": 1
+    }
+  ]
+}

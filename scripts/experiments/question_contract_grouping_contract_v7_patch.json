@@ -1,0 +1,97 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "If the question asks for counts per group, by group, or for each specified key, use grouped_aggregate.",
+      "new": "If the question asks for any aggregate measure once per group, including a count, sum, average, minimum, or maximum, use grouped_aggregate.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use answer_expression.group_key.domain=SPECIFIED_QUESTION_INPUTS when groups are exactly declared question_inputs; otherwise use SOURCE_RESULT_VALUES.\nFor a repeated measure over specified inputs, set answer_expression.group_key with domain=SPECIFIED_QUESTION_INPUTS and put one measure/count result column in answer_outputs, not one output per key value.",
+      "new": "A supplied grouping grain derives source group keys. Concrete supplied group members are question inputs; an existing source attribute used as a grouping dimension is not.\nFor a repeated measure over specified inputs, put one measure/count result column in answer_outputs, not one output per key value.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use grouping_grain when a supplied unit such as day, week, month, or quarter states how source values are divided into result groups.\nA grouping_grain is neither the queried time period nor a group member. For 'events per day during March,' day is the grouping_grain and March is the time_value.",
+      "new": "A grouping_grain is a supplied temporal unit used to derive buckets from a timestamp.\nA grouping dimension is an existing source attribute used directly as the group key; it is not a grouping_grain or a question input.",
+      "expected_count": 1
+    },
+    {
+      "old": "Within each answer_request, author answer_expression, then answer_population, then question_input_uses.\nquestion_input_uses assigns each input used by this answer_request to exactly one semantic owner kind.\nCreate exactly one question_input_uses record for each fact-local input_ref.\nUse GROUP_KEY when the input defines a requested result group under SPECIFIED_QUESTION_INPUTS.\nA SPECIFIED_QUESTION_INPUTS group key restricts results to its GROUP_KEY inputs and groups by them.\nGROUP_KEY inputs are not candidate-row predicates; create no EXPLICIT_USER_CONSTRAINT for them.\nUse POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests.\nUse COMPUTE_EXPRESSION when a formula_value is an operand in the requested computed_scalar expression.\nUse GROUP_KEY_DERIVATION when a grouping_grain determines how source values are converted into a SOURCE_RESULT_VALUES group key.\nUse RESULT_LIMIT when the input supplies answer_expression's requested result limit.\nEach EXPLICIT_USER_CONSTRAINT lists the input_ref of every POPULATION_TESTS operand it consumes in question_input_refs.\nOne population test may reference several POPULATION_TESTS inputs, and one POPULATION_TESTS input may be referenced by several tests.\nquestion_input_refs may name only POPULATION_TESTS inputs. GROUP_KEY, GROUP_KEY_DERIVATION, COMPUTE_EXPRESSION, and RESULT_LIMIT inputs are never membership-test operands.\nSUBJECT_IDENTITY asks only whether the candidate is an instance of answer_subject and has no input operands.\nAn input identifying a related entity uses POPULATION_TESTS unless it is a SPECIFIED_QUESTION_INPUTS group member, in which case it uses GROUP_KEY only.\nSUBJECT_IDENTITY, NORMAL_INSTANCE_GUARD, and RAW_RECORD_GUARD use an empty question_input_refs array.",
+      "new": "Within each answer_request, author answer_expression, then answer_population, then question_input_uses.\nquestion_input_uses lists each input used by this answer_request exactly once.\nEach EXPLICIT_USER_CONSTRAINT lists every input operand it consumes in question_input_refs.\nOne population test may reference several inputs, and one input may be referenced by several population tests.\nA formula_value is a computation operand, a grouping_grain configures source group-key derivation, and a result_limit configures result selection; none is a population-test operand.\nScoped inputs not used by population tests or those specialized roles are supplied group members.\nSUBJECT_IDENTITY, NORMAL_INSTANCE_GUARD, and RAW_RECORD_GUARD use an empty question_input_refs array.",
+      "expected_count": 1
+    },
+    {
+      "old": "Assign a result_limit through one RESULT_LIMIT question_input_uses record on the answer_request.",
+      "new": "Include the result_limit input_ref once in the answer_request's question_input_uses.",
+      "expected_count": 1
+    },
+    {
+      "old": "Before returning a complete contract, verify that each copied question occurrence is declared once, every fact-local input appears once in question_input_uses, group-key and compute-expression inputs appear in no population test, and every POPULATION_TESTS input is referenced by at least one EXPLICIT_USER_CONSTRAINT.",
+      "new": "Before returning a complete contract, verify that each copied question occurrence is declared once, every fact-local input appears once in question_input_uses, formula, grouping-grain, result-limit, and supplied-group-member inputs appear in no population test, and every population-test operand is referenced by at least one EXPLICIT_USER_CONSTRAINT.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/question_inputs/items/oneOf/5/properties/operand_text",
+      "value": {"enum": ["day", "week", "month", "quarter", "year"]}
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses/items",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"input_ref": {"type": "string", "minLength": 1}},
+        "required": ["input_ref"]
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/4/properties/group_key",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"description": {"type": "string", "minLength": 1}},
+        "required": ["description"]
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/5/properties/group_key",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"description": {"type": "string", "minLength": 1}},
+        "required": ["description"]
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/6/properties/group_key",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"description": {"type": "string", "minLength": 1}},
+        "required": ["description"]
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/7/properties/group_key",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"description": {"type": "string", "minLength": 1}},
+        "required": ["description"]
+      }
+    }
+  ]
+}

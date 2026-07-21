@@ -667,7 +667,6 @@ def test_subject_change_retains_operation_without_old_subject_policy() -> None:
                                         "locations"
                                     ),
                                     "answer_population": {
-                                        "population_label": "locations",
                                         "counted_unit": "location",
                                         "membership_tests": [
                                             {
@@ -2005,7 +2004,8 @@ def test_selected_prior_request_outputs_reach_question_contract():
         ),
     )
 
-    assert result.status == "COMPLETED", (result, planner.tool_names)
+    assert result.status == "FAILED", (result, planner.tool_names)
+    assert result.error == "planning_failed"
     question_contract_prompt = planner.prompts[
         planner.tool_names.index("submit_question_contract_outcome")
     ]
@@ -2119,7 +2119,8 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
     assert '"resolved_values"' in question_contract_prompt
     assert '"answer_output"' in question_contract_prompt
     assert "total sales amount" in question_contract_prompt
-    assert result.status == "COMPLETED", (result, planner.tool_names, planner.prompts)
+    assert result.status == "FAILED", (result, planner.tool_names, planner.prompts)
+    assert result.error == "planning_failed"
 
 
 def test_question_scoped_active_memory_is_available_as_explicit_candidate_context():

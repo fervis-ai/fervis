@@ -1,0 +1,78 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "List all completed in-person sale records from March 2026.",
+      "new": "List all sales from March 2026, including deleted sales.",
+      "expected_count": 1
+    },
+    {
+      "old": "answer_subject.instance_interpretation.kind is required.\nUse NORMAL_BUSINESS_INSTANCE for ordinary business reporting questions over the subject as business users normally understand it.\nUse RAW_DATA_RECORD only when the user explicitly asks for persisted records, rows, logs, audit entries, raw data, database entries, or another data artifact.",
+      "new": "answer_subject names the candidate type only. Population meaning belongs in answer_population.qualification, not on answer_subject.",
+      "expected_count": 1
+    },
+    {
+      "old": "answer_population membership_tests define the independently qualifying candidate instances.\nanswer_population.counted_unit names one business unit in that population.\nanswer_population.membership_tests must include one SUBJECT_IDENTITY test.\nEach membership test asks one predicate about one candidate property. Create separate EXPLICIT_USER_CONSTRAINT tests for different properties, even when they consume the same input; omit predicates already enforced by answer_expression.\nFor each EXPLICIT_USER_CONSTRAINT, copy the exact question phrase that supplies its required value as the appropriate POPULATION_TESTS input. Property-value phrases use predicate_value; time phrases retain time_value. One copied phrase may supply several tests; each test references only inputs whose values answer that test.\nWithin answer_population, question inputs are predicate operands, not separate tests; the number of inputs does not determine the number of tests.\nWithin answer_population, when multiple inputs are alternative values for the same predicate, create one membership test for that predicate.\nMultiple MUST_PASS tests mean the candidate must satisfy every test. Create separate MUST_PASS tests only when that conjunction matches the question.\nFor NORMAL_BUSINESS_INSTANCE, include a NORMAL_INSTANCE_GUARD test; the backend attaches the standard ORDINARY_BUSINESS_INSTANCE_V1 profile with typed excluded-state roles.\nFor RAW_DATA_RECORD, include a RAW_RECORD_GUARD test.\nEach membership test has polarity MUST_PASS unless the user explicitly asks to exclude matching instances, in which case use MUST_FAIL.",
+      "new": "answer_population.counted_unit names one candidate unit. membership_tests define atomic yes-or-no predicates over one candidate. qualification is the only composition of those tests.\nqualification.any_of contains alternative qualifying clauses. Within each clause, every requirement in all_of must hold. required_result=PASS requires that test to pass; required_result=FAIL requires that test to fail. A candidate qualifies exactly when every requirement in at least one clause holds.\nInclude one SUBJECT_IDENTITY test and require it to PASS in every clause. Use a NORMAL_INSTANCE_GUARD only in clauses that require the ordinary business population. Never require that guard in the same clause as an explicit state which its normal profile excludes. Use a RAW_RECORD_GUARD only in clauses that require persisted data records. When the wording states a base population and separately broadens it, preserve the unchanged base population as one clause and add each newly permitted population as another clause. The unchanged base clause for an ordinary business subject requires the NORMAL_INSTANCE_GUARD.\nCreate one EXPLICIT_USER_CONSTRAINT test for each independent candidate predicate not already enforced by answer_expression. For each concrete operand, copy the exact question phrase as the appropriate POPULATION_TESTS input and reference it from that test. Property values use predicate_value; time values retain time_value. A test references only inputs that supply its own predicate value; never use an unrelated input to satisfy the schema.\nQuestion inputs are predicate operands, not separate tests. Every membership test must be referenced by at least one qualification clause.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use answer_population membership_tests only for predicates that narrow subject instances independently of answer_expression's result axis.",
+      "new": "Use answer_population membership_tests only for atomic candidate predicates composed by answer_population.qualification, independently of answer_expression's result axis.",
+      "expected_count": 1
+    },
+    {
+      "old": "SUBJECT_IDENTITY, NORMAL_INSTANCE_GUARD, and RAW_RECORD_GUARD use an empty question_input_refs array.",
+      "new": "SUBJECT_IDENTITY, NORMAL_INSTANCE_GUARD, and RAW_RECORD_GUARD use an empty question_input_refs array. Their required result belongs only in answer_population.qualification.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_subject/properties/instance_interpretation"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_subject/required/1"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/0/properties/polarity"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/0/required/3"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/1/properties/polarity"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/1/required/3"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/2/properties/polarity"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/2/required/3"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/3/properties/polarity"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/3/required/3"},
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/qualification",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "any_of": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "all_of": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "test_id": {"type": "string", "minLength": 1},
+                      "required_result": {"enum": ["PASS", "FAIL"]}
+                    },
+                    "required": ["test_id", "required_result"]
+                  }
+                }
+              },
+              "required": ["all_of"]
+            }
+          }
+        },
+        "required": ["any_of"]
+      }
+    },
+    {"tool_name": "submit_question_contract_outcome", "op": "add", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/required/-", "value": "qualification"}
+  ]
+}

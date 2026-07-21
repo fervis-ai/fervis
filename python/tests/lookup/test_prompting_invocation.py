@@ -69,10 +69,10 @@ from fervis.lookup.plan_selection import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 22360, 40361),
+    "question contract": (364, 21938, 40205),
     "query enrichment": (364, 5185, 7408),
-    "grounding": (364, 7202, 10861),
-    "source binding": (364, 17082, 20958),
+    "grounding": (364, 7276, 10981),
+    "source binding": (364, 16398, 20271),
     "pattern fact planning": (364, 3497, 5311),
 }
 
@@ -154,8 +154,8 @@ def test_question_contract_prompt_groups_alternative_predicate_operands():
         "the same predicate, create one membership test for that predicate."
     ) in invocation.prompt_text
     assert (
-        "A SPECIFIED_QUESTION_INPUTS group key restricts results to its GROUP_KEY "
-        "inputs and groups by them."
+        "Use GROUP_KEY for the concrete question inputs that are members of a "
+        "value_source.kind=specified_question_inputs closed group set."
     ) in invocation.prompt_text
     assert (
         "GROUP_KEY inputs are not candidate-row predicates; create no "
@@ -178,20 +178,23 @@ def test_question_contract_prompt_assigns_input_ownership_once() -> None:
     ) in invocation.prompt_text
     assert (
         "Create exactly one question_input_uses record for each fact-local "
-        "input_ref. When several population tests consume that input, they reuse "
-        "its one use_id; do not create one use record per test."
+        "input_ref."
     ) in invocation.prompt_text
     assert (
-        "One population test may reference several POPULATION_TESTS use_ids."
+        "Each EXPLICIT_USER_CONSTRAINT lists the use_id of every POPULATION_TESTS "
+        "operand it consumes in population_use_refs."
     ) in invocation.prompt_text
     assert (
-        "Build EXPLICIT_USER_CONSTRAINT tests only from prior POPULATION_TESTS "
-        "uses; an input without use_id cannot be a question_input_use_ref."
+        "One population test may reference several POPULATION_TESTS uses, and one "
+        "POPULATION_TESTS use may be referenced by several tests."
     ) in invocation.prompt_text
     assert "used_question_inputs" not in invocation.prompt_text
     assert "owned_question_input_refs" not in invocation.prompt_text
     assert "question_input_refs" not in invocation.prompt_text
-    assert "computation operand" in invocation.prompt_text
+    assert (
+        "Use COMPUTE_EXPRESSION when a formula_value is an operand"
+        in invocation.prompt_text
+    )
 
 
 def test_question_contract_prompt_resolves_prior_references_before_contracting() -> (

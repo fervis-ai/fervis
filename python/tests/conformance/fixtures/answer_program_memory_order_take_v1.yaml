@@ -55,7 +55,6 @@ program:
                         component: value
                         item_index: null
                         origin: {$enum: ValueExpressionOrigin, value: constant}
-                tie_breakers: {$tuple: []}
                 kind: {$enum: OperationKind, value: order}
             output_relation: ordered_sales
     result_projection:

@@ -12,7 +12,6 @@ input:
     instance_interpretation:
       kind: NORMAL_BUSINESS_INSTANCE
   answer_population:
-    population_label: stores
     counted_unit: stores
     membership_tests:
     - test_id: pop_test_1

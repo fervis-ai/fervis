@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Use grouping_grain when a supplied unit such as day, week, month, or quarter states how source values are divided into result groups.\nA grouping_grain is neither the queried time period nor a group member. For 'events per day during March,' day is the grouping_grain and March is the time_value.",
+      "new": "Use grouping_grain only when a supplied unit determines how one source value is bucketed into groups, such as day, week, month, quarter, or a numeric interval.\nA grouping dimension whose existing values become the groups, such as category, region, or owner, is answer_expression.group_key.description, not a question input.\nA grouping_grain is neither the queried time period nor a group member. For 'events per day during March,' day is the grouping_grain and March is the time_value.",
+      "expected_count": 1
+    }
+  ]
+}

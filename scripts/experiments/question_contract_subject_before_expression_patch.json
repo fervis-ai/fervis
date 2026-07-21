@@ -1,0 +1,17 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Within each answer_request, author answer_expression, then question_input_uses, then answer_subject, answer_population, and answer_outputs.",
+      "new": "Within each answer_request, author answer_subject, then answer_expression, question_input_uses, answer_population, and answer_outputs.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "move_before",
+      "from": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_subject",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression"
+    }
+  ]
+}

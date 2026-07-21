@@ -29,15 +29,15 @@ _MEMBER_REQUIREMENT_SUPPORT_ROLES: dict[str, frozenset[str]] = {
     "metric": frozenset(("MEASURED_VALUE", "ROW_COUNT")),
     "group_identity": frozenset(("GROUP_KEY",)),
     "operation": frozenset(("MEASURED_VALUE", "ROW_COUNT", "GROUP_KEY")),
-    "value_1": frozenset(("VALUE_SOURCE",)),
-    "value_2": frozenset(("VALUE_SOURCE",)),
+    "value_1": frozenset(("VALUE_SOURCE", "MEASURED_VALUE", "ROW_COUNT")),
+    "value_2": frozenset(("VALUE_SOURCE", "MEASURED_VALUE", "ROW_COUNT")),
 }
 
 
 _MEMBER_REQUIREMENT_BINDING_ROLES: dict[str, frozenset[str]] = {
     "group_identity": frozenset(("GROUP_KEY",)),
-    "value_1": frozenset(("VALUE_SOURCE",)),
-    "value_2": frozenset(("VALUE_SOURCE",)),
+    "value_1": frozenset(("VALUE_SOURCE", "MEASURED_VALUE", "ROW_COUNT")),
+    "value_2": frozenset(("VALUE_SOURCE", "MEASURED_VALUE", "ROW_COUNT")),
 }
 
 

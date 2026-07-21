@@ -15,7 +15,6 @@ input:
         kind: order
         input_relation: codes
         order_by: [{field: code, direction: asc}]
-        tie_breakers: []
         selection: {kind: take, limit_input_id: limit}
 expect:
   result_contains:

@@ -27,7 +27,7 @@ from tests.testkit.assertions import (
     subset_mismatches,
 )
 from tests.testkit.question_contract_provider import (
-    provider_membership_tests,
+    provider_answer_population,
     provider_question_input_ownership,
 )
 
@@ -528,7 +528,11 @@ def run_question_contract_prompt_case(payload: dict[str, Any]) -> list[str]:
 def _model_payload_from_case_input(input_payload: dict[str, Any]) -> dict[str, object]:
     question_inputs = _question_inputs_from_case_input(input_payload)
     answer_requests = [
-        dict(item) for item in input_payload.get("answer_requests") or ()
+        _provider_answer_request_from_test_dsl(
+            dict(item),
+            question_inputs=question_inputs,
+        )
+        for item in input_payload.get("answer_requests") or ()
     ]
     if not answer_requests:
         answer_requests = [
@@ -587,7 +591,6 @@ def _answer_request(
         "answer_population": dict(
             input_payload.get("answer_population")
             or {
-                "population_label": "sales",
                 "counted_unit": "sales",
                 "membership_tests": [
                     {
@@ -595,7 +598,7 @@ def _answer_request(
                         "kind": "SUBJECT_IDENTITY",
                         "polarity": "MUST_PASS",
                         "test_question": "Does the row/value represent sales?",
-                        "question_input_use_refs": [],
+                        "question_input_refs": [],
                     }
                 ],
             }
@@ -606,8 +609,6 @@ def _answer_request(
         ),
     }
     request.update(dict(input_payload.get("answer_request_overrides") or {}))
-    if "question_input_uses" in request:
-        return request
     return _provider_answer_request_from_test_dsl(
         request,
         question_inputs=question_inputs,
@@ -632,8 +633,30 @@ def _provider_answer_request_from_test_dsl(
         if str(input_ref) in declared_refs
     )
 
-    population = request["answer_population"]
-    tests = population["membership_tests"]
+    declared_uses = tuple(request.pop("question_input_uses", ()) or ())
+    uses_by_id = {
+        str(item.get("use_id") or "").strip(): str(item.get("input_ref") or "").strip()
+        for item in declared_uses
+        if isinstance(item, dict) and str(item.get("use_id") or "").strip()
+    }
+    refs_by_owner: dict[str, list[str]] = {}
+    for item in declared_uses:
+        if not isinstance(item, dict):
+            continue
+        input_ref = str(item.get("input_ref") or "").strip()
+        owner_kind = str(item.get("owner_kind") or "").strip()
+        if input_ref and owner_kind:
+            refs_by_owner.setdefault(owner_kind, []).append(input_ref)
+
+    population = dict(request["answer_population"])
+    membership_tests = [
+        {**dict(item), "test_id": str(item.get("test_id") or f"population_test_{index}")}
+        for index, item in enumerate(
+            population.get("membership_tests") or (),
+            start=1,
+        )
+    ]
+    population["membership_tests"] = membership_tests
     population_refs_by_test_id: dict[str, tuple[str, ...]] = {}
 
     roles_by_ref = {
@@ -645,6 +668,7 @@ def _provider_answer_request_from_test_dsl(
         for ref in requested_refs
         if roles_by_ref.get(ref) == "result_limit"
     )
+    result_limit_refs += tuple(refs_by_owner.get("RESULT_LIMIT", ()))
     explicitly_owned = {
         *result_limit_refs,
     }
@@ -654,13 +678,38 @@ def _provider_answer_request_from_test_dsl(
     for index, input_ref in enumerate(remaining_population_refs, start=1):
         population_refs_by_test_id[f"input_constraint_{index}"] = (input_ref,)
 
+    for test in membership_tests:
+        if not isinstance(test, dict):
+            continue
+        test_id = str(test.get("test_id") or "").strip()
+        if not test_id:
+            continue
+        direct_refs = tuple(
+            str(input_ref)
+            for input_ref in (
+                test.get("question_input_refs")
+                or test.get("owned_question_input_refs")
+                or ()
+            )
+        )
+        indirect_refs = tuple(
+            uses_by_id[use_ref]
+            for raw_use_ref in test.get("question_input_use_refs") or ()
+            if (use_ref := str(raw_use_ref).strip()) in uses_by_id
+        )
+        input_refs = direct_refs or indirect_refs
+        if input_refs:
+            population_refs_by_test_id[test_id] = input_refs
+
     ownership = provider_question_input_ownership(
+        group_key_input_refs=refs_by_owner.get("GROUP_KEY", ()),
+        compute_input_refs=refs_by_owner.get("COMPUTE_EXPRESSION", ()),
         population_input_refs_by_test_id=population_refs_by_test_id,
         result_limit_input_ref=result_limit_refs[0] if result_limit_refs else "",
     )
     request["question_input_uses"] = list(ownership.question_input_uses)
-    population["membership_tests"] = provider_membership_tests(
-        tests,
+    request["answer_population"] = provider_answer_population(
+        population,
         ownership=ownership,
     )
     return request

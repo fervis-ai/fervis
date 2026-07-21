@@ -17,7 +17,6 @@ input:
         kind: order
         input_relation: rows
         order_by: [{field: id, direction: asc}]
-        tie_breakers: [{field: id, direction: asc}]
         selection: {kind: take, limit_input_id: limit}
 expect:
   result_contains:

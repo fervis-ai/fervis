@@ -202,7 +202,7 @@ def _partition_population_claims(
     returned = tuple(
         claim
         for claim in claims
-        if claim.proof_refs and set(claim.proof_refs).issubset(filter_refs)
+        if set(claim.proof_refs).intersection(filter_refs)
     )
     return returned, tuple(claim for claim in claims if claim not in returned)
 

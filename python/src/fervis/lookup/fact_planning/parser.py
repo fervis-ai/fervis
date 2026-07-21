@@ -28,6 +28,7 @@ from fervis.lookup.fact_plan.fact_plan import (
 )
 from fervis.lookup.fact_planning import provider_contract as provider_output
 from fervis.lookup.fact_planning.pattern_plan import compile_pattern_answer_program
+from fervis.lookup.fact_planning.scalar_values import SourceDerivedScalarValue
 from fervis.lookup.source_binding import BoundSource
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 from fervis.lookup.answer_program.compilation import compile_answer_program
@@ -49,6 +50,7 @@ def parse_fact_plan(
     memory_relations: tuple[RelationRows, ...] = (),
     input_context: CompilerInputContext,
     selected_source_strategy_ids: tuple[str, ...] = (),
+    source_derived_scalar_values: tuple[SourceDerivedScalarValue, ...] = (),
 ) -> FactPlan:
     requested_fact_ids = tuple(fact.id for fact in question_contract.requested_facts)
     evidence_resolver = _bound_source_evidence_resolver(
@@ -77,6 +79,7 @@ def parse_fact_plan(
             ),
             input_context=input_context,
             question_contract=question_contract,
+            source_derived_scalar_values=source_derived_scalar_values,
         )
         program, bindings = compile_answer_program(
             draft,
@@ -127,6 +130,7 @@ def _answer_plan(
     ],
     input_context: CompilerInputContext,
     question_contract: QuestionContract,
+    source_derived_scalar_values: tuple[SourceDerivedScalarValue, ...],
 ) -> tuple[AnswerProgram, BindingSet]:
     answers = tuple(
         provider_output.parse_pattern_answer(answer) for answer in payload.answers
@@ -142,6 +146,7 @@ def _answer_plan(
         ),
         input_context=input_context,
         requested_facts=question_contract.requested_facts,
+        source_derived_scalar_values=source_derived_scalar_values,
     )
 
 

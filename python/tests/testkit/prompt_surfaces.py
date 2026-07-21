@@ -90,7 +90,6 @@ PROMPT_SURFACE_CONTRACTS = {
             "Threshold Values",
             "Literal Time Inputs",
             "Formula Values",
-            "Grouping Grain",
             "Result Limits",
             "Question Input Inventory",
             "Clarification Boundary",

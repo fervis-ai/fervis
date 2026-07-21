@@ -367,9 +367,6 @@ def run_answer_program_order_take_case(payload: dict[str, Any]) -> list[str]:
                             SortKey(field="value", direction=SortDirection.DESC),
                         ),
                         selection=Take(limit=limit),
-                        tie_breakers=(
-                            SortKey(field="id", direction=SortDirection.ASC),
-                        ),
                     ),
                     output_relation="ordered",
                 ),

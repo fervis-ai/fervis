@@ -45,16 +45,20 @@ def build_answer_request_contract_schema(
         {
             "kind": {"enum": ["question_contract"]},
             "answer_requests_count": {"type": "integer", "minimum": 1},
-            "question_inputs": {
-                "type": "array",
-                "items": _question_input_schema(
-                    conversation_inputs=conversation_inputs,
-                ),
-            },
             "answer_requests": {
                 "type": "array",
                 "minItems": 1,
                 "items": _answer_request_schema(),
+            },
+            "question_inputs": {
+                "type": "array",
+                "description": (
+                    "Every concrete input-bearing phrase; never include text that "
+                    "belongs to the complete noun compound naming answer_subject."
+                ),
+                "items": _question_input_schema(
+                    conversation_inputs=conversation_inputs,
+                ),
             },
             "question_input_inventory_check": (
                 provider_output.QuestionInputInventoryCheckOutput.schema(
@@ -148,7 +152,7 @@ def _answer_expression_schema() -> dict[str, object]:
                     selection=selection,
                     ordered=ordered,
                 )
-                for family in ("list_rows", "grouped_aggregate")
+                for family in ("grouped_aggregate", "list_rows")
                 for selection, ordered in (
                     ("all_results", False),
                     ("all_results", True),
@@ -208,7 +212,16 @@ def _scalar_or_set_answer_expression_schema() -> dict[str, object]:
 def _answer_subject_schema() -> dict[str, object]:
     return provider_output.AnswerSubjectOutput.schema(
         {
-            "subject_text": {"type": "string", "minLength": 1},
+            "subject_text": {
+                "type": "string",
+                "minLength": 1,
+                "description": (
+                    "The complete repeated fact-bearing candidate kind. Preserve noun "
+                    "compounds that name the kind; exclude independently testable "
+                    "property modifiers. For grouped_aggregate, this is not the group "
+                    "key."
+                ),
+            },
             "instance_interpretation": (
                 provider_output.AnswerSubjectInstanceInterpretationOutput.schema(
                     {
@@ -228,11 +241,12 @@ def _answer_subject_schema() -> dict[str, object]:
 def _answer_population_schema() -> dict[str, object]:
     return provider_output.AnswerPopulationOutput.schema(
         {
-            "population_label": {"type": "string", "minLength": 1},
-            "counted_unit": {"type": "string", "minLength": 1},
             "membership_tests": {
                 "type": "array",
-                "minItems": 1,
+                "description": (
+                    "One predicate for every explicit property or time condition "
+                    "that qualifying answer_subject instances must satisfy."
+                ),
                 "items": _answer_population_membership_test_schema(),
             },
         },
@@ -240,41 +254,16 @@ def _answer_population_schema() -> dict[str, object]:
 
 
 def _answer_population_membership_test_schema() -> dict[str, object]:
-    return {
-        "oneOf": [
-            _answer_population_membership_test_variant(
-                kind="EXPLICIT_USER_CONSTRAINT",
-            ),
-            *(
-                _answer_population_membership_test_variant(
-                    kind=kind,
-                )
-                for kind in (
-                    "SUBJECT_IDENTITY",
-                    "NORMAL_INSTANCE_GUARD",
-                    "RAW_RECORD_GUARD",
-                )
-            ),
-        ]
-    }
+    return _explicit_population_membership_test_schema()
 
 
-def _answer_population_membership_test_variant(
-    *,
-    kind: str,
-) -> dict[str, object]:
-    use_refs: dict[str, object] = {
-        "type": "array",
-        "items": {"type": "string", "minLength": 1},
-    }
-    if kind == "EXPLICIT_USER_CONSTRAINT":
-        use_refs["minItems"] = 1
-    else:
-        use_refs["maxItems"] = 0
+def _explicit_population_membership_test_schema() -> dict[str, object]:
     properties: dict[str, object] = {
-        "question_input_use_refs": use_refs,
-        "test_id": {"type": "string", "minLength": 1},
-        "kind": {"enum": [kind]},
+        "population_use_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1},
+        },
         "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
         "test_question": {"type": "string", "minLength": 1},
     }
@@ -299,8 +288,9 @@ def _answer_output_schema() -> dict[str, object]:
 def _group_key_schema() -> dict[str, object]:
     return {
         "oneOf": [
+            _source_value_group_key_schema(),
             _specified_question_inputs_group_key_schema(),
-            _source_result_values_group_key_schema(),
+            _temporal_bucket_group_key_schema(),
         ]
     }
 
@@ -309,16 +299,38 @@ def _specified_question_inputs_group_key_schema() -> dict[str, object]:
     return provider_output.GroupKeyOutput.schema(
         {
             "description": {"type": "string", "minLength": 1},
-            "domain": {"enum": ["SPECIFIED_QUESTION_INPUTS"]},
+            "value_source": provider_output.GroupKeyValueSourceOutput.schema(
+                {
+                    "kind": {"enum": ["specified_question_inputs"]},
+                }
+            ),
         },
     )
 
 
-def _source_result_values_group_key_schema() -> dict[str, object]:
+def _source_value_group_key_schema() -> dict[str, object]:
     return provider_output.GroupKeyOutput.schema(
         {
             "description": {"type": "string", "minLength": 1},
-            "domain": {"enum": ["SOURCE_RESULT_VALUES"]},
+            "value_source": provider_output.GroupKeyValueSourceOutput.schema(
+                {"kind": {"enum": ["source_value"]}}
+            ),
+        },
+    )
+
+
+def _temporal_bucket_group_key_schema() -> dict[str, object]:
+    return provider_output.GroupKeyOutput.schema(
+        {
+            "description": {"type": "string", "minLength": 1},
+            "value_source": provider_output.GroupKeyValueSourceOutput.schema(
+                {
+                    "kind": {"enum": ["temporal_bucket"]},
+                    "grain": {
+                        "enum": ["day", "week", "month", "quarter", "year"]
+                    },
+                }
+            ),
         },
     )
 
@@ -335,9 +347,6 @@ def _question_input_use_schema() -> dict[str, object]:
             ),
             _question_input_use_variant(
                 provider_output.QuestionInputOwnerKind.COMPUTE_EXPRESSION,
-            ),
-            _question_input_use_variant(
-                provider_output.QuestionInputOwnerKind.GROUP_KEY_DERIVATION,
             ),
             _question_input_use_variant(
                 provider_output.QuestionInputOwnerKind.RESULT_LIMIT,
@@ -383,10 +392,6 @@ def _question_input_schema(
         ),
         _literal_text_input_role_schema(
             role=LiteralInputRole.FORMULA_VALUE,
-            include_conversation_resolution_inputs=False,
-        ),
-        _literal_text_input_role_schema(
-            role=LiteralInputRole.GROUPING_GRAIN,
             include_conversation_resolution_inputs=False,
         ),
         _literal_text_input_role_schema(
@@ -479,7 +484,20 @@ def _literal_text_input_role_schema(
         "operand_text": {"type": "string", "minLength": 1},
         "field_label_text": {"type": "string", "minLength": 1},
         "value_meaning_hint": {"type": "string", "minLength": 1},
-        "role": {"enum": [role.value]},
+        "role": {
+            "enum": [role.value],
+            **(
+                {
+                    "description": (
+                        "A non-identity property value expressed as an "
+                        "independently testable modifier of answer_subject "
+                        "instances."
+                    )
+                }
+                if role is LiteralInputRole.PREDICATE_VALUE
+                else {}
+            ),
+        },
         "occurrence": {"type": "integer", "minimum": 1},
         "inventory_check": _question_input_inventory_check_schema(),
         "kind": {"enum": [KnownInputKind.LITERAL.value]},

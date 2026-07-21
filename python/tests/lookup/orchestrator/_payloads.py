@@ -9,7 +9,7 @@ from tests.lookup.orchestrator._plans import *  # noqa: F403
 from tests.lookup.prompt_sections import prompt_section_payload
 from tests.testkit.question_contract_provider import (
     ProviderQuestionInputOwnership,
-    provider_membership_tests,
+    provider_answer_population,
     provider_question_input_ownership,
 )
 
@@ -1154,10 +1154,7 @@ def _answer_expression_payload(
         return {"family": "scalar_aggregate"}
     payload: dict[str, Any] = {"family": expression.family.value}
     if expression.group_key is not None:
-        payload["group_key"] = {
-            "description": expression.group_key.description,
-            "domain": expression.group_key.domain.value,
-        }
+        payload["group_key"] = expression.group_key.to_answer_request_dict()
     if expression.ordering_direction is not None:
         payload["ordering"] = {
             "basis": expression.ordering_basis,
@@ -1336,7 +1333,6 @@ def _answer_population_payload(
             ).instance_interpretation
         )
         payload = default_answer_population(
-            description=fact.description,
             subject_text=subject_text,
             instance_interpretation=instance_interpretation,
         ).to_question_contract_dict()
@@ -1348,11 +1344,7 @@ def _provider_answer_population_payload(
     *,
     ownership: ProviderQuestionInputOwnership,
 ) -> dict[str, Any]:
-    payload["membership_tests"] = provider_membership_tests(
-        payload["membership_tests"],
-        ownership=ownership,
-    )
-    return payload
+    return provider_answer_population(payload, ownership=ownership)
 
 
 def _answer_population_payload_from_text(
@@ -1361,7 +1353,6 @@ def _answer_population_payload_from_text(
     subject_text: str,
 ) -> dict[str, Any]:
     payload = default_answer_population(
-        description=description,
         subject_text=subject_text,
         instance_interpretation=RequestedFactAnswerSubject(
             subject_text=subject_text

@@ -10,7 +10,7 @@ input:
     family: grouped_aggregate
     group_key:
       description: store
-      domain: SOURCE_RESULT_VALUES
+      value_source: {kind: source_value}
     ordering: {basis: total sales, direction: descending}
     selection: {kind: take_one}
 expect:

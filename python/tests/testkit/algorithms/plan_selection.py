@@ -11,6 +11,7 @@ from fervis.lookup.plan_selection.source_strategies import source_strategies_by_
 from fervis.lookup.plan_selection.model import OperationEvidence
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
+    GroupKeySourceKind,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerExpression,
@@ -209,6 +210,12 @@ def _group_key(raw_value: object) -> RequestedFactGroupKey | None:
         id=str(raw_value.get("id") or "group_key"),
         description=str(raw_value.get("description") or "group"),
         domain=GroupKeyDomainKind(str(raw_value.get("domain") or "")),
+        source_kind=(
+            GroupKeySourceKind(str(raw_value["source_kind"]))
+            if raw_value.get("source_kind")
+            else None
+        ),
+        temporal_grain=str(raw_value.get("grain") or ""),
         question_input_refs=tuple(
             str(item) for item in raw_value.get("question_input_refs") or ()
         ),

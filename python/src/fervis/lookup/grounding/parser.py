@@ -12,7 +12,6 @@ from fervis.lookup.grounding.model import (
     IdentifierKind,
     KnownInputBindingTask,
     LookupTextResolutionDecision,
-    NO_SHOWN_RESOURCE_TYPE,
     ResourceTypeMatch,
     LookupRequestParameter,
     TimeResolutionIntent,
@@ -52,12 +51,10 @@ def parse_grounding_compatibility(
             raise ValueError("review references unknown known input")
         task = tasks_by_id[known_input_id]
         _required_text(review.resource_type_basis)
-        resource_type_x = _required_text(review.resource_type_x)
-        if resource_type_x not in {
-            *task.shown_resource_types,
-            NO_SHOWN_RESOURCE_TYPE,
-        }:
-            raise ValueError("grounding resource_type_x was not shown")
+        resource_type_compatibility = _resource_type_compatibility(
+            review.resource_type_compatibility,
+            task=task,
+        )
         _required_text(review.identifier_kind_basis)
         identifier_kind = IdentifierKind(review.identifier_kind)
         compatible_bindings = _compatible_bindings(
@@ -65,7 +62,7 @@ def parse_grounding_compatibility(
             request=request,
             task=task,
             options_by_id=options_by_task[known_input_id],
-            resource_type_x=resource_type_x,
+            resource_type_compatibility=resource_type_compatibility,
             identifier_kind=identifier_kind,
         )
         seen.add(known_input_id)
@@ -119,7 +116,7 @@ def _compatible_bindings(
     request: GroundingRequest,
     task: KnownInputBindingTask,
     options_by_id: dict[str, InputBindingOption],
-    resource_type_x: str,
+    resource_type_compatibility: dict[str, ResourceTypeMatch],
     identifier_kind: IdentifierKind,
 ) -> tuple[CompatibleInputBinding, ...]:
     if set(reviews) != set(options_by_id):
@@ -130,14 +127,7 @@ def _compatible_bindings(
         resource_type = _required_text(review.resource_type)
         if resource_type != option.candidate.entity_kind:
             raise ValueError("grounding option resource_type mismatch")
-        resource_type_match = ResourceTypeMatch(review.resource_type_match)
-        expected_match = (
-            ResourceTypeMatch.SAME_RESOURCE_TYPE
-            if resource_type == resource_type_x
-            else ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE
-        )
-        if resource_type_match is not expected_match:
-            raise ValueError("grounding resource_type_match contradicts resource types")
+        resource_type_match = resource_type_compatibility[resource_type]
         expected_question = resolver_fit_question_for_option(
             task=task,
             option=option,
@@ -167,6 +157,21 @@ def _compatible_bindings(
         ):
             raise ValueError("negative grounding review must not select read inputs")
     return tuple(compatible)
+
+
+def _resource_type_compatibility(
+    values: dict[str, str],
+    *,
+    task: KnownInputBindingTask,
+) -> dict[str, ResourceTypeMatch]:
+    if set(values) != set(task.shown_resource_types):
+        raise ValueError(
+            "grounding resource_type_compatibility must cover shown resource types"
+        )
+    return {
+        resource_type: ResourceTypeMatch(value)
+        for resource_type, value in values.items()
+    }
 
 
 def _compatible_binding(

@@ -279,13 +279,16 @@ def _verify_population_fulfillment(
         population = fact.answer_population
         if population is None:
             continue
+        required_test_kind = (
+            AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
+        )
         required = frozenset(
             MembershipTestRef(
                 requested_fact_id=fact.id,
                 membership_test_id=test.id,
             )
             for test in population.membership_tests
-            if test.kind is not AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY
+            if test.kind is required_test_kind
         )
         missing = required - proof.population_coverage.row_tests
         if missing:

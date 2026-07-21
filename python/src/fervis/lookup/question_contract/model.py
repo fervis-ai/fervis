@@ -61,15 +61,6 @@ class NormalInstanceExcludedStateRole(StrEnum):
     )
 
 
-class NormalInstanceExplicitOverrideReason(StrEnum):
-    USER_EXPLICITLY_REQUESTED_STATE = "USER_EXPLICITLY_REQUESTED_STATE"
-    USER_EXPLICITLY_REQUESTED_RAW_RECORDS = "USER_EXPLICITLY_REQUESTED_RAW_RECORDS"
-    USER_EXPLICITLY_REQUESTED_ALL_RECORDS = "USER_EXPLICITLY_REQUESTED_ALL_RECORDS"
-    USER_EXPLICITLY_REQUESTED_NON_NORMAL_POPULATION = (
-        "USER_EXPLICITLY_REQUESTED_NON_NORMAL_POPULATION"
-    )
-
-
 class RequestedFactAnswerExpressionFamily(StrEnum):
     LIST_ROWS = "list_rows"
     SCALAR_VALUE = "scalar_value"
@@ -103,10 +94,9 @@ class GroupKeyDomainKind(StrEnum):
     SOURCE_RESULT_VALUES = "SOURCE_RESULT_VALUES"
 
 
-NORMAL_INSTANCE_EXPLICIT_USER_OVERRIDE_POLICY = (
-    "Do not exclude a state role when the user explicitly asks for that state, "
-    "raw records, all records, or a non-normal population."
-)
+class GroupKeySourceKind(StrEnum):
+    SOURCE_VALUE = "source_value"
+    TEMPORAL_BUCKET = "temporal_bucket"
 
 
 @dataclass(frozen=True)
@@ -181,7 +171,6 @@ class NormalInstanceProfile:
     excluded_state_roles: tuple[NormalInstanceExcludedStateRoleDefinition, ...] = (
         NORMAL_INSTANCE_EXCLUDED_STATE_ROLES
     )
-    explicit_user_override_policy: str = NORMAL_INSTANCE_EXPLICIT_USER_OVERRIDE_POLICY
 
     def __post_init__(self) -> None:
         if not self.subject_text.strip():
@@ -196,7 +185,6 @@ class NormalInstanceProfile:
             "excluded_state_roles": [
                 role.to_answer_request_dict() for role in self.excluded_state_roles
             ],
-            "explicit_user_override_policy": self.explicit_user_override_policy,
         }
 
 
@@ -219,8 +207,9 @@ def normal_instance_guard_question(subject_text: str) -> str:
 class RequestedFactGroupKey:
     description: str
     domain: GroupKeyDomainKind
+    source_kind: GroupKeySourceKind | None = None
+    temporal_grain: str = ""
     question_input_refs: tuple[str, ...] = ()
-    derivation_input_refs: tuple[str, ...] = ()
     id: str = "group_key"
 
     def __post_init__(self) -> None:
@@ -237,47 +226,60 @@ class RequestedFactGroupKey:
             object.__setattr__(self, "question_input_refs", refs)
         if len(set(refs)) != len(refs):
             raise ValueError("group key repeats question input")
-        derivation_refs = tuple(
-            str(item).strip()
-            for item in self.derivation_input_refs
-            if str(item).strip()
-        )
-        if derivation_refs != self.derivation_input_refs:
-            object.__setattr__(self, "derivation_input_refs", derivation_refs)
-        if len(set(derivation_refs)) != len(derivation_refs):
-            raise ValueError("group key repeats derivation input")
         if self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS and not refs:
             raise ValueError("specified group key requires question inputs")
-        if (
-            self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
-            and derivation_refs
-        ):
-            raise ValueError("specified group key cannot carry derivation inputs")
-        if self.domain == GroupKeyDomainKind.SOURCE_RESULT_VALUES and refs:
+        if self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS:
+            if self.source_kind is not None or self.temporal_grain:
+                raise ValueError("specified group key cannot carry a source kind")
+            return
+        if refs:
             raise ValueError("source-result group key cannot carry input refs")
+        if not isinstance(self.source_kind, GroupKeySourceKind):
+            raise ValueError("source-result group key requires a source kind")
+        grain = self.temporal_grain.strip().casefold()
+        if self.source_kind is GroupKeySourceKind.TEMPORAL_BUCKET:
+            if grain not in {"day", "week", "month", "quarter", "year"}:
+                raise ValueError("temporal group key requires a supported grain")
+            object.__setattr__(self, "temporal_grain", grain)
+        elif grain:
+            raise ValueError("source-value group key cannot carry temporal grain")
 
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "id": self.id,
             "description": self.description,
-            "domain": self.domain.value,
+            "value_source": self._value_source_dict(),
         }
-        if self.question_input_refs:
-            payload["question_input_refs"] = list(self.question_input_refs)
-        if self.derivation_input_refs:
-            payload["derivation_input_refs"] = list(self.derivation_input_refs)
         return payload
+
+    def temporal_grain_value_id(self, *, requested_fact_id: str) -> str:
+        if self.source_kind is not GroupKeySourceKind.TEMPORAL_BUCKET:
+            raise ValueError("only temporal group keys have a grain value")
+        if not requested_fact_id:
+            raise ValueError("temporal grain value requires requested fact id")
+        return f"group_key.{requested_fact_id}.{self.id}.grain"
 
     def to_answer_request_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "description": self.description,
-            "domain": self.domain.value,
+            "value_source": self._value_source_dict(),
         }
-        if self.question_input_refs:
-            payload["question_input_refs"] = list(self.question_input_refs)
-        if self.derivation_input_refs:
-            payload["derivation_input_refs"] = list(self.derivation_input_refs)
         return payload
+
+    def _value_source_dict(self) -> dict[str, object]:
+        if self.domain is GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS:
+            return {
+                "kind": "specified_question_inputs",
+                "question_input_refs": list(self.question_input_refs),
+            }
+        if self.source_kind is GroupKeySourceKind.TEMPORAL_BUCKET:
+            return {
+                "kind": self.source_kind.value,
+                "grain": self.temporal_grain,
+            }
+        if self.source_kind is GroupKeySourceKind.SOURCE_VALUE:
+            return {"kind": self.source_kind.value}
+        raise ValueError("group key value source is incomplete")
 
 
 @dataclass(frozen=True)
@@ -431,11 +433,6 @@ class RequestedFactLiteralInput:
             if literal_type != "number":
                 raise ValueError("threshold_value requires a numeric scalar literal")
             object.__setattr__(self, "resolved_value_text", normalized)
-        if self.role == LiteralInputRole.GROUPING_GRAIN:
-            grain = self.resolved_value_text.strip().casefold()
-            if grain not in {"day", "week", "month", "quarter", "year"}:
-                raise ValueError("grouping_grain requires a supported temporal grain")
-            object.__setattr__(self, "resolved_value_text", grain)
         if self.source == KnownInputSource.CONVERSATION_RESOLUTION:
             if not self.resolved_input_ref.strip():
                 raise ValueError(
@@ -473,10 +470,6 @@ class RequestedFactLiteralInput:
     @property
     def is_formula_value(self) -> bool:
         return self.role == LiteralInputRole.FORMULA_VALUE
-
-    @property
-    def is_grouping_grain(self) -> bool:
-        return self.role == LiteralInputRole.GROUPING_GRAIN
 
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -572,8 +565,7 @@ class RequestedFactAnswerSubjectInstanceInterpretation:
             "Answer over ordinary business instances of '{subject_text}' as they are "
             "normally understood in business operations and reporting. Do not assume "
             "this includes every persisted representation the host API may expose for "
-            "'{subject_text}'. Explicit user wording may narrow or override this "
-            "normal instance interpretation."
+            "'{subject_text}'."
         )
 
     def to_answer_request_dict(self, *, subject_text: str) -> dict[str, object]:
@@ -704,13 +696,10 @@ class RequestedFactAnswerPopulationMembershipTest:
 
 @dataclass(frozen=True)
 class RequestedFactAnswerPopulation:
-    population_label: str
     counted_unit: str
     membership_tests: tuple[RequestedFactAnswerPopulationMembershipTest, ...]
 
     def __post_init__(self) -> None:
-        if not self.population_label.strip():
-            raise ValueError("answer population requires population label")
         if not self.counted_unit.strip():
             raise ValueError("answer population requires counted unit")
         if not self.membership_tests:
@@ -739,7 +728,6 @@ class RequestedFactAnswerPopulation:
 
     def to_answer_request_dict(self) -> dict[str, object]:
         return {
-            "population_label": self.population_label,
             "counted_unit": self.counted_unit,
             "membership_tests": [
                 test.to_answer_request_dict() for test in self.membership_tests
@@ -748,7 +736,6 @@ class RequestedFactAnswerPopulation:
 
     def to_question_contract_dict(self) -> dict[str, object]:
         return {
-            "population_label": self.population_label,
             "counted_unit": self.counted_unit,
             "membership_tests": [
                 test.to_question_contract_dict() for test in self.membership_tests
@@ -776,9 +763,11 @@ def _normalized_population_membership_test(
 
 def default_answer_population(
     *,
-    description: str,
     subject_text: str,
     instance_interpretation: RequestedFactAnswerSubjectInstanceInterpretation,
+    explicit_membership_tests: tuple[
+        RequestedFactAnswerPopulationMembershipTest, ...
+    ] = (),
 ) -> RequestedFactAnswerPopulation:
     guard_kind = (
         AnswerPopulationMembershipTestKind.RAW_RECORD_GUARD
@@ -795,7 +784,6 @@ def default_answer_population(
         )
     )
     return RequestedFactAnswerPopulation(
-        population_label=description or subject_text,
         counted_unit=subject_text,
         membership_tests=(
             RequestedFactAnswerPopulationMembershipTest(
@@ -821,6 +809,7 @@ def default_answer_population(
                     else None
                 ),
             ),
+            *explicit_membership_tests,
         ),
     )
 
@@ -889,7 +878,6 @@ class RequestedFact:
                 self,
                 "answer_population",
                 default_answer_population(
-                    description=self.description,
                     subject_text=self.answer_subject.subject_text,
                     instance_interpretation=(
                         self.answer_subject.instance_interpretation
@@ -927,10 +915,7 @@ class RequestedFact:
             input_ref_set = set(input_refs)
             unknown_refs = tuple(
                 ref
-                for ref in (
-                    *self.answer_expression.group_key.question_input_refs,
-                    *self.answer_expression.group_key.derivation_input_refs,
-                )
+                for ref in self.answer_expression.group_key.question_input_refs
                 if ref not in input_ref_set
             )
             if unknown_refs:

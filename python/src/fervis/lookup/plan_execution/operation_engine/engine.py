@@ -31,6 +31,7 @@ from fervis.lookup.answer_program.operations import (
     RoleExpandSpec,
     UnionSpec,
     UniversalConditionSpec,
+    operation_scalar_output_ids,
 )
 
 from .aggregate_operations import _aggregate, _order
@@ -67,7 +68,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
     scalars: dict[str, RuntimeValue] = {}
     scalar_proofs: dict[str, tuple[str, ...]] = {}
     scalar_types: dict[str, str] = {}
-    computed_outputs: dict[str, tuple[str, RuntimeValue]] = {}
+    node_outputs: dict[str, dict[str, RuntimeValue]] = {}
     for scalar_input in engine_input.scalar_inputs:
         if not isinstance(scalar_input, ScalarInput):
             raise RelationEngineError("scalar input must be ScalarInput")
@@ -86,7 +87,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                 scalars,
                 scalar_proofs,
                 scalar_types,
-                computed_outputs,
+                node_outputs,
                 environment_values=dict(engine_input.environment_values or {}),
                 environment_types=dict(engine_input.environment_types or {}),
                 operation_proof_refs=operation_proof_refs,
@@ -123,12 +124,22 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
             if result.id in relations:
                 raise RelationEngineError(f"duplicate relation {result.id}")
             relations[result.id] = result
+            scalar_output_ids = operation_scalar_output_ids(operation.spec)
+            if scalar_output_ids:
+                if len(result.rows) != 1:
+                    raise RelationEngineError(
+                        f"operation {operation.id} did not produce one scalar row"
+                    )
+                node_outputs[operation.id] = {
+                    output_id: result.rows[0][output_id]
+                    for output_id in scalar_output_ids
+                }
         elif isinstance(operation.spec, ComputeSpec):
             output_scalar = operation.spec.output_scalar
             if output_scalar in scalars:
                 raise RelationEngineError(f"duplicate scalar {output_scalar}")
             scalars[output_scalar] = result
-            computed_outputs[operation.id] = (output_scalar, result)
+            node_outputs[operation.id] = {output_scalar: result}
             scalar_proofs[output_scalar] = _operation_proof_refs(
                 operation,
                 _input_relations(operation, relations),
@@ -154,7 +165,7 @@ def _execute_operation(
     scalars: dict[str, RuntimeValue],
     scalar_proofs: dict[str, tuple[str, ...]],
     scalar_types: dict[str, str],
-    computed_outputs: dict[str, tuple[str, RuntimeValue]],
+    node_outputs: dict[str, dict[str, RuntimeValue]],
     *,
     environment_values: dict[str, RuntimeValue],
     environment_types: dict[str, str],
@@ -179,7 +190,7 @@ def _execute_operation(
             scalars,
             scalar_proofs,
             scalar_types,
-            computed_outputs,
+            node_outputs,
             environment_values=environment_values,
             environment_types=environment_types,
         )
@@ -224,7 +235,7 @@ def _execute_operation(
     if isinstance(spec, ComputeSpec):
         return _compute(
             spec,
-            computed_outputs,
+            node_outputs,
             scalars=scalars,
             scalar_types=scalar_types,
         )

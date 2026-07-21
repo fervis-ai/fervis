@@ -26,6 +26,7 @@ input:
                   group_key:
                     description: region
                     domain: SOURCE_RESULT_VALUES
+                    source_kind: source_value
                 answer_subject: {subject_text: sales}
                 answer_outputs:
                   - id: answer_1

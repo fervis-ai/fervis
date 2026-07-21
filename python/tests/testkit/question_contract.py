@@ -4,6 +4,7 @@ from typing import Any
 
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
+    GroupKeySourceKind,
     KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
@@ -82,7 +83,6 @@ def answer_population_from_payload(
     if not isinstance(payload, dict):
         raise ValueError("answer_population must be an object")
     return RequestedFactAnswerPopulation(
-        population_label=str(payload["population_label"]),
         counted_unit=str(payload["counted_unit"]),
         membership_tests=tuple(
             RequestedFactAnswerPopulationMembershipTest(
@@ -172,6 +172,12 @@ def group_key_from_payload(payload: Any) -> RequestedFactGroupKey | None:
         id=str(payload.get("id") or "group_key"),
         description=str(payload["description"]),
         domain=GroupKeyDomainKind(str(payload["domain"])),
+        source_kind=(
+            GroupKeySourceKind(str(payload["source_kind"]))
+            if payload.get("source_kind")
+            else None
+        ),
+        temporal_grain=str(payload.get("grain") or ""),
         question_input_refs=tuple(
             str(item) for item in payload.get("question_input_refs") or ()
         ),

@@ -41,6 +41,7 @@ from .parameterization import (
 from .shared import RelationBuilder
 from fervis.lookup.fact_planning.compiled_patterns import CompiledPattern
 from fervis.lookup.question_contract import RequestedFact
+from fervis.lookup.fact_planning.scalar_values import SourceDerivedScalarValue
 
 
 def compile_pattern_answer_program(
@@ -53,9 +54,13 @@ def compile_pattern_answer_program(
     ],
     input_context: CompilerInputContext,
     requested_facts: tuple[RequestedFact, ...],
+    source_derived_scalar_values: tuple[SourceDerivedScalarValue, ...] = (),
 ) -> tuple[AnswerProgram, BindingSet]:
     bound_sources_by_id = {item.id: item for item in bound_sources}
     requested_facts_by_id = {item.id: item for item in requested_facts}
+    source_scalar_values_by_id = {
+        item.value_id: item for item in source_derived_scalar_values
+    }
     namespace_result_outputs = len(answers) > 1
     parameters = {item.id: item for item in input_context.program_inputs.parameters}
     bindings = {
@@ -92,6 +97,7 @@ def compile_pattern_answer_program(
             input_context=input_context,
             requested_facts_by_id=requested_facts_by_id,
             relation_builder=build_relation,
+            source_scalar_values_by_id=source_scalar_values_by_id,
         )
         for index, answer in enumerate(answers)
     ]
@@ -139,6 +145,7 @@ def _compile_pattern_answer(
     input_context: CompilerInputContext,
     requested_facts_by_id: Mapping[str, RequestedFact],
     relation_builder: RelationBuilder,
+    source_scalar_values_by_id: Mapping[str, SourceDerivedScalarValue],
 ) -> CompiledPattern:
     match answer:
         case ListRowsAnswerOutput() | GroupedRowsAnswerOutput():
@@ -192,6 +199,8 @@ def _compile_pattern_answer(
                 namespace_result_outputs=namespace_result_outputs,
                 input_context=input_context,
                 relation_builder=relation_builder,
+                bound_sources=bound_sources,
+                source_scalar_values_by_id=source_scalar_values_by_id,
             )
         case SetDifferenceAnswerOutput():
             allowed_ids = _allowed_source_binding_ids(

@@ -123,7 +123,7 @@ def fact_plan_instruction_sections(
                 "Derived Group Key",
                 (
                     "When group_key_source_fields are shown, select exactly one source_field_id whose declared value is divided into the requested groups.",
-                    "The grouping_grain input already fixes the bucket size. Do not copy or reinterpret it.",
+                    "The requested group key already fixes the temporal grain. Do not copy or reinterpret it.",
                 ),
             )
         )

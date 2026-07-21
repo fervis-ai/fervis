@@ -263,13 +263,12 @@ def _grounding_review_for_task(
         if str(option["binding_option_id"]) in compatible_option_ids
     )
     if not compatible_options:
-        resource_type_x = "NO_SHOWN_RESOURCE_TYPE"
+        compatible_resource_types: set[str] = set()
         identifier_kind = "DESCRIPTIVE"
     else:
-        resource_types = {str(option["resource_type"]) for option in compatible_options}
-        if len(resource_types) != 1:
-            raise AssertionError("scripted compatible resolvers return different types")
-        [resource_type_x] = resource_types
+        compatible_resource_types = {
+            str(option["resource_type"]) for option in compatible_options
+        }
         purposes = {str(option.get("purpose") or "") for option in compatible_options}
         if len(purposes) != 1:
             raise AssertionError("scripted compatible resolvers use different purposes")
@@ -280,8 +279,15 @@ def _grounding_review_for_task(
     match_fields = match_fields_for_option or _resolver_match_fields
     lookup_text = str(task["lookup_text"])
     return {
-        "resource_type_basis": f"The input identifies {resource_type_x}.",
-        "resource_type_x": resource_type_x,
+        "resource_type_basis": "The input's resource meaning was reviewed.",
+        "resource_type_compatibility": {
+            resource_type: (
+                "SAME_RESOURCE_TYPE"
+                if resource_type in compatible_resource_types
+                else "DIFFERENT_RESOURCE_TYPE"
+            )
+            for resource_type in task["shown_resource_types"]
+        },
         "identifier_kind_basis": (
             f"The input uses a {identifier_kind.lower()} identifier."
         ),
@@ -290,7 +296,6 @@ def _grounding_review_for_task(
             option["binding_option_id"]: _grounding_option_review(
                 option,
                 lookup_text=lookup_text,
-                resource_type_x=resource_type_x,
                 compatible=str(option["binding_option_id"]) in compatible_option_ids,
                 request_values_for_option=request_values,
                 match_fields_for_option=match_fields,
@@ -304,27 +309,17 @@ def _grounding_option_review(
     option: dict[str, Any],
     *,
     lookup_text: str,
-    resource_type_x: str,
     compatible: bool,
     request_values_for_option: Any,
     match_fields_for_option: Any,
 ) -> dict[str, Any]:
-    resource_type = str(option["resource_type"])
-    same_resource_type = resource_type == resource_type_x
-    if compatible and not same_resource_type:
-        raise AssertionError("scripted compatible resolver returns a different type")
     request_values = (
         request_values_for_option(option, lookup_text=lookup_text)
         if compatible
         else {}
     )
     return {
-        "resource_type": resource_type,
-        "resource_type_match": (
-            "SAME_RESOURCE_TYPE"
-            if same_resource_type
-            else "DIFFERENT_RESOURCE_TYPE"
-        ),
+        "resource_type": str(option["resource_type"]),
         "resolver_fit_question": option["resolver_fit_question"],
         "because": "The declared route capability was reviewed.",
         "resolution": {

@@ -16,7 +16,7 @@ expect:
       allows_group_key: true
       additional_properties: false
       group_key_schema_kind: oneOf
-      group_key_branch_count: 2
+      group_key_branch_count: 3
     ordinary_answer_expression_branch:
       required: [family, selection]
       properties: [family, selection]

@@ -1,4 +1,28 @@
 question_contracts:
+  raw_sale_records:
+    requested_facts:
+      - id: fact_1
+        description: raw sale records
+        answer_subject:
+          subject_text: sale records
+          instance_interpretation: {kind: RAW_DATA_RECORD}
+        answer_expression: {family: list_rows, selection_kind: all_results}
+        answer_outputs:
+          - {id: answer_1, description: sale record, role: ANSWER_VALUE}
+        known_inputs: []
+        input_refs: []
+        answer_population:
+          counted_unit: sale record
+          membership_tests:
+            - id: sale_record_subject
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does this row represent a sale record?
+            - id: persisted_sale_record
+              kind: RAW_RECORD_GUARD
+              polarity: MUST_PASS
+              test_question: Is this a persisted sale record?
+
   sales_in_nairobi:
     requested_facts:
       - id: fact_1
@@ -16,7 +40,6 @@ question_contracts:
             value_meaning_hint: area
         input_refs: [nairobi]
         answer_population:
-          population_label: sales in Nairobi
           counted_unit: sale
           membership_tests:
             - id: sale_subject
@@ -52,7 +75,6 @@ question_contracts:
             value_meaning_hint: area
         input_refs: [nairobi, mombasa]
         answer_population:
-          population_label: sales in Nairobi
           counted_unit: sale
           membership_tests:
             - id: sale_subject
@@ -82,7 +104,6 @@ question_contracts:
             value_meaning_hint: staff member
         input_refs: [nadia]
         answer_population:
-          population_label: staff member named Nadia without a sale
           counted_unit: staff member
           membership_tests:
             - id: staff_subject
@@ -112,7 +133,6 @@ question_contracts:
             value_meaning_hint: area
         input_refs: [nairobi]
         answer_population:
-          population_label: stores in Nairobi
           counted_unit: store
           membership_tests:
             - id: store_subject
@@ -148,7 +168,6 @@ question_contracts:
             value_meaning_hint: inventory status
         input_refs: [active, available]
         answer_population:
-          population_label: products available in every active store
           counted_unit: product
           membership_tests:
             - id: product_subject

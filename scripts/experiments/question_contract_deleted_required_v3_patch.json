@@ -1,0 +1,48 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "List all completed in-person sale records from March 2026.",
+      "new": "List all deleted sales from March 2026.",
+      "expected_count": 1
+    },
+    {
+      "old": "Each membership test asks one predicate about one candidate property. Create separate EXPLICIT_USER_CONSTRAINT tests for different properties, even when they consume the same input; omit predicates already enforced by answer_expression.",
+      "new": "An EXPLICIT_USER_CONSTRAINT narrows the population: MUST_PASS requires a candidate property, while MUST_FAIL excludes it. A permission to include additional candidates is not an EXPLICIT_USER_CONSTRAINT.",
+      "expected_count": 1
+    },
+    {
+      "old": "For NORMAL_BUSINESS_INSTANCE, include a NORMAL_INSTANCE_GUARD test; the backend attaches the standard ORDINARY_BUSINESS_INSTANCE_V1 profile with typed excluded-state roles.",
+      "new": "For NORMAL_BUSINESS_INSTANCE, include a NORMAL_INSTANCE_GUARD test; the backend attaches the standard ORDINARY_BUSINESS_INSTANCE_V1 profile with typed excluded-state roles. In explicit_user_overrides, copy each complete question phrase that permits candidates outside that normal population; otherwise use an empty array.",
+      "expected_count": 1
+    },
+    {
+      "old": "After writing answer_population, inspect each EXPLICIT_USER_CONSTRAINT. When the question supplies a concrete value used by that test, declare the smallest copied value phrase as one predicate_value and reference that input from the test. Do not turn the answer subject or counted unit into an input.\nA predicate_value does not identify one particular resource.",
+      "new": "A predicate_value is the concrete value required or excluded by an EXPLICIT_USER_CONSTRAINT. Copy the smallest phrase that supplies that value. Population permissions are not predicate values. Do not turn the answer subject or counted unit into an input.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/2/properties/explicit_user_overrides",
+      "value": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source_text": {"type": "string", "minLength": 1}
+          },
+          "required": ["source_text"]
+        }
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/2/required/-",
+      "value": "explicit_user_overrides"
+    }
+  ]
+}

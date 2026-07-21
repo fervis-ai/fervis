@@ -267,7 +267,7 @@ def _tool_spec_payload(spec: Any) -> object:
 
 
 def _json_text(value: Any) -> str:
-    return json.dumps(value, default=str, sort_keys=True)
+    return json.dumps(value, default=str)
 
 
 def _content_hash(value: str) -> str:

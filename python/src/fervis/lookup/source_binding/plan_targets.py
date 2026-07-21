@@ -197,7 +197,12 @@ def _source_binding_plan_family(
     facts_by_id: dict[str, RequestedFact],
 ) -> SourceBindingPlanFamily | None:
     requested_fact_id, plan_shape = family_key
-    shape_spec = _shape_spec(plans[0], fact=facts_by_id.get(requested_fact_id))
+    shape_specs = tuple(
+        _shape_spec(plan, fact=facts_by_id.get(requested_fact_id)) for plan in plans
+    )
+    shape_spec = shape_specs[0]
+    if any(spec != shape_spec for spec in shape_specs[1:]):
+        raise ValueError("source binding family mixes incompatible plan variants")
     requirement_ids = _family_requirement_ids(plans, shape_spec=shape_spec)
     role_targets = _family_role_targets(
         plans,
@@ -434,6 +439,13 @@ def _shape_spec(
 ) -> PlanSelectionShapeSpec | None:
     if fact is None or fact.answer_expression is None:
         return None
+    requirement_ids = tuple(
+        dict.fromkeys(
+            requirement_id
+            for member in plan.source_members
+            for requirement_id in source_binding_member_requirement_ids(member)
+        )
+    )
     return next(
         (
             spec
@@ -441,6 +453,7 @@ def _shape_spec(
                 fact.answer_expression.family
             )
             if spec.plan_shape == plan.plan_shape
+            and spec.member_requirements == requirement_ids
         ),
         None,
     )

@@ -49,6 +49,7 @@ from fervis.lookup.turn_prompts import (
     TurnPromptBuilder,
 )
 from fervis.lookup.question_contract import (
+    GroupKeySourceKind,
     QuestionContract,
     RequestedFact,
     requested_fact_evidence_ref,
@@ -61,6 +62,10 @@ from fervis.lookup.source_binding import (
 )
 from fervis.lookup.fact_planning.schema import (
     build_fact_plan_schema,
+)
+from fervis.lookup.fact_planning.scalar_values import (
+    SourceDerivedScalarValue,
+    source_derived_scalar_values_by_fact,
 )
 from fervis.model_io.structured_output.specs import required_tool_spec
 
@@ -112,6 +117,10 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
             request,
             plan_selection=plan_selection,
         )
+        self._source_derived_scalar_values = source_derived_scalar_values_by_fact(
+            bound_sources=request.bound_sources,
+            plan_selection=plan_selection,
+        )
 
     def prompt_sections(
         self,
@@ -128,9 +137,9 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
             ),
             builder.json_section(
                 "Operation input values:",
-                operation_input_values_payload(
-                    available_values=self.request.available_values,
-                    available_value_uses=self.request.available_value_uses,
+                _operation_input_values_payload(
+                    self.request,
+                    source_values_by_fact=self._source_derived_scalar_values,
                 ),
             ),
             builder.json_section(
@@ -242,8 +251,16 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
                 for fact in self.request.question_contract.requested_facts
             },
             value_ids_by_requested_fact_id=_value_ids_by_requested_fact_id(
-                self.request
+                self.request,
+                source_values_by_fact=self._source_derived_scalar_values,
             ),
+        )
+
+    def source_derived_scalar_values(self) -> tuple[SourceDerivedScalarValue, ...]:
+        return tuple(
+            value
+            for values in self._source_derived_scalar_values.values()
+            for value in values
         )
 
 
@@ -431,11 +448,6 @@ def _grouped_aggregate_choices_by_requested_fact_id(
     )
     facts_by_id = {fact.id: fact for fact in request.question_contract.requested_facts}
     sources_by_id = {source.id: source for source in request.bound_sources}
-    value_ids_by_known_input_id = {
-        value.known_input_id: value.id
-        for value in request.available_values
-        if value.known_input_id
-    }
     output: dict[str, tuple[dict[str, Any], ...]] = {}
     for requested_fact_id, fact_choices in choices.items():
         projected = tuple(
@@ -446,7 +458,6 @@ def _grouped_aggregate_choices_by_requested_fact_id(
                     choice,
                     requested_fact=facts_by_id.get(requested_fact_id),
                     sources_by_id=sources_by_id,
-                    value_ids_by_known_input_id=value_ids_by_known_input_id,
                 )
             )
             is not None
@@ -461,24 +472,23 @@ def _with_group_key_source_fields(
     *,
     requested_fact: RequestedFact | None,
     sources_by_id: dict[str, BoundSource],
-    value_ids_by_known_input_id: dict[str, str],
 ) -> dict[str, Any] | None:
-    group_key = (
-        requested_fact.answer_expression.group_key
-        if requested_fact is not None and requested_fact.answer_expression is not None
-        else None
-    )
-    if group_key is None or not group_key.derivation_input_refs:
+    if requested_fact is None or requested_fact.answer_expression is None:
+        return choice
+    group_key = requested_fact.answer_expression.group_key
+    if (
+        group_key is None
+        or group_key.source_kind is not GroupKeySourceKind.TEMPORAL_BUCKET
+    ):
         return choice
     source = sources_by_id.get(str(choice.get("source_binding_id") or ""))
     if source is None:
         return choice
-    derivation_value_ids = {
-        value_ids_by_known_input_id.get(input_id, "")
-        for input_id in group_key.derivation_input_refs
-    }
+    grain_value_id = group_key.temporal_grain_value_id(
+        requested_fact_id=requested_fact.id,
+    )
     if source.source is not None and any(
-        binding.value_id in derivation_value_ids
+        binding.value_id == grain_value_id
         for binding in source.source.param_bindings
     ):
         return choice
@@ -720,13 +730,39 @@ def _schema_clarification_inputs(
 
 def _value_ids_by_requested_fact_id(
     request: FactPlanRequest,
+    *,
+    source_values_by_fact: dict[str, tuple[SourceDerivedScalarValue, ...]],
 ) -> dict[str, tuple[str, ...]]:
     return {
-        fact.id: tuple(
-            value.id
-            for value in request.available_values
-            if not value.applies_to_requested_fact_ids
-            or fact.id in value.applies_to_requested_fact_ids
+        fact.id: (
+            *tuple(
+                value.id
+                for value in request.available_values
+                if not value.applies_to_requested_fact_ids
+                or fact.id in value.applies_to_requested_fact_ids
+            ),
+            *(value.value_id for value in source_values_by_fact.get(fact.id, ())),
         )
         for fact in request.question_contract.requested_facts
+    }
+
+
+def _operation_input_values_payload(
+    request: FactPlanRequest,
+    *,
+    source_values_by_fact: dict[str, tuple[SourceDerivedScalarValue, ...]],
+) -> dict[str, Any]:
+    literal_values = operation_input_values_payload(
+        available_values=request.available_values,
+        available_value_uses=request.available_value_uses,
+    )
+    return {
+        "values": [
+            *(literal_values.get("values") or ()),
+            *(
+                value.payload
+                for values in source_values_by_fact.values()
+                for value in values
+            ),
+        ]
     }

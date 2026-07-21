@@ -7,10 +7,14 @@ from fervis.lookup.answer_program.expressions import (
     ExpressionFunction,
     FieldRef,
     FunctionExpression,
-    ParameterRef,
 )
 from fervis.lookup.answer_program.operations import AggregateSpec, ProjectSpec
-from fervis.lookup.answer_program.values import EnvironmentRef, LiteralType
+from fervis.lookup.answer_program.values import (
+    ConstantRef,
+    EnvironmentRef,
+    FactValue,
+    LiteralType,
+)
 from fervis.lookup.source_binding.compiler_ir import RelationInputOrigin
 from fervis.lookup.plan_execution.operation_engine import execute_operations
 from fervis.lookup.plan_execution.operation_runtime import (
@@ -28,15 +32,13 @@ from fervis.lookup.fact_planning.grouped_aggregate_choices import (
 )
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
-    KnownInputSource,
+    GroupKeySourceKind,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
     RequestedFactGroupKey,
-    RequestedFactLiteralInput,
     RequestedFactOrderingDirection,
     ResultSelectionKind,
 )
-from fervis.lookup.question_inputs import LiteralInputRole
 
 
 def _ordered_grouped_payload(
@@ -78,6 +80,7 @@ def _ordered_grouped_fact() -> RequestedFact:
                 id="answer_1",
                 description="result group",
                 domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
             ),
             ordering_basis="aggregate value",
             ordering_direction=RequestedFactOrderingDirection.DESCENDING,
@@ -103,7 +106,8 @@ def _derived_group_fact() -> RequestedFact:
                 id="answer_1",
                 description="event day",
                 domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
-                derivation_input_refs=("qi_grain",),
+                source_kind=GroupKeySourceKind.TEMPORAL_BUCKET,
+                temporal_grain="day",
             ),
             selection_kind=ResultSelectionKind.ALL_RESULTS,
         ),
@@ -114,28 +118,18 @@ def _derived_group_fact() -> RequestedFact:
                 description="total measured value",
             ),
         ),
-        input_refs=("qi_grain",),
     )
 
 
-def _grouping_grain_input() -> RequestedFactLiteralInput:
-    return RequestedFactLiteralInput(
-        id="qi_grain",
-        source=KnownInputSource.QUESTION_CONTEXT,
-        role=LiteralInputRole.GROUPING_GRAIN,
-        text="day",
-        resolved_value_text="day",
-    )
-
-
-def _grouping_grain_value() -> FactValue:
+def _temporal_grain_value() -> FactValue:
+    group_key = _derived_group_fact().answer_expression.group_key
+    assert group_key is not None
     return FactValue.literal(
-        id="value_grain",
-        known_input_id="qi_grain",
+        id=group_key.temporal_grain_value_id(requested_fact_id="rf_answer"),
         literal_type=LiteralType.STRING,
         value="day",
         label="day",
-        proof_refs=("known_input:qi_grain",),
+        proof_refs=("requested_fact:rf_answer",),
         applies_to_requested_fact_ids=("rf_answer",),
     )
 
@@ -221,8 +215,8 @@ def _direct_group_bound_source() -> BoundSource:
                 DraftEndpointParamBinding(
                     param_id="grain",
                     value="day",
-                    value_id="value_grain",
-                    origin_kind=RelationInputOrigin.QUESTION_INPUT,
+                    value_id=_temporal_grain_value().id,
+                    origin_kind=RelationInputOrigin.CONTEXT_CONSTANT,
                 ),
             ),
         ),
@@ -612,10 +606,9 @@ def test_derived_group_key_exposes_only_the_evidence_backed_temporal_field():
         question="What was the total measured value per day?",
         question_contract=QuestionContract(
             requested_facts=(fact,),
-            question_inputs=(_grouping_grain_input(),),
         ),
         relation_catalog=RelationCatalog(reads=()),
-        available_values=(_grouping_grain_value(),),
+        available_values=(_temporal_grain_value(),),
         bound_sources=(_derived_group_bound_source(),),
     )
     turn = PatternFactPlanTurnPrompt(
@@ -650,10 +643,9 @@ def test_derived_group_key_has_no_fact_plan_when_group_evidence_is_not_temporal(
         question="What was the total measured value per day?",
         question_contract=QuestionContract(
             requested_facts=(fact,),
-            question_inputs=(_grouping_grain_input(),),
         ),
         relation_catalog=RelationCatalog(reads=()),
-        available_values=(_grouping_grain_value(),),
+        available_values=(_temporal_grain_value(),),
         bound_sources=(_derived_group_bound_source(group_field_type="string"),),
     )
     turn = PatternFactPlanTurnPrompt(
@@ -675,16 +667,15 @@ def test_derived_group_key_has_no_fact_plan_when_group_evidence_is_not_temporal(
         )
 
 
-def test_bound_grouping_grain_does_not_compete_with_derived_bucket():
+def test_direct_group_field_does_not_compete_with_derived_bucket():
     fact = _derived_group_fact()
     request = FactPlanRequest(
         question="What was the total measured value per day?",
         question_contract=QuestionContract(
             requested_facts=(fact,),
-            question_inputs=(_grouping_grain_input(),),
         ),
         relation_catalog=RelationCatalog(reads=()),
-        available_values=(_grouping_grain_value(),),
+        available_values=(_temporal_grain_value(),),
         bound_sources=(_direct_group_bound_source(),),
     )
     turn = PatternFactPlanTurnPrompt(
@@ -709,13 +700,12 @@ def test_derived_group_key_compiles_generic_projection_before_aggregate():
     fact = _derived_group_fact()
     contract = QuestionContract(
         requested_facts=(fact,),
-        question_inputs=(_grouping_grain_input(),),
     )
     plan = compile_pattern_answer_plan(
         _derived_group_payload(),
         bound_sources=(_derived_group_bound_source(),),
         requested_facts=(fact,),
-        available_values=(_grouping_grain_value(),),
+        available_values=(_temporal_grain_value(),),
         question_contract=contract,
     )
 
@@ -737,8 +727,8 @@ def test_derived_group_key_compiles_generic_projection_before_aggregate():
     assert bucket.function is ExpressionFunction.TEMPORAL_BUCKET
     assert isinstance(bucket.arguments[0], FieldRef)
     assert bucket.arguments[0].field_id == "occurred_at"
-    assert isinstance(bucket.arguments[1], ParameterRef)
-    assert bucket.arguments[1].parameter_id == "question.qi_grain"
+    assert isinstance(bucket.arguments[1], ConstantRef)
+    assert bucket.arguments[1].value.payload.canonical_value() == "day"
     assert isinstance(bucket.arguments[2], EnvironmentRef)
 
 
@@ -746,13 +736,12 @@ def test_derived_group_key_executes_with_explicit_timezone():
     fact = _derived_group_fact()
     contract = QuestionContract(
         requested_facts=(fact,),
-        question_inputs=(_grouping_grain_input(),),
     )
     plan = compile_pattern_answer_plan(
         _derived_group_payload(),
         bound_sources=(_derived_group_bound_source(),),
         requested_facts=(fact,),
-        available_values=(_grouping_grain_value(),),
+        available_values=(_temporal_grain_value(),),
         question_contract=contract,
     )
 
@@ -786,7 +775,16 @@ def test_derived_group_key_executes_with_explicit_timezone():
                 )
                 for operation in plan.operations
             ),
-            scalar_inputs=(ScalarInput(id="parameter:question.qi_grain", value="day"),),
+            scalar_inputs=(
+                ScalarInput(
+                    id=(
+                        "constant:context.group_key.rf_answer.answer_1.grain"
+                        "@context-value@1"
+                    ),
+                    value="day",
+                    value_type="string",
+                ),
+            ),
             environment_values={"ANCHOR_TIMEZONE": "America/New_York"},
             environment_types={"ANCHOR_TIMEZONE": "string"},
         )

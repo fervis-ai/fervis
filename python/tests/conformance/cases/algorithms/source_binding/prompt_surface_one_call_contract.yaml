@@ -39,7 +39,5 @@ expect:
         - test_effect
       normal_instance_test_result:
         - role_match_basis
-        - explicit_user_override_evidence
-        - explicit_user_override_applies
         - population_consequence
         - disposition

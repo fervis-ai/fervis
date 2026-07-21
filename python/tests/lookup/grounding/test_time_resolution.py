@@ -3,6 +3,7 @@ from tests.lookup.grounding._support import (
     CALENDAR_START_PARAM_ID,
     GroundedValueCertificationMethod,
     GroundingRequest,
+    GroundingRequestedFactCard,
     GroundingTurnPrompt,
     KnownInputSource,
     KnownTimeResolutionTask,
@@ -32,6 +33,50 @@ from tests.lookup.grounding._fixtures import (
     _quarter_question_contract,
     _time_question_contract,
 )
+
+
+def test_time_grounding_fact_context_uses_structured_fact_fields() -> None:
+    request = GroundingRequest(
+        question="How much revenue happened this month?",
+        tasks=(),
+        resolver_catalog=RelationCatalog(),
+        time_tasks=(
+            KnownTimeResolutionTask(
+                known_input_id="input_date",
+                known_input_text="this month",
+                requested_fact_id="fact_1",
+                time_expression="this month",
+                requested_facts=(
+                    GroundingRequestedFactCard(
+                        requested_fact_id="fact_1",
+                        answer_fact="revenue this month",
+                        answer_population_counted_unit="sale",
+                        answer_outputs=(
+                            {"id": "revenue", "description": "sales revenue"},
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    task = GroundingTurnPrompt(request).time_inputs_payload()[
+        "known_time_resolution_tasks"
+    ][0]
+
+    assert task["question_context"] == {
+        "question": "How much revenue happened this month?",
+        "requested_facts": [
+            {
+                "requested_fact_id": "fact_1",
+                "answer_fact": "revenue this month",
+                "answer_population": {"counted_unit": "sale"},
+                "answer_outputs": [
+                    {"id": "revenue", "description": "sales revenue"}
+                ],
+            }
+        ],
+    }
 
 
 def test_grounding_time_schema_rejects_relative_word_as_yearless_point_date():

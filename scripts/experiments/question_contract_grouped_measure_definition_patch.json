@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "If the question asks for counts per group, by group, or for each specified key, use grouped_aggregate.",
+      "new": "If the question asks for any aggregate measure once per group, including a count, sum, average, minimum, or maximum, use grouped_aggregate.",
+      "expected_count": 1
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "List all completed in-person sale records from March 2026.",
+      "new": "List all completed in-person sales from March 2026.",
+      "expected_count": 1
+    },
+    {
+      "old": "After writing answer_population, inspect each EXPLICIT_USER_CONSTRAINT. When the question supplies a concrete value used by that test, declare the smallest copied value phrase as one predicate_value and reference that input from the test. Do not turn the answer subject or counted unit into an input.\nA predicate_value does not identify one particular resource.",
+      "new": "After writing answer_population, inspect each EXPLICIT_USER_CONSTRAINT. A predicate_value is an explicit word or phrase that states which property value qualifying candidates must have. This includes adjectival and compound modifiers; copy the user's phrase without inferring catalog field boundaries.\nEach predicate_value supplies the membership test or tests whose required property value it states. A compound phrase may supply several tests. Do not turn the answer subject or counted unit into an input.",
+      "expected_count": 1
+    }
+  ]
+}

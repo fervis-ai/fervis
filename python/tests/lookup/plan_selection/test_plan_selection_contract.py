@@ -15,6 +15,7 @@ from fervis.lookup.relation_catalog import (
 )
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
+    GroupKeySourceKind,
     KnownInputSource,
     LiteralInputRole,
     QuestionContract,
@@ -47,6 +48,8 @@ from fervis.lookup.plan_selection import (
     parse_plan_selection,
 )
 from fervis.lookup.plan_selection.family_specs import PlanSelectionShapeSpec
+from fervis.lookup.plan_selection.model import SourceStrategy
+from fervis.lookup.plan_selection.parser import _minimal_supported_strategies
 from fervis.lookup.plan_selection.source_strategies import source_strategies_by_fact
 from fervis.lookup.fact_plan.fact_plan import (
     BlockedFactBasis,
@@ -62,6 +65,7 @@ def _top_group_expression() -> RequestedFactAnswerExpression:
             id="answer_group",
             description="result group",
             domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+            source_kind=GroupKeySourceKind.SOURCE_VALUE,
         ),
         ordering_basis="aggregate value",
         ordering_direction=RequestedFactOrderingDirection.DESCENDING,
@@ -1037,6 +1041,26 @@ def test_source_alignment_reviews_preserve_multi_member_partial_strategy():
     )
 
 
+def test_direct_singleton_removes_redundant_multi_source_strategy() -> None:
+    direct = SourceStrategy(
+        source_strategy_id="direct",
+        plan_shape="list_rows",
+        required_answer_output_ids=("answer_1",),
+        source_members=(SourceStrategyMember(source_candidate_id="source_rows"),),
+    )
+    joined = SourceStrategy(
+        source_strategy_id="joined",
+        plan_shape="joined_rows",
+        required_answer_output_ids=("answer_1",),
+        source_members=(
+            SourceStrategyMember(source_candidate_id="source_detail"),
+            SourceStrategyMember(source_candidate_id="source_rows"),
+        ),
+    )
+
+    assert _minimal_supported_strategies((joined, direct)) == (direct,)
+
+
 def test_plan_selection_candidates_are_limited_to_answer_expression_family():
     payload = PlanSelectionTurnPrompt(
         _plan_selection_request()
@@ -1806,6 +1830,7 @@ def test_grouped_operation_candidate_combines_multiple_identity_outputs_with_met
                 id="answer_1",
                 description="staff, product, and shade",
                 domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
             ),
             selection_kind=ResultSelectionKind.ALL_RESULTS,
         ),
@@ -2009,10 +2034,165 @@ def test_plan_selection_projects_computed_scalar_from_two_distinct_values():
         item
         for item in payload["requested_fact_source_strategies"][0]["source_strategies"]
         if item["plan_shape"] == "computed_scalar"
+        and len(item["source_members"]) == 2
     )
     assert {
         member["source_candidate_id"] for member in source_strategy["source_members"]
     } == {"value_1", "value_2"}
+
+
+def test_plan_selection_projects_computed_scalar_from_one_source_value():
+    fraction = RequestedFactLiteralInput(
+        id="fraction",
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text="10%",
+        resolved_value_text="10%",
+        role=LiteralInputRole.FORMULA_VALUE,
+    )
+    fact = RequestedFact(
+        id="fact_1",
+        description="a fixed fraction of one known total",
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR,
+        ),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1",
+                role="ANSWER_VALUE",
+                description="fraction of the total",
+            ),
+        ),
+        known_inputs=(fraction,),
+        input_refs=("fraction",),
+    )
+    request = PlanSelectionRequest(
+        question="What is a fixed fraction of the total?",
+        question_contract=QuestionContract(
+            question_inputs=(fraction,),
+            requested_facts=(fact,),
+        ),
+        requested_facts=(fact,),
+        relation_catalog=RelationCatalog(reads=()),
+        source_candidate_payload={
+            "requested_fact_sources": [],
+            "value_source_candidates": [
+                {
+                    "source_candidate_id": "total_value",
+                    "kind": "value",
+                    "value_id": "total_value",
+                    "type": "number",
+                    "value": 42,
+                    "applies_to_requested_facts": ["fact_1"],
+                },
+                {
+                    "source_candidate_id": "other_value",
+                    "kind": "value",
+                    "value_id": "other_value",
+                    "type": "number",
+                    "value": 7,
+                    "applies_to_requested_facts": ["fact_1"],
+                },
+            ],
+        },
+        conversation_context={},
+    )
+
+    payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
+
+    strategies = [
+        item
+        for item in payload["requested_fact_source_strategies"][0][
+            "source_strategies"
+        ]
+        if item["plan_shape"] == "computed_scalar"
+    ]
+    assert {len(strategy["source_members"]) for strategy in strategies} == {1, 2}
+    assert any(
+        [
+            member["source_candidate_id"]
+            for member in strategy["source_members"]
+        ]
+        == ["total_value"]
+        for strategy in strategies
+    )
+
+
+def test_plan_selection_projects_computed_scalar_from_one_measured_read():
+    fraction = RequestedFactLiteralInput(
+        id="fraction",
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text="10%",
+        resolved_value_text="10%",
+        role=LiteralInputRole.FORMULA_VALUE,
+    )
+    fact = RequestedFact(
+        id="fact_1",
+        description="a fixed fraction of sales revenue",
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR,
+        ),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1",
+                role="MEASURED_VALUE",
+                description="fraction of sales revenue",
+            ),
+        ),
+        known_inputs=(fraction,),
+        input_refs=("fraction",),
+    )
+    request = PlanSelectionRequest(
+        question="What is a fixed fraction of sales revenue?",
+        question_contract=QuestionContract(
+            question_inputs=(fraction,),
+            requested_facts=(fact,),
+        ),
+        requested_facts=(fact,),
+        relation_catalog=RelationCatalog(reads=()),
+        source_candidate_payload={
+            "requested_fact_sources": [
+                {
+                    "requested_fact_id": "fact_1",
+                    "source_contexts": [
+                        {
+                            "context_id": "fact_1:sources",
+                            "source_options": [
+                                {
+                                    "source_candidate_id": "sales_read",
+                                    "kind": "new_api_read",
+                                    "read_id": "list_sales",
+                                    "fields": [
+                                        {"field_id": "amount", "type": "number"}
+                                    ],
+                                    "fulfillment_support_sets": [
+                                        _metric_support_set(
+                                            "support.sales.answer_1.amount",
+                                            answer_output_id="answer_1",
+                                            slot_id="slot.sales.answer_1.amount",
+                                            evidence_id="sales.data.amount",
+                                            field_id="amount",
+                                            type="number",
+                                        )
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+        conversation_context={},
+    )
+
+    payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
+
+    strategies = payload["requested_fact_source_strategies"][0]["source_strategies"]
+    assert [
+        member["source_candidate_id"]
+        for strategy in strategies
+        if strategy["plan_shape"] == "computed_scalar"
+        for member in strategy["source_members"]
+    ] == ["sales_read"]
 
 
 def test_plan_selection_keeps_value_source_role_when_value_has_fulfillment_support():

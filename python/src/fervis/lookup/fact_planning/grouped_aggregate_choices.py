@@ -42,7 +42,7 @@ from fervis.lookup.source_binding import (
     entity_evidence_entity_kind,
     entity_evidence_key_id,
 )
-from fervis.lookup.question_contract import RequestedFact
+from fervis.lookup.question_contract import GroupKeySourceKind, RequestedFact
 
 
 GROUPED_AGGREGATE_PLAN_SHAPES = frozenset({"aggregate_by_group"})
@@ -283,7 +283,10 @@ def _selected_group_key_source_field(
             _text(item.get("source_field_id"))
             for item in group_key_source_field_candidates(choice)
         )
-        if group_key is not None and group_key.derivation_input_refs
+        if (
+            group_key is not None
+            and group_key.source_kind is GroupKeySourceKind.TEMPORAL_BUCKET
+        )
         else ()
     )
     selected = (

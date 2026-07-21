@@ -54,10 +54,11 @@ def generate_pattern_fact_plan(
     model_key: str,
     max_thinking_tokens: int,
 ) -> FactPlanTurnResult:
-    invocation = PatternFactPlanTurnPrompt(
+    prompt = PatternFactPlanTurnPrompt(
         request,
         plan_selection=plan_selection,
-    ).to_model_invocation(
+    )
+    invocation = prompt.to_model_invocation(
         build_turn_prompt_context(
             current_question=request.question,
             conversation_context=request.conversation_context,
@@ -100,6 +101,7 @@ def generate_pattern_fact_plan(
             selected_source_strategy_ids=tuple(
                 plan.source_strategy_id for plan in plan_selection.plan_selections
             ),
+            source_derived_scalar_values=prompt.source_derived_scalar_values(),
         )
     except Exception as exc:
         raise FactPlanGenerationError(

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
-
 from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
 
 
@@ -30,14 +28,17 @@ class ParamDecisionOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class ResolvedInputApplicationOutput(ProviderOutput):
-    target_kind: str
-    target_id: str
-    value_id: str
+class ResolvedInputTargetApplicationOutput(ProviderOutput):
+    application_target_id: str
     value_component: str
     match_basis_explanation: str
+
+
+@dataclass(frozen=True)
+class ResolvedInputApplicationOutput(ProviderOutput):
+    value_id: str
+    applications: tuple[ResolvedInputTargetApplicationOutput, ...]
     population_test_results: dict[str, RowPredicatePopulationTestResultOutput]
-    application_value_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -99,16 +100,8 @@ class NormalInstanceDispositionOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class NormalInstanceOverrideEvidenceOutput(ProviderOutput):
-    source_text: str
-    reason: str
-
-
-@dataclass(frozen=True)
 class NormalInstanceTestResultOutput(ProviderOutput):
     role_match_basis: str
-    explicit_user_override_evidence: tuple[NormalInstanceOverrideEvidenceOutput, ...]
-    explicit_user_override_applies: bool
     population_consequence: str
     disposition: NormalInstanceDispositionOutput
 

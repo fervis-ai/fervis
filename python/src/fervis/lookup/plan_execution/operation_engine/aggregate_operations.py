@@ -111,7 +111,7 @@ def _order(
     input_relation = _relation(relations, spec.input_relation)
     rows = tuple(input_relation.rows)
     field_types = dict(input_relation.field_types or {})
-    order_by = (*spec.order_by, *spec.tie_breakers)
+    order_by = spec.order_by
 
     def key(row: Row) -> tuple[object, ...]:
         values: list[object] = []
@@ -143,8 +143,8 @@ def _order(
             raise RelationEngineError("order take requires a positive integer") from exc
     elif not isinstance(spec.selection, KeepAll):
         assert_never(spec.selection)
-    _verify_order_keys_are_unique_at_limit(sorted_keyed_rows, limit=limit)
-    sorted_rows = [dict(row) for _, row in sorted_keyed_rows[:limit]]
+    selected_rows = _rows_through_boundary_ties(sorted_keyed_rows, limit=limit)
+    sorted_rows = [dict(row) for _, row in selected_rows]
     return _operation_relation(
         operation,
         sorted_rows,
@@ -155,13 +155,17 @@ def _order(
     )
 
 
-def _verify_order_keys_are_unique_at_limit(
+def _rows_through_boundary_ties(
     keyed_rows: list[tuple[tuple[object, ...], Row]],
     *,
     limit: int,
-) -> None:
-    for index in range(1, min(limit, len(keyed_rows))):
-        if keyed_rows[index - 1][0] == keyed_rows[index][0]:
-            raise RelationEngineError("order requires unique ordering keys")
-    if limit < len(keyed_rows) and keyed_rows[limit - 1][0] == keyed_rows[limit][0]:
-        raise RelationEngineError("order requires unique ordering keys")
+) -> list[tuple[tuple[object, ...], Row]]:
+    selected = keyed_rows[:limit]
+    if not selected or limit >= len(keyed_rows):
+        return selected
+    boundary_key = selected[-1][0]
+    index = limit
+    while index < len(keyed_rows) and keyed_rows[index][0] == boundary_key:
+        selected.append(keyed_rows[index])
+        index += 1
+    return selected

@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "For a positive review, include every required request parameter with no default. Include an optional request parameter only when it performs the lookup.",
+      "new": "For a positive review, include every required request parameter with no default. Include an optional request parameter only when it performs the lookup. For PRIMARY_KEY, a positive route must take lookup_text as the canonical_result component. A route that takes only other request parameters is negative, even if its response returns the canonical key.",
+      "expected_count": 1
+    }
+  ]
+}

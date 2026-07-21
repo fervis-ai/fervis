@@ -33,6 +33,7 @@ from fervis.lookup.answer_program.expressions import (
     BinaryExpression,
     ExpressionBinaryOperator,
     FieldRef,
+    NodeOutputRef,
 )
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
@@ -474,7 +475,7 @@ def test_universal_condition_requires_subject_dimension_and_predicate():
     verify_fact_plan(_plan_with(valid))
 
 
-def test_order_requires_ordering_and_deterministic_tie_breakers():
+def test_order_requires_ordering_keys():
     invalid = Operation(
         id="ranked",
         spec=OrderSpec(
@@ -489,7 +490,6 @@ def test_order_requires_ordering_and_deterministic_tie_breakers():
         spec=OrderSpec(
             input_relation="totals",
             order_by=(SortKey(field="total", direction=SortDirection.DESC),),
-            tie_breakers=(SortKey(field="name", direction=SortDirection.ASC),),
             selection=Take(limit=_rank_limit(1)),
         ),
         output_relation="result",
@@ -755,6 +755,107 @@ def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence(
     )
 
     with pytest.raises(VerificationError, match="terminal relation output"):
+        verify_fact_plan(plan)
+
+
+def test_scalar_result_consumes_the_relation_node_that_produces_its_operand():
+    plan = FactPlan(
+        outcome=AnswerProgram(
+            fulfillment=(
+                FactFulfillment(
+                    requested_fact_id="rf_answer",
+                    answer_output_id="answer",
+                    result_output_id="answer",
+                ),
+            ),
+            relations=(_relation("rows"),),
+            operations=(
+                Operation(
+                    id="total",
+                    spec=AggregateSpec(
+                        input_relation="rows",
+                        group_by=(),
+                        aggregations=(
+                            AggregationSpec(
+                                function=AggregationFunction.SUM,
+                                input_field="total",
+                                output_field="total",
+                            ),
+                        ),
+                    ),
+                    output_relation="total_row",
+                ),
+                Operation(
+                    id="scaled",
+                    spec=ComputeSpec(
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.MULTIPLY,
+                            left=NodeOutputRef("total", "total"),
+                            right=_number_ref(input_id="fraction", value="0.1"),
+                        ),
+                        output_scalar="scaled",
+                    ),
+                ),
+            ),
+            result_projection=ResultProjection(
+                scalar_outputs=(
+                    ScalarResultOutput(id="answer", scalar_id="scaled"),
+                ),
+            ),
+        )
+    )
+
+    verify_fact_plan(plan)
+
+
+def test_grouped_relation_output_cannot_masquerade_as_one_scalar_operand():
+    plan = FactPlan(
+        outcome=AnswerProgram(
+            fulfillment=(
+                FactFulfillment(
+                    requested_fact_id="rf_answer",
+                    answer_output_id="answer",
+                    result_output_id="answer",
+                ),
+            ),
+            relations=(_relation("rows"),),
+            operations=(
+                Operation(
+                    id="totals_by_group",
+                    spec=AggregateSpec(
+                        input_relation="rows",
+                        group_by=("field.group",),
+                        aggregations=(
+                            AggregationSpec(
+                                function=AggregationFunction.SUM,
+                                input_field="total",
+                                output_field="total",
+                            ),
+                        ),
+                    ),
+                    output_relation="group_totals",
+                ),
+                Operation(
+                    id="scaled",
+                    spec=ComputeSpec(
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.MULTIPLY,
+                            left=NodeOutputRef("totals_by_group", "total"),
+                            right=_number_ref(input_id="fraction", value="0.1"),
+                        ),
+                        output_scalar="scaled",
+                    ),
+                ),
+            ),
+            result_projection=ResultProjection(
+                scalar_outputs=(
+                    ScalarResultOutput(id="answer", scalar_id="scaled"),
+                ),
+            ),
+        )
+    )
+
+    with pytest.raises(VerificationError, match="unbound scalar input"):
         verify_fact_plan(plan)
 
 
@@ -1033,9 +1134,6 @@ def test_order_rejects_non_positive_take_limit():
             spec=OrderSpec(
                 input_relation="rows",
                 order_by=(SortKey(field="field.value", direction=SortDirection.ASC),),
-                tie_breakers=(
-                    SortKey(field="field.value", direction=SortDirection.ASC),
-                ),
                 selection=Take(limit=_rank_limit(0)),
             ),
             output_relation="result",

@@ -1,0 +1,73 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "When a time input constrains an answer_request, assign it one POPULATION_TESTS use_id and reference that use_id from the applicable EXPLICIT_USER_CONSTRAINT.",
+      "new": "When a time input constrains an answer_request, list the applicable EXPLICIT_USER_CONSTRAINT test_id on its POPULATION_TESTS use.",
+      "expected_count": 1
+    },
+    {
+      "old": "Within each answer_request, author answer_expression, then question_input_uses, then answer_subject, answer_population, and answer_outputs.",
+      "new": "Within each answer_request, author answer_expression, then answer_subject and answer_population, then question_input_uses, and then answer_outputs.",
+      "expected_count": 1
+    },
+    {
+      "old": "Create exactly one question_input_uses record for each fact-local input_ref. When several population tests consume that input, they reuse its one use_id; do not create one use record per test.",
+      "new": "Create exactly one question_input_uses record for each fact-local input_ref.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests, and give that use a unique use_id.",
+      "new": "Give each EXPLICIT_USER_CONSTRAINT a unique test_id. Use POPULATION_TESTS when the input is an operand of one or more such tests, and list those test IDs in membership_test_ids.",
+      "expected_count": 1
+    },
+    {
+      "old": "Each EXPLICIT_USER_CONSTRAINT lists the use_id of every POPULATION_TESTS operand it consumes in question_input_use_refs.\nOne population test may reference several POPULATION_TESTS uses, and one POPULATION_TESTS use may be referenced by several tests.\nMembership-test question_input_use_refs may name only POPULATION_TESTS uses. GROUP_KEY, COMPUTE_EXPRESSION, and RESULT_LIMIT inputs are never membership-test operands.",
+      "new": "One POPULATION_TESTS use may list several membership_test_ids, and one membership test may be listed by several POPULATION_TESTS uses. GROUP_KEY, COMPUTE_EXPRESSION, and RESULT_LIMIT uses have no membership_test_ids.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "test_id": {"type": "string", "minLength": 1},
+          "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
+          "test_question": {"type": "string", "minLength": 1}
+        },
+        "required": ["test_id", "polarity", "test_question"]
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses/items/oneOf/1/properties/use_id"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses/items/oneOf/1/properties/membership_test_ids",
+      "value": {
+        "type": "array",
+        "minItems": 1,
+        "items": {"type": "string", "minLength": 1}
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses/items/oneOf/1/required",
+      "value": ["input_ref", "owner_kind", "membership_test_ids"]
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "move_before",
+      "from": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_outputs"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "If the question asks for counts per group, by group, or for each specified key, use grouped_aggregate.",
+      "new": "If the question asks for any aggregate measure once per group, including a count, sum, average, minimum, or maximum, use grouped_aggregate.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use answer_expression.group_key.domain=SPECIFIED_QUESTION_INPUTS when groups are exactly declared question_inputs; otherwise use SOURCE_RESULT_VALUES.",
+      "new": "Use SPECIFIED_QUESTION_INPUTS only for a closed set of concrete group-member values supplied as question_inputs. Use SOURCE_RESULT_VALUES when a grouping dimension obtains its group-member values from source rows.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use grouping_grain when a supplied unit such as day, week, month, or quarter states how source values are divided into result groups.\nA grouping_grain is neither the queried time period nor a group member. For 'events per day during March,' day is the grouping_grain and March is the time_value.",
+      "new": "A grouping_grain is a supplied temporal unit used to derive buckets from a timestamp.\nA grouping dimension is an existing source attribute used directly as the group key; it is not a grouping_grain or a question input.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use GROUP_KEY when the input defines a requested result group under SPECIFIED_QUESTION_INPUTS.",
+      "new": "GROUP_KEY owns a concrete group-member value supplied by the question.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use GROUP_KEY_DERIVATION when a grouping_grain determines how source values are converted into a SOURCE_RESULT_VALUES group key.",
+      "new": "GROUP_KEY_DERIVATION owns a grouping_grain used to derive group-member values from source rows.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/question_inputs/items/oneOf/5/properties/operand_text",
+      "value": {
+        "enum": ["day", "week", "month", "quarter", "year"]
+      }
+    }
+  ]
+}

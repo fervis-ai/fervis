@@ -49,6 +49,7 @@ def parse_param_decision_binding_sets(
     answer_population: AnswerPopulation,
     parameter_namespace: str,
     effective_param_ids: tuple[str, ...] | None = None,
+    prebound_param_ids: tuple[str, ...] = (),
 ) -> ParamDecisionParse:
     params_by_id = {
         param.id: param for param in candidate.params if _param_is_model_bindable(param)
@@ -149,10 +150,15 @@ def parse_param_decision_binding_sets(
                 ),
             )
         )
+    prebound = set(prebound_param_ids)
     missing_param_ids = {
         param_id
         for param_id, param in params_by_id.items()
-        if param_id not in decisions and param.requires_explicit_decision
+        if (
+            param_id not in decisions
+            and param_id not in prebound
+            and param.requires_explicit_decision
+        )
     }
     if missing_param_ids:
         raise ValueError("source binding missing explicit param decision")

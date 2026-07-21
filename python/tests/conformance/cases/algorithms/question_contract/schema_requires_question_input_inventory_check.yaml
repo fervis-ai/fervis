@@ -18,14 +18,7 @@ input:
           subject_text: sales
           instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
         answer_population:
-          population_label: sales
-          counted_unit: sales
           membership_tests:
-            - question_input_use_refs: []
-              test_id: pop_test_1
-              kind: SUBJECT_IDENTITY
-              polarity: MUST_PASS
-              test_question: Does the row/value represent sales?
         answer_outputs:
           - description: sales total
             role: ANSWER_VALUE

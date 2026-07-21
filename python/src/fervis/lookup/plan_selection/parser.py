@@ -87,6 +87,7 @@ def parse_plan_selection(
                 source_alignment_by_id=source_alignment_by_id,
             )
         )
+        aligned_strategies = _minimal_supported_strategies(aligned_strategies)
         if not aligned_strategies:
             blocked_facts.append(
                 _blocked_fact_from_unaligned_reviews(
@@ -163,6 +164,15 @@ def _source_strategy_is_supported(
     if len(member_alignments) == 1:
         return member_alignments[0] is SourceAlignment.DIRECT
     return True
+
+
+def _minimal_supported_strategies(
+    strategies: tuple[SourceStrategy, ...],
+) -> tuple[SourceStrategy, ...]:
+    standalone = tuple(
+        strategy for strategy in strategies if len(strategy.source_members) == 1
+    )
+    return standalone or strategies
 
 
 def _blocked_fact_from_unaligned_reviews(

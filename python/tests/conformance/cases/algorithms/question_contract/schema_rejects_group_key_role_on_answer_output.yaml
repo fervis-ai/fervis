@@ -30,7 +30,8 @@ input:
         family: grouped_aggregate
         group_key:
           description: specified staff member
-          domain: SPECIFIED_QUESTION_INPUTS
+          value_source:
+            kind: specified_question_inputs
       question_input_uses:
       - {input_ref: staff_a, owner_kind: GROUP_KEY}
       - {input_ref: staff_b, owner_kind: GROUP_KEY}
@@ -38,14 +39,7 @@ input:
         subject_text: sales
         instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
       answer_population:
-        population_label: sales
-        counted_unit: sale
         membership_tests:
-        - question_input_use_refs: []
-          test_id: subject_identity
-          kind: SUBJECT_IDENTITY
-          polarity: MUST_PASS
-          test_question: Is this a sale?
       answer_outputs:
       - description: specified staff member
         role: GROUP_KEY

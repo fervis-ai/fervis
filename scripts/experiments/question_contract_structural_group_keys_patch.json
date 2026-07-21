@@ -1,0 +1,19 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Create question_inputs for concrete values supplied by the question or conversation resolution that a population predicate, result key, time constraint, compute expression, or result limit consumes.",
+      "new": "Create question_inputs for concrete values supplied by the question or conversation resolution that a population predicate, time constraint, compute expression, result limit, or closed set of explicitly named group members consumes.",
+      "expected_count": 1
+    },
+    {
+      "old": "Each question_input must have one primary contract role: population predicate operand, result key, time constraint, computation operand, or result limit.",
+      "new": "A grouping dimension or temporal grain is answer_expression structure, not a question_input.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use GROUP_KEY when the input defines a requested result group under SPECIFIED_QUESTION_INPUTS.",
+      "new": "Use GROUP_KEY only when a concrete question input is one member of the closed group set under SPECIFIED_QUESTION_INPUTS.",
+      "expected_count": 1
+    }
+  ]
+}

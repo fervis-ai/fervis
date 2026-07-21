@@ -20,7 +20,6 @@ input:
                   answer_expression: {family: scalar_aggregate}
                   answer_subject: {subject_text: sales}
                   answer_population:
-                    population_label: sales made today
                     counted_unit: sale
                     membership_tests:
                       - {test_id: subject, kind: SUBJECT_IDENTITY, polarity: MUST_PASS, test_question: "Is this a sale?", owned_question_input_refs: []}
@@ -48,7 +47,6 @@ input:
                   answer_expression: {family: scalar_aggregate}
                   answer_subject: {subject_text: sales}
                   answer_population:
-                    population_label: today's sales
                     counted_unit: sale
                     membership_tests:
                       - {test_id: sale_identity, kind: SUBJECT_IDENTITY, polarity: MUST_PASS, test_question: "Does this represent a sale?", owned_question_input_refs: []}

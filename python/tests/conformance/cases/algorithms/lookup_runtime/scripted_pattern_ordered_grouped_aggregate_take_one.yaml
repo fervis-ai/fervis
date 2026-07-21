@@ -13,7 +13,7 @@ input:
     answer_expression_family: grouped_aggregate
     group_key:
       description: location
-      domain: SOURCE_RESULT_VALUES
+      value_source: {kind: source_value}
     ordering: {basis: aggregate metric total, direction: descending}
     selection: {kind: take_one}
     answer_outputs:

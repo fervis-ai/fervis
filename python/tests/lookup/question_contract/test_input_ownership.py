@@ -52,22 +52,28 @@ def _input(
 
 def _membership_test(
     *,
-    test_id: str,
-    kind: str,
     question: str,
-    question_input_use_refs: list[str] | None = None,
+    question_input_refs: list[str],
     comparison_operator: str = "",
 ) -> dict[str, object]:
     payload = {
-        "test_id": test_id,
-        "kind": kind,
+        "population_use_refs": [
+            f"use_{input_ref}" for input_ref in question_input_refs
+        ],
         "polarity": "MUST_PASS",
         "test_question": question,
-        "question_input_use_refs": question_input_use_refs or [],
     }
     if comparison_operator:
         payload["comparison_operator"] = comparison_operator
     return payload
+
+
+def _population_use(input_ref: str) -> dict[str, object]:
+    return {
+        "use_id": f"use_{input_ref}",
+        "input_ref": input_ref,
+        "owner_kind": "POPULATION_TESTS",
+    }
 
 
 def _answer_request(
@@ -80,17 +86,15 @@ def _answer_request(
     return {
         "answer_fact": answer_fact,
         "answer_expression": expression,
+        "question_input_uses": question_input_uses,
         "answer_subject": {
             "subject_text": "sales",
             "instance_interpretation": {"kind": "NORMAL_BUSINESS_INSTANCE"},
         },
         "answer_population": {
-            "population_label": "requested sales",
-            "counted_unit": "sale",
             "membership_tests": membership_tests,
         },
         "answer_outputs": [{"description": "sales count", "role": "ROW_COUNT"}],
-        "question_input_uses": question_input_uses,
     }
 
 
@@ -115,6 +119,9 @@ def _grouped_staff_contract() -> dict[str, object]:
             ),
             _input(input_ref="qi_today", text="today", role="time_value"),
         ],
+        "question_input_inventory_check": {
+            "all_input_like_phrases_declared": True,
+        },
         "answer_requests": [
             _answer_request(
                 answer_fact="sales count for each specified staff member today",
@@ -123,20 +130,15 @@ def _grouped_staff_contract() -> dict[str, object]:
                     "selection": {"kind": "all_results"},
                     "group_key": {
                         "description": "staff member",
-                        "domain": "SPECIFIED_QUESTION_INPUTS",
+                        "value_source": {
+                            "kind": "specified_question_inputs",
+                        },
                     },
                 },
                 membership_tests=[
                     _membership_test(
-                        test_id="t_subject",
-                        kind="SUBJECT_IDENTITY",
-                        question="Is this a sale?",
-                    ),
-                    _membership_test(
-                        test_id="t_today",
-                        kind="EXPLICIT_USER_CONSTRAINT",
                         question="Did the sale occur today?",
-                        question_input_use_refs=["use_today"],
+                        question_input_refs=["qi_today"],
                     ),
                 ],
                 question_input_uses=[
@@ -148,17 +150,10 @@ def _grouped_staff_contract() -> dict[str, object]:
                         "input_ref": "qi_staff_2",
                         "owner_kind": "GROUP_KEY",
                     },
-                    {
-                        "use_id": "use_today",
-                        "input_ref": "qi_today",
-                        "owner_kind": "POPULATION_TESTS",
-                    },
+                    _population_use("qi_today"),
                 ],
             )
         ],
-        "question_input_inventory_check": {
-            "all_input_like_phrases_declared": True,
-        },
     }
 
 
@@ -189,9 +184,41 @@ def test_single_ownership_lowers_to_the_existing_requested_fact_contract() -> No
         (test.id, test.owned_question_input_refs)
         for test in fact.answer_population.membership_tests
     ) == (
-        ("t_subject", ()),
-        ("t_today", ("qi_today",)),
+        ("pop_test_1", ()),
+        ("pop_test_2", ()),
+        ("explicit_user_constraint_1", ("qi_today",)),
     )
+
+
+def test_population_schema_authors_only_explicit_user_constraints() -> None:
+    schema = build_answer_request_contract_schema()
+    population = schema["properties"]["answer_requests"]["items"]["properties"][
+        "answer_population"
+    ]
+
+    assert population["required"] == ["membership_tests"]
+    assert "counted_unit" not in population["properties"]
+    membership_test = population["properties"]["membership_tests"]["items"]
+    assert membership_test["required"] == [
+        "population_use_refs",
+        "polarity",
+        "test_question",
+    ]
+    assert set(membership_test["properties"]) == {
+        "population_use_refs",
+        "polarity",
+        "test_question",
+    }
+
+
+def test_population_membership_reuses_the_owned_input_reference() -> None:
+    payload = _grouped_staff_contract()
+
+    result = _parse(payload)
+
+    assert result.outcome.requested_facts[0].answer_population.membership_tests[
+        2
+    ].owned_question_input_refs == ("qi_today",)
 
 
 def test_one_input_may_supply_multiple_population_tests() -> None:
@@ -203,36 +230,22 @@ def test_one_input_may_supply_multiple_population_tests() -> None:
     }
     request["answer_population"]["membership_tests"] = [
         _membership_test(
-            test_id="t_subject",
-            kind="SUBJECT_IDENTITY",
-            question="Is this a sale?",
-        ),
-        _membership_test(
-            test_id="t_started",
-            kind="EXPLICIT_USER_CONSTRAINT",
             question="Did the sale start after today?",
-            question_input_use_refs=["use_today"],
+            question_input_refs=["qi_today"],
         ),
         _membership_test(
-            test_id="t_finished",
-            kind="EXPLICIT_USER_CONSTRAINT",
             question="Did the sale finish after today?",
-            question_input_use_refs=["use_today"],
+            question_input_refs=["qi_today"],
         ),
     ]
-    request["question_input_uses"] = [
-        {
-            "use_id": "use_today",
-            "input_ref": "qi_today",
-            "owner_kind": "POPULATION_TESTS",
-        }
-    ]
+    request["question_input_uses"] = [_population_use("qi_today")]
     payload["question_inputs"] = [payload["question_inputs"][2]]
 
     result = _parse(payload)
 
     tests = result.outcome.requested_facts[0].answer_population.membership_tests
     assert tuple(test.owned_question_input_refs for test in tests) == (
+        (),
         (),
         ("qi_today",),
         ("qi_today",),
@@ -245,35 +258,20 @@ def test_multiple_inputs_may_supply_one_population_test() -> None:
     request["answer_expression"] = {"family": "scalar_aggregate"}
     request["answer_population"]["membership_tests"] = [
         _membership_test(
-            test_id="t_subject",
-            kind="SUBJECT_IDENTITY",
-            question="Is this a sale?",
-        ),
-        _membership_test(
-            test_id="t_staff",
-            kind="EXPLICIT_USER_CONSTRAINT",
             question="Is the sale associated with a requested staff member?",
-            question_input_use_refs=["use_staff_1", "use_staff_2"],
+            question_input_refs=["qi_staff_1", "qi_staff_2"],
         ),
     ]
     request["question_input_uses"] = [
-        {
-            "use_id": "use_staff_1",
-            "input_ref": "qi_staff_1",
-            "owner_kind": "POPULATION_TESTS",
-        },
-        {
-            "use_id": "use_staff_2",
-            "input_ref": "qi_staff_2",
-            "owner_kind": "POPULATION_TESTS",
-        },
+        _population_use("qi_staff_1"),
+        _population_use("qi_staff_2"),
     ]
     payload["question_inputs"] = payload["question_inputs"][:2]
 
     result = _parse(payload)
 
     assert result.outcome.requested_facts[0].answer_population.membership_tests[
-        1
+        2
     ].owned_question_input_refs == ("qi_staff_1", "qi_staff_2")
 
 
@@ -284,28 +282,14 @@ def test_one_declared_input_may_be_owned_independently_by_multiple_facts() -> No
     request["answer_expression"] = {"family": "scalar_aggregate"}
     request["answer_population"]["membership_tests"] = [
         _membership_test(
-            test_id="t_subject",
-            kind="SUBJECT_IDENTITY",
-            question="Is this a sale?",
-        ),
-        _membership_test(
-            test_id="t_today",
-            kind="EXPLICIT_USER_CONSTRAINT",
             question="Did the sale occur today?",
-            question_input_use_refs=["use_today"],
+            question_input_refs=["qi_today"],
         ),
     ]
-    request["question_input_uses"] = [
-        {
-            "use_id": "use_today",
-            "input_ref": "qi_today",
-            "owner_kind": "POPULATION_TESTS",
-        }
-    ]
+    request["question_input_uses"] = [_population_use("qi_today")]
     second = deepcopy(request)
     second["answer_fact"] = "refund count today"
     second["answer_subject"]["subject_text"] = "refunds"
-    second["answer_population"]["counted_unit"] = "refund"
     payload["question_inputs"] = [today]
     payload["answer_requests_count"] = 2
     payload["answer_requests"] = [request, second]
@@ -332,11 +316,6 @@ def test_result_limit_use_lowers_to_the_existing_expression_field() -> None:
                 "selection": {"kind": "take"},
             },
             membership_tests=[
-                _membership_test(
-                    test_id="t_subject",
-                    kind="SUBJECT_IDENTITY",
-                    question="Is this a sale?",
-                )
             ],
             question_input_uses=[
                 {
@@ -364,11 +343,6 @@ def test_formula_value_is_owned_by_the_computed_scalar_expression() -> None:
             answer_fact="10% of the total measured value",
             expression={"family": "computed_scalar"},
             membership_tests=[
-                _membership_test(
-                    test_id="t_subject",
-                    kind="SUBJECT_IDENTITY",
-                    question="Is this a measured total?",
-                )
             ],
             question_input_uses=[
                 {
@@ -397,23 +371,12 @@ def test_formula_value_cannot_be_owned_by_population_tests() -> None:
             expression={"family": "computed_scalar"},
             membership_tests=[
                 _membership_test(
-                    test_id="t_subject",
-                    kind="SUBJECT_IDENTITY",
-                    question="Is this a measured total?",
-                ),
-                _membership_test(
-                    test_id="t_rate",
-                    kind="EXPLICIT_USER_CONSTRAINT",
                     question="Does this value equal 10%?",
-                    question_input_use_refs=["use_rate"],
+                    question_input_refs=["qi_rate"],
                 ),
             ],
             question_input_uses=[
-                {
-                    "use_id": "use_rate",
-                    "input_ref": "qi_rate",
-                    "owner_kind": "POPULATION_TESTS",
-                }
+                _population_use("qi_rate")
             ],
         )
     ]
@@ -432,11 +395,9 @@ def test_formula_value_rejects_unit_bearing_text_without_typed_unit_authority() 
         _parse(payload, question="What is the total plus 10 widgets?")
 
 
-def test_grouping_grain_is_owned_by_source_group_key_derivation() -> None:
+def test_temporal_group_key_owns_its_grain_without_a_question_input() -> None:
     payload = _grouped_staff_contract()
-    payload["question_inputs"] = [
-        _input(input_ref="qi_grain", text="day", role="grouping_grain")
-    ]
+    payload["question_inputs"] = []
     payload["answer_requests"] = [
         _answer_request(
             answer_fact="event count per day",
@@ -444,23 +405,13 @@ def test_grouping_grain_is_owned_by_source_group_key_derivation() -> None:
                 "family": "grouped_aggregate",
                 "group_key": {
                     "description": "event day",
-                    "domain": "SOURCE_RESULT_VALUES",
+                    "value_source": {"kind": "temporal_bucket", "grain": "day"},
                 },
                 "selection": {"kind": "all_results"},
             },
             membership_tests=[
-                _membership_test(
-                    test_id="t_subject",
-                    kind="SUBJECT_IDENTITY",
-                    question="Is this an event?",
-                )
             ],
-            question_input_uses=[
-                {
-                    "input_ref": "qi_grain",
-                    "owner_kind": "GROUP_KEY_DERIVATION",
-                }
-            ],
+            question_input_uses=[],
         )
     ]
 
@@ -469,79 +420,39 @@ def test_grouping_grain_is_owned_by_source_group_key_derivation() -> None:
     expression = result.outcome.requested_facts[0].answer_expression
     assert expression is not None
     assert expression.group_key is not None
-    assert expression.group_key.derivation_input_refs == ("qi_grain",)
-
-
-def test_grouping_grain_cannot_be_owned_by_population_tests() -> None:
-    payload = _grouped_staff_contract()
-    payload["question_inputs"] = [
-        _input(input_ref="qi_grain", text="day", role="grouping_grain")
-    ]
-    payload["answer_requests"] = [
-        _answer_request(
-            answer_fact="event count per day",
-            expression={
-                "family": "grouped_aggregate",
-                "group_key": {
-                    "description": "event day",
-                    "domain": "SOURCE_RESULT_VALUES",
-                },
-                "selection": {"kind": "all_results"},
-            },
-            membership_tests=[
-                _membership_test(
-                    test_id="t_grain",
-                    kind="EXPLICIT_USER_CONSTRAINT",
-                    question="Did this event happen on a day?",
-                    question_input_use_refs=["use_grain"],
-                )
-            ],
-            question_input_uses=[
-                {
-                    "use_id": "use_grain",
-                    "input_ref": "qi_grain",
-                    "owner_kind": "POPULATION_TESTS",
-                }
-            ],
-        )
-    ]
-
-    with pytest.raises(ValueError, match="grouping_grain.*GROUP_KEY_DERIVATION"):
-        _parse(payload, question="How many events were recorded per day?")
+    assert expression.group_key.source_kind.value == "temporal_bucket"
+    assert expression.group_key.temporal_grain == "day"
+    assert result.outcome.question_inputs == ()
 
 
 @pytest.mark.parametrize(
     ("mutate", "error"),
     [
         (
-            lambda payload: payload["answer_requests"][0]["question_input_uses"].append(
-                {
-                    "input_ref": "missing",
-                    "owner_kind": "GROUP_KEY",
-                }
-            ),
+            lambda payload: payload["answer_requests"][0][
+                "question_input_uses"
+            ].append({"input_ref": "missing", "owner_kind": "GROUP_KEY"}),
             "unknown question input",
         ),
         (
-            lambda payload: payload["answer_requests"][0]["question_input_uses"].append(
-                {
-                    "input_ref": "qi_staff_1",
-                    "owner_kind": "GROUP_KEY",
-                }
-            ),
+            lambda payload: payload["answer_requests"][0][
+                "question_input_uses"
+            ].append({"input_ref": "qi_staff_1", "owner_kind": "GROUP_KEY"}),
             "duplicates question input",
         ),
         (
             lambda payload: payload["answer_requests"][0]["answer_population"][
                 "membership_tests"
-            ][1].update({"question_input_use_refs": ["missing"]}),
-            "unknown question input use",
+            ][0].update({"population_use_refs": ["missing"]}),
+            "references unknown population input use",
         ),
         (
             lambda payload: payload["answer_requests"][0]["answer_population"][
                 "membership_tests"
-            ][1].update({"question_input_use_refs": ["use_today", "use_today"]}),
-            "duplicates question input use",
+            ][0].update(
+                {"population_use_refs": ["use_qi_today", "use_qi_today"]}
+            ),
+            "duplicates population input use",
         ),
     ],
 )
@@ -553,43 +464,34 @@ def test_parser_rejects_invalid_population_ownership(mutate, error: str) -> None
         _parse(payload)
 
 
-def test_parser_rejects_duplicate_population_use_ids() -> None:
-    payload = _grouped_staff_contract()
-    request = payload["answer_requests"][0]
-    request["question_input_uses"][0] = {
-        "use_id": "use_today",
-        "input_ref": "qi_staff_1",
-        "owner_kind": "POPULATION_TESTS",
-    }
-
-    with pytest.raises(ValueError, match="duplicates use ID"):
-        _parse(payload)
-
-
 def test_parser_rejects_explicit_population_test_without_an_operand() -> None:
     payload = _grouped_staff_contract()
     request = payload["answer_requests"][0]
-    request["answer_population"]["membership_tests"][1]["question_input_use_refs"] = []
+    request["answer_population"]["membership_tests"][0][
+        "population_use_refs"
+    ] = []
 
     with pytest.raises(ValueError, match="requires at least one question input"):
         _parse(payload)
 
 
-def test_parser_rejects_group_owner_without_a_specified_input_group_key() -> None:
+def test_parser_rejects_group_members_without_a_specified_input_group_key() -> None:
     payload = _grouped_staff_contract()
     payload["answer_requests"][0]["answer_expression"] = {"family": "scalar_aggregate"}
 
-    with pytest.raises(ValueError, match="GROUP_KEY.*SPECIFIED_QUESTION_INPUTS"):
+    with pytest.raises(
+        ValueError,
+        match="GROUP_KEY requires a specified_question_inputs group key",
+    ):
         _parse(payload)
 
 
 def test_parser_rejects_specified_input_group_key_without_owned_inputs() -> None:
     payload = _grouped_staff_contract()
     request = payload["answer_requests"][0]
-    request["question_input_uses"] = [request["question_input_uses"][2]]
-    payload["question_inputs"] = [payload["question_inputs"][2]]
+    request["question_input_uses"] = request["question_input_uses"][2:]
 
-    with pytest.raises(ValueError, match="requires at least one GROUP_KEY"):
+    with pytest.raises(ValueError, match="SPECIFIED_QUESTION_INPUTS.*GROUP_KEY"):
         _parse(payload)
 
 
@@ -601,9 +503,7 @@ def test_parser_rejects_result_limit_owner_for_non_limit_input() -> None:
         "ordering": {"basis": "sale amount", "direction": "descending"},
         "selection": {"kind": "take"},
     }
-    request["answer_population"]["membership_tests"] = [
-        request["answer_population"]["membership_tests"][0]
-    ]
+    request["answer_population"]["membership_tests"] = []
     request["question_input_uses"] = [
         {
             "input_ref": "qi_today",
@@ -631,23 +531,12 @@ def test_parser_rejects_non_limit_owner_for_result_limit_input() -> None:
             },
             membership_tests=[
                 _membership_test(
-                    test_id="t_subject",
-                    kind="SUBJECT_IDENTITY",
-                    question="Is this a sale?",
-                ),
-                _membership_test(
-                    test_id="t_limit",
-                    kind="EXPLICIT_USER_CONSTRAINT",
                     question="Is this sale within the requested limit?",
-                    question_input_use_refs=["use_limit"],
+                    question_input_refs=["qi_limit"],
                 ),
             ],
             question_input_uses=[
-                {
-                    "use_id": "use_limit",
-                    "input_ref": "qi_limit",
-                    "owner_kind": "POPULATION_TESTS",
-                }
+                _population_use("qi_limit")
             ],
         )
     ]
@@ -671,11 +560,6 @@ def test_parser_rejects_multiple_result_limits_for_one_fact() -> None:
                 "selection": {"kind": "take"},
             },
             membership_tests=[
-                _membership_test(
-                    test_id="t_subject",
-                    kind="SUBJECT_IDENTITY",
-                    question="Is this a sale?",
-                )
             ],
             question_input_uses=[
                 {
@@ -697,27 +581,12 @@ def test_parser_rejects_multiple_result_limits_for_one_fact() -> None:
 def test_legacy_provider_ownership_fields_are_rejected() -> None:
     payload = _grouped_staff_contract()
     request = payload["answer_requests"][0]
-    request["answer_population"]["membership_tests"].insert(
-        1,
-        _membership_test(
-            test_id="t_staff",
-            kind="EXPLICIT_USER_CONSTRAINT",
-            question="Is the sale associated with a requested staff member?",
-        ),
-    )
     del request["question_input_uses"]
     request["used_question_inputs"] = ["qi_staff_1", "qi_staff_2", "qi_today"]
     request["answer_expression"]["group_key"]["question_input_refs"] = [
         "qi_staff_1",
         "qi_staff_2",
     ]
-    for test in request["answer_population"]["membership_tests"]:
-        if test["test_id"] == "t_staff":
-            test["owned_question_input_refs"] = ["qi_staff_1", "qi_staff_2"]
-        elif test["test_id"] == "t_today":
-            test["owned_question_input_refs"] = ["qi_today"]
-        else:
-            test["owned_question_input_refs"] = []
 
     with pytest.raises(ValueError, match="unparsed fields|missing required field"):
         _parse(payload)
@@ -725,8 +594,16 @@ def test_legacy_provider_ownership_fields_are_rejected() -> None:
 
 def test_schema_exposes_only_the_single_ownership_ledger() -> None:
     schema = build_answer_request_contract_schema()
+    top_level_properties = list(schema["properties"])
+    assert top_level_properties.index("answer_requests") < top_level_properties.index(
+        "question_inputs"
+    )
     answer_request = schema["properties"]["answer_requests"]["items"]
     properties = answer_request["properties"]
+    property_names = list(properties)
+    assert property_names.index("question_input_uses") < property_names.index(
+        "answer_population"
+    )
 
     assert "question_input_uses" in properties
     use_schema = properties["question_input_uses"]["items"]
@@ -736,33 +613,37 @@ def test_schema_exposes_only_the_single_ownership_ledger() -> None:
         "GROUP_KEY",
         "POPULATION_TESTS",
         "COMPUTE_EXPRESSION",
-        "GROUP_KEY_DERIVATION",
         "RESULT_LIMIT",
     ]
-    assert "use_id" not in use_schema["oneOf"][0]["properties"]
-    assert "use_id" in use_schema["oneOf"][1]["properties"]
-    assert "use_id" not in use_schema["oneOf"][2]["properties"]
+    branches_by_owner = {
+        branch["properties"]["owner_kind"]["enum"][0]: branch
+        for branch in use_schema["oneOf"]
+    }
+    assert (
+        "use_id" in branches_by_owner["POPULATION_TESTS"]["properties"]
+    )
+    assert all(
+        "use_id" not in branch["properties"]
+        for owner, branch in branches_by_owner.items()
+        if owner != "POPULATION_TESTS"
+    )
     assert "used_question_inputs" not in properties
     grouped_expression = next(
         branch
         for branch in properties["answer_expression"]["oneOf"]
         if branch["properties"]["family"]["enum"] == ["grouped_aggregate"]
     )
+    specified_group_key = grouped_expression["properties"]["group_key"]["oneOf"][0]
     assert (
         "question_input_refs"
-        not in grouped_expression["properties"]["group_key"]["oneOf"][0]["properties"]
+        not in specified_group_key["properties"]["value_source"]["properties"]
     )
-    membership_variants = properties["answer_population"]["properties"][
+    membership_test = properties["answer_population"]["properties"][
         "membership_tests"
-    ]["items"]["oneOf"]
-    assert all(
-        "owned_question_input_refs" not in variant["properties"]
-        for variant in membership_variants
-    )
-    assert all(
-        "question_input_use_refs" in variant["properties"]
-        for variant in membership_variants
-    )
+    ]["items"]
+    assert "population_label" not in properties["answer_population"]["properties"]
+    assert "owned_question_input_refs" not in membership_test["properties"]
+    assert "population_use_refs" in membership_test["properties"]
 
 
 def test_schema_places_comparison_operator_only_on_threshold_inputs() -> None:
@@ -784,10 +665,7 @@ def test_schema_places_comparison_operator_only_on_threshold_inputs() -> None:
     membership_test = schema["properties"]["answer_requests"]["items"]["properties"][
         "answer_population"
     ]["properties"]["membership_tests"]["items"]
-    assert all(
-        "comparison_operator" not in branch["properties"]
-        for branch in membership_test["oneOf"]
-    )
+    assert "comparison_operator" not in membership_test["properties"]
 
 
 def _predicate_contract(
@@ -807,24 +685,11 @@ def _predicate_contract(
     ]
     request = payload["answer_requests"][0]
     request["answer_expression"] = {"family": "scalar_aggregate"}
-    request["question_input_uses"] = [
-        {
-            "use_id": "use_operand",
-            "input_ref": "qi_operand",
-            "owner_kind": "POPULATION_TESTS",
-        }
-    ]
+    request["question_input_uses"] = [_population_use("qi_operand")]
     request["answer_population"]["membership_tests"] = [
         _membership_test(
-            test_id="t_subject",
-            kind="SUBJECT_IDENTITY",
-            question="Is this a sale?",
-        ),
-        _membership_test(
-            test_id="t_operand",
-            kind="EXPLICIT_USER_CONSTRAINT",
             question="Does the sale satisfy the supplied predicate?",
-            question_input_use_refs=["use_operand"],
+            question_input_refs=["qi_operand"],
         ),
     ]
     return payload
@@ -837,7 +702,7 @@ def test_predicate_value_is_owned_by_population_tests() -> None:
     )
 
     known = result.outcome.question_inputs[0]
-    test = result.outcome.requested_facts[0].answer_population.membership_tests[1]
+    test = result.outcome.requested_facts[0].answer_population.membership_tests[2]
     assert known.is_predicate_value
     assert not known.is_reference_value
     assert test.owned_question_input_refs == ("qi_operand",)
@@ -856,7 +721,7 @@ def test_threshold_value_carries_one_ordered_comparison(operator: str) -> None:
     )
 
     known = result.outcome.question_inputs[0]
-    test = result.outcome.requested_facts[0].answer_population.membership_tests[1]
+    test = result.outcome.requested_facts[0].answer_population.membership_tests[2]
     assert known.is_threshold_value
     assert test.comparison_operator.value == operator
 

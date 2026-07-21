@@ -11,7 +11,7 @@ expect:
     answer_contract_properties:
       - kind
       - answer_requests_count
-      - question_inputs
       - answer_requests
+      - question_inputs
       - question_input_inventory_check
     clarifications_have_answer_fields: false

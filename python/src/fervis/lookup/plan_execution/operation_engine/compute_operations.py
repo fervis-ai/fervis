@@ -12,7 +12,7 @@ from .expression_evaluator import ExpressionEnvironment, evaluate_expression
 
 def _compute(
     spec: ComputeSpec,
-    computed_outputs: dict[str, tuple[str, RuntimeValue]],
+    node_outputs: dict[str, dict[str, RuntimeValue]],
     *,
     scalars: dict[str, RuntimeValue],
     scalar_types: dict[str, str],
@@ -23,7 +23,7 @@ def _compute(
             environment=ExpressionEnvironment(
                 scalars=scalars,
                 scalar_types=scalar_types,
-                computed_outputs=computed_outputs,
+                node_outputs=node_outputs,
             ),
         ).value
     except UndefinedOperationError as exc:

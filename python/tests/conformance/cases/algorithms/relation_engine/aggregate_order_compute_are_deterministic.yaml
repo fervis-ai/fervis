@@ -31,7 +31,6 @@ input:
         kind: order
         input_relation: totals_by_group
         order_by: [{field: total, direction: desc}]
-        tie_breakers: [{field: group_id, direction: asc}]
         selection: {kind: take, limit_input_id: limit}
     - id: remaining
       output_relation: ""

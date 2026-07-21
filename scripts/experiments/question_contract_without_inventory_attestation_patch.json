@@ -1,0 +1,21 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Set question_input_inventory_check.all_input_like_phrases_declared=true only when every input-like word or phrase has a question_inputs item.\n",
+      "new": "",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/question_input_inventory_check"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/required/4"
+    }
+  ]
+}

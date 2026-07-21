@@ -1,0 +1,38 @@
+{
+  "prompt_replacements": [
+    {
+      "old": ", \"explicit_user_override_policy\": \"Do not exclude a state role when the user explicitly asks for that state, raw records, all records, or a non-normal population.\"",
+      "new": "",
+      "expected_count": 1
+    },
+    {
+      "old": " Explicit user wording may narrow or override this normal instance interpretation.",
+      "new": "",
+      "expected_count": 1
+    },
+    {
+      "old": "When the membership test has kind=NORMAL_INSTANCE_GUARD, write role_match_basis, explicit_user_override_evidence, explicit_user_override_applies, population_consequence, then disposition.",
+      "new": "When the membership test has kind=NORMAL_INSTANCE_GUARD, write role_match_basis, population_consequence, then disposition.",
+      "expected_count": 1
+    },
+    {
+      "old": "If disposition.matched_excluded_role is an excluded role and explicit_user_override_applies=false, use disposition.test_effect=CONFLICTS_WITH_TEST.\nIf disposition.matched_excluded_role is an excluded role and explicit_user_override_applies=true, use disposition.test_effect=SATISFIES_TEST.",
+      "new": "If disposition.matched_excluded_role is an excluded role, use disposition.test_effect=CONFLICTS_WITH_TEST.",
+      "expected_count": 1
+    },
+    {
+      "old": "explicit_user_override_evidence contains copied question or conversation-resolution text only when the user explicitly asks for that matched excluded state, raw records, all records, or a non-normal population.\nFor NORMAL_INSTANCE_GUARD, explicit_user_override_applies=true requires non-empty explicit_user_override_evidence and disposition.matched_excluded_role must be a role from the profile.",
+      "new": "",
+      "expected_count": 1
+    }
+  ],
+  "schema_property_removals": [
+    {
+      "tool_name": "submit_source_binding",
+      "property_names": [
+        "explicit_user_override_evidence",
+        "explicit_user_override_applies"
+      ]
+    }
+  ]
+}

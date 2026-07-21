@@ -1,5 +1,5 @@
-id: order_take_requires_unique_ordering_keys
-description: Order/take fails closed when ordering keys are not unique and no tie-breaker exists.
+id: order_take_preserves_boundary_ties
+description: Ordered selection keeps every row sharing the selected boundary value.
 migrates:
   - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_rank_requires_unique_ordering_keys_for_limited_results
 kind: algorithm
@@ -22,8 +22,10 @@ input:
         kind: order
         input_relation: items
         order_by: [{field: amount, direction: desc}]
-        tie_breakers: []
         selection: {kind: take, limit_input_id: limit}
 expect:
   result_contains:
-    status: rejected
+    top_item:
+      rows:
+        - {item_id: a, amount: "100"}
+        - {item_id: b, amount: "100"}

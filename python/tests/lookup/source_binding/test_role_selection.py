@@ -6,6 +6,7 @@ from fervis.lookup.plan_selection import (
 from fervis.lookup.plan_selection.model import OperationEvidence
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
+    GroupKeySourceKind,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
@@ -34,6 +35,7 @@ def test_role_binding_preserves_every_plan_supported_by_admitted_evidence():
                 id="answer_1",
                 description="staff",
                 domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
             ),
             selection_kind=ResultSelectionKind.ALL_RESULTS,
         ),

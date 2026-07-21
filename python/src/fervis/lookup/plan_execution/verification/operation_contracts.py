@@ -214,7 +214,7 @@ def _order_dependency_proof(
 ) -> ProofLineage:
     return _fields_dependency_proof(
         contract,
-        tuple(sort.field for sort in (*spec.order_by, *spec.tie_breakers)),
+        tuple(sort.field for sort in spec.order_by),
         "order",
     )
 

@@ -820,19 +820,7 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
                                                 },
                                             },
                                             "answer_population": {
-                                                "population_label": "restricted fact",
-                                                "counted_unit": "restricted fact",
-                                                "membership_tests": [
-                                                    {
-                                                        "test_id": "pop_test_1",
-                                                        "kind": "SUBJECT_IDENTITY",
-                                                        "polarity": "MUST_PASS",
-                                                        "test_question": (
-                                                            "Does the row/value represent restricted fact?"
-                                                        ),
-                                                        "question_input_use_refs": [],
-                                                    }
-                                                ],
+                                                "membership_tests": [],
                                             },
                                             "answer_outputs": [
                                                 {

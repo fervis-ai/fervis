@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fervis.lookup.answer_program.values import LiteralType, LiteralValuePayload
 from fervis.lookup.grounding.resolution.deterministic import (
-    _deterministic_known_inputs,
+    _deterministic_fact_values,
 )
 from fervis.lookup.question_contract import (
     KnownInputSource,
@@ -49,7 +49,7 @@ def _literal(
 
 
 def test_predicate_and_threshold_values_are_grounded_without_identity_tasks() -> None:
-    ledger = _deterministic_known_inputs(
+    ledger = _deterministic_fact_values(
         _contract(
             _literal(
                 "qi_state",
@@ -79,7 +79,7 @@ def test_predicate_and_threshold_values_are_grounded_without_identity_tasks() ->
 
 
 def test_reference_value_is_not_deterministically_grounded_as_a_scalar() -> None:
-    ledger = _deterministic_known_inputs(
+    ledger = _deterministic_fact_values(
         _contract(
             _literal(
                 "qi_resource",

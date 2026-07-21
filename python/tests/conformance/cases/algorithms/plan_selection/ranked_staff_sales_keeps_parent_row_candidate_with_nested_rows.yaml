@@ -26,7 +26,7 @@ input:
     id: fact_1
     description: staff person with the highest sales total for the current month
     answer_expression_family: grouped_aggregate
-    group_key: {description: staff person, domain: SOURCE_RESULT_VALUES}
+    group_key: {description: staff person, domain: SOURCE_RESULT_VALUES, source_kind: source_value}
     ordering_basis: sales total
     ordering_direction: descending
     selection_kind: take_one

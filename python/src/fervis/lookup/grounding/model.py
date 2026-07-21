@@ -40,9 +40,6 @@ class ResourceTypeMatch(StrEnum):
     DIFFERENT_RESOURCE_TYPE = "DIFFERENT_RESOURCE_TYPE"
 
 
-NO_SHOWN_RESOURCE_TYPE = "NO_SHOWN_RESOURCE_TYPE"
-
-
 @dataclass(frozen=True)
 class ExpectedInputIdentity:
     entity_kind: str
@@ -188,7 +185,6 @@ class KnownInputBindingTask:
 class GroundingRequestedFactCard:
     requested_fact_id: str
     answer_fact: str
-    answer_population_label: str = ""
     answer_population_counted_unit: str = ""
     answer_outputs: tuple[dict[str, str], ...] = ()
 
@@ -279,8 +275,9 @@ def resolver_fit_question_for_option(
     candidate = option.candidate
     return (
         f"Does read {candidate.resolver_read_id}, which returns resource_type "
-        f"{candidate.entity_kind}, return the resource type described by the "
-        "input-wide resource_type_x? If not, it cannot resolve "
+        f"{candidate.entity_kind}, return a resource type marked "
+        "SAME_RESOURCE_TYPE in the input-wide resource_type_compatibility? "
+        "If not, it cannot resolve "
         f"{task.lookup_text}. If it does, can this route resolve {task.lookup_text} "
         "under the input-wide identifier_kind?"
     )

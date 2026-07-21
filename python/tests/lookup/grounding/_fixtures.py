@@ -99,7 +99,6 @@ def _city_question_contract(text: str) -> QuestionContract:
                 id="fact_1",
                 description="count of stores in city",
                 answer_population=RequestedFactAnswerPopulation(
-                    population_label="stores in city",
                     counted_unit="store",
                     membership_tests=(
                         RequestedFactAnswerPopulationMembershipTest(
@@ -588,7 +587,7 @@ def _location_with_area_read() -> EndpointRead:
                 ref="field.data.location_id",
                 path="data.location_id",
                 row_path_id="data",
-                type="string",
+                type="uuid",
             ),
             CatalogField(
                 ref="field.data.name",
@@ -607,7 +606,7 @@ def _location_with_area_read() -> EndpointRead:
                 ref="field.data.area.area_id",
                 path="data.area.area_id",
                 row_path_id="data",
-                type="string",
+                type="uuid",
             ),
             CatalogField(
                 ref="field.data.area.name",

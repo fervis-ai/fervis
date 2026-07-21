@@ -326,9 +326,6 @@ def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
             input_relation=str(payload["input_relation"]),
             order_by=tuple(_sort_key(item) for item in payload["order_by"]),
             selection=selection,
-            tie_breakers=tuple(
-                _sort_key(item) for item in payload.get("tie_breakers") or ()
-            ),
         )
     if kind == "compute":
         return ComputeSpec(

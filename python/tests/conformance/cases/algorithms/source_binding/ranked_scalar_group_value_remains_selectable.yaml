@@ -8,7 +8,7 @@ input:
     description: location with the highest total
     subject_text: location
     answer_expression_family: grouped_aggregate
-    group_key: {description: location, domain: SOURCE_RESULT_VALUES}
+    group_key: {description: location, domain: SOURCE_RESULT_VALUES, source_kind: source_value}
   catalog:
     reads:
       - id: list_summary

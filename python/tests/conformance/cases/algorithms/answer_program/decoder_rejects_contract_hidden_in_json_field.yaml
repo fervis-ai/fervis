@@ -65,7 +65,6 @@ input:
                             origin:
                               $enum: ValueExpressionOrigin
                               value: constant
-                    tie_breakers: {$tuple: []}
                     kind: {$enum: OperationKind, value: order}
                 output_relation: ordered
         result_projection: null

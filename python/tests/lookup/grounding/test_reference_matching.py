@@ -59,13 +59,14 @@ def test_selected_staff_lookup_fields_produce_one_canonical_staff_key() -> None:
             "known_input_binding_reviews": {
                 "input_staff": {
                     "resource_type_basis": "Azraah identifies a staff member.",
-                    "resource_type_x": "staff",
+                    "resource_type_compatibility": {
+                        "staff": "SAME_RESOURCE_TYPE"
+                    },
                     "identifier_kind_basis": "Azraah is a descriptive name.",
                     "identifier_kind": "DESCRIPTIVE",
                     "option_reviews": {
                         option.id: {
                             "resource_type": "staff",
-                            "resource_type_match": "SAME_RESOURCE_TYPE",
                             "resolver_fit_question": resolver_fit_question_for_option(
                                 task=task,
                                 option=option,
@@ -301,13 +302,14 @@ def test_resolver_verifies_the_typed_request_value_against_typed_response_fields
             "known_input_binding_reviews": {
                 "input_location": {
                     "resource_type_basis": "The UUID identifies a person.",
-                    "resource_type_x": "person",
+                    "resource_type_compatibility": {
+                        "person": "SAME_RESOURCE_TYPE"
+                    },
                     "identifier_kind_basis": "The lookup is a primary key.",
                     "identifier_kind": "PRIMARY_KEY",
                     "option_reviews": {
                         option.id: {
                             "resource_type": "person",
-                            "resource_type_match": "SAME_RESOURCE_TYPE",
                             "resolver_fit_question": resolver_fit_question_for_option(
                                 task=task,
                                 option=option,

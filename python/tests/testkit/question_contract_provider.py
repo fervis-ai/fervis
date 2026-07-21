@@ -6,8 +6,8 @@ from typing import Any, Iterable, Mapping
 
 @dataclass(frozen=True, slots=True)
 class ProviderQuestionInputOwnership:
-    question_input_uses: tuple[dict[str, str], ...]
-    question_input_use_refs_by_test_id: Mapping[str, tuple[str, ...]]
+    question_input_uses: tuple[dict[str, object], ...]
+    population_use_refs_by_test_id: Mapping[str, tuple[str, ...]]
 
 
 def provider_membership_tests(
@@ -20,27 +20,44 @@ def provider_membership_tests(
     for raw_test in membership_tests:
         test = dict(raw_test)
         test_id = str(test["test_id"])
+        if test.get("kind") != "EXPLICIT_USER_CONSTRAINT":
+            continue
         emitted_test_ids.add(test_id)
+        test.pop("test_id")
+        test.pop("kind")
         test.pop("owned_question_input_refs", None)
-        test["question_input_use_refs"] = list(
-            ownership.question_input_use_refs_by_test_id.get(test_id, ())
+        test.pop("question_input_refs", None)
+        test.pop("question_input_use_refs", None)
+        test["population_use_refs"] = list(
+            ownership.population_use_refs_by_test_id.get(test_id, ())
         )
         output.append(test)
     for test_id in sorted(
-        set(ownership.question_input_use_refs_by_test_id) - emitted_test_ids
+        set(ownership.population_use_refs_by_test_id) - emitted_test_ids
     ):
         output.append(
             {
-                "test_id": test_id,
-                "kind": "EXPLICIT_USER_CONSTRAINT",
                 "polarity": "MUST_PASS",
                 "test_question": "Does this candidate satisfy the supplied input?",
-                "question_input_use_refs": list(
-                    ownership.question_input_use_refs_by_test_id[test_id]
+                "population_use_refs": list(
+                    ownership.population_use_refs_by_test_id[test_id]
                 ),
             }
         )
     return output
+
+
+def provider_answer_population(
+    population: Mapping[str, Any],
+    *,
+    ownership: ProviderQuestionInputOwnership,
+) -> dict[str, Any]:
+    return {
+        "membership_tests": provider_membership_tests(
+            population.get("membership_tests") or (),
+            ownership=ownership,
+        )
+    }
 
 
 def provider_question_input_ownership(
@@ -52,27 +69,22 @@ def provider_question_input_ownership(
 ) -> ProviderQuestionInputOwnership:
     """Project test-owned semantic edges into the provider ownership contract."""
 
-    uses: list[dict[str, str]] = []
-    use_id_by_input_ref: dict[str, str] = {}
+    uses: list[dict[str, object]] = []
     owner_by_input_ref: dict[str, str] = {}
 
-    def add(input_ref: str, owner_kind: str) -> str:
+    def add(input_ref: str, owner_kind: str) -> None:
         normalized_ref = str(input_ref).strip()
         if not normalized_ref:
             raise ValueError("question input reference is required")
-        if normalized_ref in use_id_by_input_ref:
+        if normalized_ref in owner_by_input_ref:
             raise ValueError(f"question input has multiple owners: {normalized_ref}")
-        use_id = f"use_{len(uses) + 1}"
-        use = {
-            "input_ref": normalized_ref,
-            "owner_kind": owner_kind,
-        }
-        if owner_kind == "POPULATION_TESTS":
-            use["use_id"] = use_id
-        uses.append(use)
-        use_id_by_input_ref[normalized_ref] = use_id
+        uses.append(
+            {
+                "input_ref": normalized_ref,
+                "owner_kind": owner_kind,
+            }
+        )
         owner_by_input_ref[normalized_ref] = owner_kind
-        return use_id
 
     for input_ref in group_key_input_refs:
         add(input_ref, "GROUP_KEY")
@@ -80,28 +92,36 @@ def provider_question_input_ownership(
     for input_ref in compute_input_refs:
         add(input_ref, "COMPUTE_EXPRESSION")
 
-    refs_by_test_id: dict[str, tuple[str, ...]] = {}
+    tests_by_input_ref: dict[str, list[str]] = {}
     for test_id, input_refs in (population_input_refs_by_test_id or {}).items():
         normalized_test_id = str(test_id).strip()
         if not normalized_test_id:
             raise ValueError("membership test ID is required")
-        test_use_ids: list[str] = []
         for input_ref in input_refs:
             normalized_ref = str(input_ref).strip()
-            use_id = use_id_by_input_ref.get(normalized_ref)
-            if use_id is None:
-                use_id = add(normalized_ref, "POPULATION_TESTS")
-            elif owner_by_input_ref[normalized_ref] != "POPULATION_TESTS":
+            owner_kind = owner_by_input_ref.get(normalized_ref)
+            if owner_kind not in {None, "POPULATION_TESTS"}:
                 raise ValueError(
                     f"question input has multiple owners: {normalized_ref}"
                 )
-            test_use_ids.append(use_id)
-        refs_by_test_id[normalized_test_id] = tuple(test_use_ids)
+            tests_by_input_ref.setdefault(normalized_ref, []).append(normalized_test_id)
+
+    refs_by_test_id: dict[str, list[str]] = {
+        str(test_id): [] for test_id in (population_input_refs_by_test_id or {})
+    }
+    for index, (input_ref, test_ids) in enumerate(tests_by_input_ref.items(), start=1):
+        add(input_ref, "POPULATION_TESTS")
+        use_id = f"population_use_{index}"
+        uses[-1]["use_id"] = use_id
+        for test_id in test_ids:
+            refs_by_test_id[test_id].append(use_id)
 
     if result_limit_input_ref:
         add(result_limit_input_ref, "RESULT_LIMIT")
 
     return ProviderQuestionInputOwnership(
         question_input_uses=tuple(uses),
-        question_input_use_refs_by_test_id=refs_by_test_id,
+        population_use_refs_by_test_id={
+            test_id: tuple(refs) for test_id, refs in refs_by_test_id.items()
+        },
     )

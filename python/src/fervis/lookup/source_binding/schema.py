@@ -10,10 +10,7 @@ from fervis.lookup.fact_plan.fact_plan import (
     MissingCatalogInputKind,
     PlanOutcomeKind,
 )
-from fervis.lookup.question_contract import (
-    NormalInstanceExplicitOverrideReason,
-    NormalInstanceExcludedStateRole,
-)
+from fervis.lookup.question_contract import NormalInstanceExcludedStateRole
 from fervis.lookup.source_binding.normal_instance_roles import (
     NORMAL_INSTANCE_NO_EXCLUDED_ROLE,
     NORMAL_INSTANCE_UNKNOWN_EXCLUDED_ROLE,
@@ -471,8 +468,6 @@ def _normal_instance_test_result_schema() -> dict[str, object]:
     return provider_output.NormalInstanceTestResultOutput.schema(
         {
             "role_match_basis": _handle_schema(),
-            "explicit_user_override_evidence": _normal_instance_override_schema(),
-            "explicit_user_override_applies": {"type": "boolean"},
             "population_consequence": _handle_schema(),
             "disposition": provider_output.NormalInstanceDispositionOutput.schema(
                 {
@@ -482,23 +477,6 @@ def _normal_instance_test_result_schema() -> dict[str, object]:
             ),
         }
     )
-
-
-def _normal_instance_override_schema() -> dict[str, object]:
-    return {
-        "type": "array",
-        "items": provider_output.NormalInstanceOverrideEvidenceOutput.schema(
-            {
-                "source_text": _handle_schema(),
-                "reason": {
-                    "enum": [
-                        reason.value for reason in NormalInstanceExplicitOverrideReason
-                    ],
-                },
-            }
-        ),
-    }
-
 
 def _normal_instance_role_schema() -> dict[str, object]:
     return {

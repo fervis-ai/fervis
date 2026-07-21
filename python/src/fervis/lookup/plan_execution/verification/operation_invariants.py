@@ -206,9 +206,6 @@ def _require_order(spec: OrderSpec) -> None:
         and not expression_references(spec.selection.limit).leaves
     ):
         raise VerificationError("order take limit requires an expression")
-    if not spec.tie_breakers:
-        raise VerificationError("order requires deterministic tie breakers")
-    _require_sort_keys(spec.tie_breakers, "order")
 
 
 def _require_compute(spec: ComputeSpec) -> None:

@@ -67,7 +67,7 @@ from tests.lookup.orchestrator._runtime_ports import (
 )
 from tests.lookup.prompt_sections import prompt_section_payload
 from tests.testkit.question_contract_provider import (
-    provider_membership_tests,
+    provider_answer_population,
     provider_question_input_ownership,
 )
 
@@ -622,7 +622,7 @@ def _question_contract_for_fact_plan(
             elif family == "grouped_aggregate":
                 expression["group_key"] = {
                     "description": "result group",
-                    "domain": "SOURCE_RESULT_VALUES",
+                    "value_source": {"kind": "source_value"},
                 }
                 expression["selection"] = {"kind": "all_results"}
             answer_request["answer_expression"] = expression
@@ -678,8 +678,7 @@ def _answer_population_payload(
     subject_text: str,
     ownership=None,
 ) -> dict[str, object]:
-    payload = default_answer_population(
-        description=description,
+    population = default_answer_population(
         subject_text=subject_text,
         instance_interpretation=RequestedFactAnswerSubject(
             subject_text=subject_text,
@@ -687,11 +686,10 @@ def _answer_population_payload(
     ).to_question_contract_dict()
     if ownership is None:
         ownership = provider_question_input_ownership()
-    payload["membership_tests"] = provider_membership_tests(
-        payload["membership_tests"],
+    return provider_answer_population(
+        population,
         ownership=ownership,
     )
-    return payload
 
 
 def _question_contract_with_prompt_memory(

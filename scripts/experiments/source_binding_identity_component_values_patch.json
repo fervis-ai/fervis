@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "\"value_meaning\": \"Nairobi\"}], \"targets_by_kind\"",
+      "new": "\"value_meaning\": \"Nairobi\", \"component_values\": {\"area_id\": \"1607d0c3-c237-427d-9d2b-f9ef100bcf9d\"}}], \"targets_by_kind\"",
+      "expected_count": 1
+    }
+  ]
+}

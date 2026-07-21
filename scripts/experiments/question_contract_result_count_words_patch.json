@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "A result_limit is an explicit positive integer stating how many ordered results to return.",
+      "new": "A result_limit is an explicit positive count, written in digits or words, stating how many ordered results to return.",
+      "expected_count": 1
+    }
+  ]
+}

@@ -11,7 +11,7 @@ input:
     answer_expression_family: grouped_aggregate
     group_key:
       description: status
-      domain: SOURCE_RESULT_VALUES
+      value_source: {kind: source_value}
     answer_outputs:
       - {description: metric total, role: MEASURED_VALUE}
     resource_terms: [metric]

@@ -1,0 +1,33 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "For each choice, write choice_domain_meaning, choice_inclusion_basis, then choice_inclusion, then population_test_results.",
+      "new": "For each choice, write choice_domain_meaning, then population_test_results.",
+      "expected_count": 1
+    },
+    {
+      "old": "choice_inclusion_basis explains why rows with this choice value independently belong or do not belong in the answer computation.\nchoice_inclusion is row-set membership for this one choice, not selection of one parameter value. Multiple choices may be INCLUDE.\nDo not exclude a choice because selecting only that value would omit rows belonging to another included choice.\n",
+      "new": "",
+      "expected_count": 1
+    },
+    {
+      "old": "If the choice axis does not describe the answer subject, use disposition.matched_excluded_role=NONE and disposition.test_effect=DOES_NOT_DECIDE_TEST for NORMAL_INSTANCE_GUARD, and set choice_inclusion based on whether rows with this choice value should contribute to the requested answer.",
+      "new": "If the choice axis does not describe the answer subject, use disposition.matched_excluded_role=NONE and disposition.test_effect=DOES_NOT_DECIDE_TEST for NORMAL_INSTANCE_GUARD.",
+      "expected_count": 1
+    },
+    {
+      "old": "The backend derives include and exclude choice sets from population_test_results and choice_inclusion.",
+      "new": "The backend derives include and exclude choice sets from population_test_results.",
+      "expected_count": 1
+    }
+  ],
+  "schema_property_removals": [
+    {
+      "tool_name": "submit_source_binding",
+      "property_names": [
+        "choice_inclusion_basis",
+        "choice_inclusion"
+      ]
+    }
+  ]
+}

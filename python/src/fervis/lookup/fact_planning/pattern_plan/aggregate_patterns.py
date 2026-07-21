@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from fervis.lookup.fact_planning.grouped_aggregate_choices import (
@@ -11,9 +11,11 @@ from fervis.lookup.fact_planning.grouped_aggregate_choices import (
 )
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
+    Relation,
     RelationField,
     SourceKind,
 )
+from fervis.lookup.answer_program.model import FactFulfillment
 from fervis.lookup.fact_planning.metric_options import metric_for_selection
 from fervis.lookup.source_binding import BoundSource
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
@@ -49,6 +51,7 @@ from .shared import (
     _field_spec,
     _pattern_output_relation_id,
     _pattern_relation_id,
+    _relations_for_bound_source,
     _relation_fields,
     _result_value_field_ids_by_answer_output,
     _validate_metric_source_compatibility,
@@ -60,7 +63,15 @@ from fervis.lookup.fact_planning.compiled_patterns import (
     CompiledOrdering,
     PatternAddress,
 )
-from fervis.lookup.question_contract import RequestedFact
+from fervis.lookup.question_contract import GroupKeySourceKind, RequestedFact
+
+
+@dataclass(frozen=True)
+class _ScalarAggregateCompilation:
+    relations: tuple[Relation, ...]
+    operations: tuple[Operation, ...]
+    bound: BoundSource
+    aggregate_operation_id: str
 
 
 def _compile_aggregate_pattern_answer(
@@ -96,36 +107,13 @@ def _compile_aggregate_pattern_answer(
     output_relation_id = _pattern_output_relation_id(index)
     group_fields: tuple[dict[str, str], ...] = ()
     metric = metric_for_selection(answer=answer, bound_sources=bound_sources)
-    bound = _bound_source(answer.source_binding_id, bound_sources=bound_sources)
-    row_population_basis = metric.row_population_basis
-    if row_population_basis and bound.source is not None:
-        bound = _bound_source_with_row_population_basis(
-            bound,
-            row_population_basis=row_population_basis,
-        )
-    _validate_metric_source_compatibility(
+    compiled_source = _compile_scalar_aggregate_source(
         address=address,
         metric=metric,
+        relation_id=relation_id,
+        output_relation_id=output_relation_id,
         bound_sources=bound_sources,
-    )
-    relation_fields = (
-        *_relation_fields(group_fields),
-        *(
-            (
-                RelationField(
-                    field_id=metric.field_id,
-                    roles=(FieldBindingRole.OUTPUT,),
-                ),
-            )
-            if metric.field_id
-            else ()
-        ),
-    )
-    _validate_relation_fields_for_bound(
-        address=address,
-        bound=bound,
-        relation_fields=relation_fields,
-        selected_metric=metric,
+        relation_builder=relation_builder,
     )
     relation_outputs = _aggregate_relation_outputs(
         index=index,
@@ -134,26 +122,86 @@ def _compile_aggregate_pattern_answer(
         metric=metric,
         namespace_result_outputs=namespace_result_outputs,
     )
-    return _compiled_pattern(
-        address=address,
-        relation_id=relation_id,
-        relation_fields=relation_fields,
-        operations=_aggregate_operations(
-            input_relation_id=relation_id,
-            output_relation_id=output_relation_id,
-            group_fields=group_fields,
-            metric=metric,
+    return CompiledPattern(
+        fulfillment=tuple(
+            FactFulfillment(
+                requested_fact_id=address.requested_fact_id,
+                answer_output_id=answer_output_id,
+                result_output_id=result_output_id,
+            )
+            for answer_output_id, result_output_id in zip(
+                address.answer_output_ids,
+                _aggregate_fulfillment_result_ids(
+                    address=address,
+                    bound=compiled_source.bound,
+                    relation_outputs=relation_outputs,
+                    metric=metric,
+                ),
+                strict=True,
+            )
         ),
+        relations=compiled_source.relations,
+        operations=compiled_source.operations,
         relation_outputs=relation_outputs,
-        fulfillment_result_ids=_aggregate_fulfillment_result_ids(
-            address=address,
-            bound=bound,
-            relation_outputs=relation_outputs,
-            metric=metric,
+        scalar_outputs=(),
+    )
+
+
+def _compile_scalar_aggregate_source(
+    *,
+    address: PatternAddress,
+    metric: CompiledMetric,
+    relation_id: str,
+    output_relation_id: str,
+    bound_sources: dict[str, BoundSource],
+    relation_builder: RelationBuilder,
+) -> _ScalarAggregateCompilation:
+    """Lower one selected source metric into one scalar relation row."""
+
+    bound = _bound_source(address.source_binding_id, bound_sources=bound_sources)
+    row_population_basis = metric.row_population_basis
+    if row_population_basis and bound.source is not None:
+        bound = _bound_source_with_row_population_basis(
+            bound,
+            row_population_basis=row_population_basis,
+        )
+    effective_sources = {**bound_sources, bound.id: bound}
+    _validate_metric_source_compatibility(
+        address=address,
+        metric=metric,
+        bound_sources=effective_sources,
+    )
+    relation_fields = (
+        RelationField(
+            field_id=metric.field_id,
+            roles=(FieldBindingRole.OUTPUT,),
         ),
-        bound_sources={**bound_sources, bound.id: bound},
+    ) if metric.field_id else ()
+    _validate_relation_fields_for_bound(
+        address=address,
+        bound=bound,
+        relation_fields=relation_fields,
+        selected_metric=metric,
+    )
+    source_inputs = _relations_for_bound_source(
+        relation_id=relation_id,
+        address=address,
+        relation_fields=relation_fields,
+        bound_sources=effective_sources,
         relation_builder=relation_builder,
         selected_metric=metric,
+    )
+    aggregate_operations = _aggregate_operations(
+        input_relation_id=relation_id,
+        output_relation_id=output_relation_id,
+        group_fields=(),
+        metric=metric,
+    )
+    return _ScalarAggregateCompilation(
+        relations=source_inputs["relations"],
+        operations=(*source_inputs["operations"], *aggregate_operations),
+        bound=bound,
+        aggregate_operation_id=aggregate_operations[-1].id,
     )
 
 
@@ -337,16 +385,22 @@ def _derived_group_key(
     group_key = expression.group_key if expression is not None else None
     if not source_field_id:
         return None
-    if group_key is None or len(group_key.derivation_input_refs) != 1:
-        raise ValueError("derived group key requires one grouping grain")
+    if (
+        group_key is None
+        or group_key.source_kind is not GroupKeySourceKind.TEMPORAL_BUCKET
+        or not group_key.temporal_grain
+    ):
+        raise ValueError("derived group key requires a temporal bucket")
     return (
         group_key.id,
         FunctionExpression(
             function=ExpressionFunction.TEMPORAL_BUCKET,
             arguments=(
                 FieldRef(source_field_id),
-                input_context.expression_for_question_input(
-                    group_key.derivation_input_refs[0]
+                input_context.expression_for_value(
+                    group_key.temporal_grain_value_id(
+                        requested_fact_id=requested_fact.id,
+                    )
                 ),
                 EnvironmentRef(key=ANCHOR_TIMEZONE_REF),
             ),

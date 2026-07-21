@@ -24,7 +24,7 @@ def load_goldset_suite(suite_path: Path | str) -> GoldsetSuite:
 
 def _load_path_suite(suite_ref: str) -> GoldsetSuite:
     path = Path(suite_ref).expanduser().resolve()
-    module_path = path if path.is_file() else path / SUITE_MODULE
+    module_path = path if path.is_file() else _suite_module_path(path)
     if not module_path.exists():
         raise ValueError(f"goldset suite entrypoint not found: {module_path}")
 
@@ -50,6 +50,13 @@ def _load_path_suite(suite_ref: str) -> GoldsetSuite:
             pass
 
     return _suite_from_module(module)
+
+
+def _suite_module_path(suite_directory: Path) -> Path:
+    root_entrypoint = suite_directory / SUITE_MODULE
+    if root_entrypoint.exists():
+        return root_entrypoint
+    return suite_directory / "src" / SUITE_MODULE
 
 
 def _load_import_suite(suite_ref: str) -> GoldsetSuite:

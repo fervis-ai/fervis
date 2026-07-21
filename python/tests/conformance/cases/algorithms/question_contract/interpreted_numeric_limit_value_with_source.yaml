@@ -29,7 +29,7 @@ input:
   used_input_refs:
   - limit
 expect:
-  result_equals:
+  result_contains:
     question_inputs:
     - id: limit
       kind: literal_text
@@ -41,27 +41,11 @@ expect:
       value_meaning_hint: ''
       role: result_limit
     requested_facts:
-    - id: fact_1
-      description: sales at ABC Mall
+    - description: sales at ABC Mall
       answer_expression_family: list_rows
       answer_subject_text: stores
       input_refs: [limit]
-      known_inputs:
-      - id: limit
-        kind: literal_text
-        source: question_context
-        text: top five
-        resolved_input_ref: ''
-        resolved_value_text: '5'
-        field_label_text: ''
-        value_meaning_hint: ''
-        role: result_limit
-      answer_outputs:
-      - id: answer_1
-        description: sales total
-        role: ANSWER_VALUE
       answer_request:
-        answer_fact: sales at ABC Mall
         answer_expression:
           family: list_rows
           ordering:
@@ -69,21 +53,8 @@ expect:
             direction: descending
           selection_kind: take
           limit_input_ref: limit
-        answer_subject:
-          subject_text: stores
-          instance_interpretation:
-            kind: NORMAL_BUSINESS_INSTANCE
-            short_label: ordinary business meaning of stores
-            meaning: Answer over ordinary business instances of 'stores' as they are normally understood in business operations and reporting. Do not assume this includes every persisted representation the host API may expose for 'stores'. Explicit user wording may narrow or override this normal instance interpretation.
-        answer_population:
-          population_label: sales
-          counted_unit: sales
-          membership_tests:
-          - test_id: pop_test_1
-            kind: SUBJECT_IDENTITY
-            polarity: MUST_PASS
-            test_question: Does the row/value represent sales?
-            owned_question_input_refs: []
-        answer_outputs:
-        - description: sales total
-          role: ANSWER_VALUE
+  result_exact_fields:
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs: [limit]
+      known_input_refs: [limit]

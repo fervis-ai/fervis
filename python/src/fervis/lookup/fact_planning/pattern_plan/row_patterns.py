@@ -7,7 +7,6 @@ from fervis.lookup.answer_program.operations import (
     OrderSpec,
     NamedExpression,
     ProjectSpec,
-    SortDirection,
     SortKey,
 )
 from fervis.lookup.answer_program.expressions import FieldRef
@@ -115,10 +114,6 @@ def _compile_project_fields(
     relation_id = _pattern_relation_id(index)
     output_relation_id = _pattern_output_relation_id(index)
     bound = _bound_source(address.source_binding_id, bound_sources=bound_sources)
-    tie_breaker_fields = _order_tie_breaker_fields(
-        bound,
-        order_field=order_field,
-    )
     output_fields = _without_existing_fields(
         output_fields,
         existing_field_ids={item["field_id"] for item in group_fields},
@@ -174,15 +169,11 @@ def _compile_project_fields(
         output_relation_id=output_relation_id,
         project_fields=project_fields,
         order_field=order_field,
-        tie_breaker_fields=tie_breaker_fields,
         ordering=ordering,
     )
     support_fields = tuple(
         item
-        for item in (
-            *((order_field,) if order_field is not None else ()),
-            *tie_breaker_fields,
-        )
+        for item in ((order_field,) if order_field is not None else ())
         if item not in (*group_fields, *output_fields)
     )
     compiled = _compiled_pattern(
@@ -202,29 +193,12 @@ def _compile_project_fields(
     return compiled
 
 
-def _order_tie_breaker_fields(
-    bound: BoundSource,
-    *,
-    order_field: dict[str, str] | None,
-) -> tuple[dict[str, str], ...]:
-    if order_field is None:
-        return ()
-    order_field_id = order_field["field_id"]
-    return tuple(
-        _field_spec({"field_id": field.field_id})
-        for field in bound.available_fields
-        if "identity" in {str(role) for role in field.roles}
-        and field.field_id != order_field_id
-    )
-
-
 def _row_operations(
     *,
     relation_id: str,
     output_relation_id: str,
     project_fields: tuple[NamedExpression, ...],
     order_field: dict[str, str] | None,
-    tie_breaker_fields: tuple[dict[str, str], ...],
     ordering: CompiledOrdering | None,
 ) -> tuple[Operation, ...]:
     project_input_relation = relation_id
@@ -243,13 +217,6 @@ def _row_operations(
                         ),
                     ),
                     selection=ordering.selection,
-                    tie_breakers=tuple(
-                        SortKey(
-                            field=item["field_id"],
-                            direction=SortDirection.ASC,
-                        )
-                        for item in tie_breaker_fields
-                    ),
                 ),
                 output_relation=project_input_relation,
             )

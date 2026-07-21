@@ -1,5 +1,12 @@
 from ._helpers import *  # noqa: F403
 
+from fervis.lookup.answer_program.expressions import NodeOutputRef
+from fervis.lookup.answer_program.operations import AggregateSpec, ComputeSpec
+from fervis.lookup.answer_program.values import LiteralType
+from fervis.lookup.fact_planning.scalar_values import (
+    source_derived_scalar_values_by_fact,
+)
+
 
 def test_pattern_prompt_projects_scalar_aggregate_choices_for_numeric_summary_evidence():
     request = FactPlanRequest(
@@ -117,6 +124,137 @@ def test_pattern_prompt_projects_scalar_aggregate_choices_for_numeric_summary_ev
     assert '<function id="function_avg" value="avg"' in choices
     assert '"metric"' in schema_text
     assert '"function"' in schema_text
+
+
+def test_computed_scalar_uses_one_catalog_for_source_and_literal_values():
+    source = BoundSource(
+        id="sb_1",
+        requested_fact_id="fact_1",
+        answer_population=_answer_population(),
+        source=DraftRelationSource(
+            kind=SourceKind.API_READ,
+            read_id="list_measurements",
+        ),
+        cardinality="many",
+        available_field_ids=("amount",),
+        available_fields=(SourceField(field_id="amount", type="decimal"),),
+        evidence_items=(
+            SourceEvidenceItem(
+                evidence_id="source.amount",
+                field_id="amount",
+                row_cardinality="many",
+            ),
+        ),
+        fulfillments=(
+            SourceFulfillment(
+                requested_fact_id="fact_1",
+                answer_output_id="answer_1",
+                match_basis_explanation="amount is the requested measure",
+                metric_measure_evidence_ids=("source.amount",),
+            ),
+        ),
+    )
+    selected = BoundPlanSelectionSet(
+        plan_selections=(
+            BoundSelectedSourceStrategy(
+                requested_fact_id="fact_1",
+                plan_selection_id="fact_1.computed_scalar.sb_1",
+                source_strategy_id="source_strategy.fact_1.computed_scalar.1",
+                plan_shape="computed_scalar",
+                    required_answer_output_ids=("answer_1",),
+                    source_members=(
+                        BoundSourceStrategyMember(
+                            source_candidate_id="candidate_1",
+                            role_targets=(
+                                BoundRoleTarget(
+                                    requirement_id="answer_1",
+                                    source_candidate_id="candidate_1",
+                                    source_binding_ids=("sb_1",),
+                                ),
+                            ),
+                        ),
+                    ),
+            ),
+        )
+    )
+    request = FactPlanRequest(
+        question="What is one tenth of the total measure?",
+        question_contract=QuestionContract(
+            requested_facts=(
+                RequestedFact(
+                    id="fact_1",
+                    description="one tenth of the total measure",
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(
+                            id="answer_1",
+                            role="ANSWER_VALUE",
+                        ),
+                    ),
+                ),
+            )
+        ),
+        relation_catalog=RelationCatalog(reads=()),
+        bound_sources=(source,),
+        available_values=(
+            FactValue.literal(
+                id="fraction",
+                literal_type=LiteralType.NUMBER,
+                value="0.1",
+                applies_to_requested_fact_ids=("fact_1",),
+            ),
+        ),
+    )
+    prompt = PatternFactPlanTurnPrompt(request, plan_selection=selected)
+    source_values = prompt.source_derived_scalar_values()
+    sum_value = next(
+        value
+        for value in source_values
+        if value.metric.function.value == "sum"
+    )
+
+    assert sum_value.value_id in _text_prompt_section(
+        _pattern_fact_plan_prompt(request, plan_selection=selected),
+        label="Operation input values",
+        next_label="Bound sources",
+    )
+
+    program = compile_pattern_answer_plan(
+        {
+            "answers": [
+                {
+                    "pattern": "computed_scalar",
+                    "requested_fact_id": "fact_1",
+                    "answer_output_ids": ["answer_1"],
+                    "scalar_inputs": [
+                        {"input_id": "total", "value_id": sum_value.value_id},
+                        {"input_id": "fraction", "value_id": "fraction"},
+                    ],
+                    "expression": [
+                        {"input_id": "total"},
+                        {"input_id": "fraction"},
+                        {"operator": "multiply"},
+                    ],
+                    "output": {"scalar_id": "result"},
+                }
+            ]
+        },
+        bound_sources=(source,),
+        requested_facts=request.question_contract.requested_facts,
+        available_values=request.available_values,
+        question_contract=request.question_contract,
+        source_derived_scalar_values=source_values,
+    )
+
+    aggregate = next(
+        operation for operation in program.operations if isinstance(operation.spec, AggregateSpec)
+    )
+    compute = next(
+        operation for operation in program.operations if isinstance(operation.spec, ComputeSpec)
+    )
+    assert NodeOutputRef(
+        node_id=aggregate.id,
+        output_id=sum_value.metric.output_field_id,
+    ) in (compute.spec.expression.left, compute.spec.expression.right)
 
 
 def test_pattern_prompt_projects_scalar_aggregate_choices_for_one_row_summary_evidence():

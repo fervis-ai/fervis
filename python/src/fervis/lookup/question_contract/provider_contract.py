@@ -13,7 +13,6 @@ class QuestionInputOwnerKind(StrEnum):
     GROUP_KEY = "GROUP_KEY"
     POPULATION_TESTS = "POPULATION_TESTS"
     COMPUTE_EXPRESSION = "COMPUTE_EXPRESSION"
-    GROUP_KEY_DERIVATION = "GROUP_KEY_DERIVATION"
     RESULT_LIMIT = "RESULT_LIMIT"
 
 
@@ -24,13 +23,13 @@ class QuestionContractDecisionOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class QuestionInputItemInventoryCheckOutput(ProviderOutput):
-    why_this_is_an_input: str
+class QuestionInputInventoryCheckOutput(ProviderOutput):
+    all_input_like_phrases_declared: bool
 
 
 @dataclass(frozen=True)
-class QuestionInputInventoryCheckOutput(ProviderOutput):
-    all_input_like_phrases_declared: bool
+class QuestionInputItemInventoryCheckOutput(ProviderOutput):
+    why_this_is_an_input: str
 
 
 @dataclass(frozen=True)
@@ -68,17 +67,13 @@ class AnswerOutputOutput(ProviderOutput):
 
 @dataclass(frozen=True)
 class AnswerPopulationMembershipTestOutput(ProviderOutput):
-    question_input_use_refs: tuple[str, ...]
-    test_id: str
-    kind: str
+    population_use_refs: tuple[str, ...]
     polarity: str
     test_question: str
 
 
 @dataclass(frozen=True)
 class AnswerPopulationOutput(ProviderOutput):
-    population_label: str
-    counted_unit: str
     membership_tests: tuple[AnswerPopulationMembershipTestOutput, ...]
 
 
@@ -94,9 +89,15 @@ class AnswerSubjectOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class GroupKeyValueSourceOutput(ProviderOutput):
+    kind: str
+    grain: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class GroupKeyOutput(ProviderOutput):
     description: str
-    domain: str
+    value_source: GroupKeyValueSourceOutput
 
 
 @dataclass(frozen=True)
@@ -139,8 +140,8 @@ class AnswerRequestOutput(ProviderOutput):
 class QuestionContractOutput(ProviderOutput):
     kind: str
     answer_requests_count: int
-    question_inputs: tuple[ProviderObject, ...]
     answer_requests: tuple[AnswerRequestOutput, ...]
+    question_inputs: tuple[ProviderObject, ...]
     question_input_inventory_check: QuestionInputInventoryCheckOutput
 
 

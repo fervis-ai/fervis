@@ -16,7 +16,7 @@ from .contract_types import (
 )
 from .contracts import _scalar_contracts
 from .operations import _operation_input_refs
-from .scalars import _operation_scalar_inputs
+from .scalars import _operation_node_output_refs, _operation_scalar_inputs
 from fervis.lookup.plan_execution.operation_runtime import ResolvedOperationInput
 from fervis.lookup.answer_program.result_projection import (
     RelationResultOutput,
@@ -231,8 +231,18 @@ def _verify_result_scalar_references(
 
 def _operation_input_refs_for_all(operations: tuple[Operation, ...]) -> tuple[str, ...]:
     refs: list[str] = []
+    output_relation_by_node_id = {
+        operation.id: operation.output_relation
+        for operation in operations
+        if operation.output_relation
+    }
     for operation in operations:
         refs.extend(_operation_input_refs(operation))
+        refs.extend(
+            output_relation_by_node_id[reference.node_id]
+            for reference in _operation_node_output_refs(operation)
+            if reference.node_id in output_relation_by_node_id
+        )
     return tuple(refs)
 
 

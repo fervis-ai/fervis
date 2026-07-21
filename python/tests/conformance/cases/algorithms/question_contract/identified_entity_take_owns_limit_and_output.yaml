@@ -53,31 +53,17 @@ input:
           ordering: {basis: shift chronology, direction: ascending}
           selection: {kind: take}
         question_input_uses:
-          - {use_id: use_nadia, input_ref: nadia, owner_kind: POPULATION_TESTS}
-          - {use_id: use_limit, input_ref: first_two, owner_kind: RESULT_LIMIT}
+          - {input_ref: nadia, owner_kind: POPULATION_TESTS, use_id: nadia_use}
+          - {input_ref: first_two, owner_kind: RESULT_LIMIT}
         answer_subject:
           subject_text: shifts
           instance_interpretation:
             kind: NORMAL_BUSINESS_INSTANCE
         answer_population:
-          population_label: Nadia Wanjiku's shifts
-          counted_unit: shift
           membership_tests:
-            - test_id: shift_identity
-              kind: SUBJECT_IDENTITY
-              polarity: MUST_PASS
-              test_question: Does the candidate represent a shift?
-              question_input_use_refs: []
-            - test_id: selected_staff
-              kind: EXPLICIT_USER_CONSTRAINT
-              polarity: MUST_PASS
+            - polarity: MUST_PASS
               test_question: Is the shift associated with the selected staff member?
-              question_input_use_refs: [use_nadia]
-            - test_id: ordinary_shift
-              kind: NORMAL_INSTANCE_GUARD
-              polarity: MUST_PASS
-              test_question: Is this an ordinary business instance of a shift?
-              question_input_use_refs: []
+              population_use_refs: [nadia_use]
         answer_outputs:
           - description: work location
             role: ANSWER_VALUE
@@ -119,15 +105,14 @@ expect:
             selection_kind: take
             limit_input_ref: first_two
           answer_population:
-            population_label: Nadia Wanjiku's shifts
-            counted_unit: shift
+            counted_unit: shifts
             membership_tests:
-              - test_id: shift_identity
+              - test_id: pop_test_1
                 owned_question_input_refs: []
-              - test_id: selected_staff
+              - test_id: pop_test_2
+                owned_question_input_refs: []
+              - test_id: explicit_user_constraint_1
                 owned_question_input_refs: [nadia]
-              - test_id: ordinary_shift
-                owned_question_input_refs: []
           answer_outputs:
             - description: work location
               role: ANSWER_VALUE

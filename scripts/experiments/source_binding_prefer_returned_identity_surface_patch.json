@@ -1,0 +1,34 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "\"components_by_target_kind\": {\"request_parameter\": [\"area_id\"], \"returned_identity\": [\"canonical_key\"]}",
+      "new": "\"components_by_target_kind\": {\"returned_identity\": [\"canonical_key\"]}",
+      "expected_count": 1
+    },
+    {
+      "old": "\"targets_by_kind\": {\"request_parameter\": [{\"application_target_id\": \"request_parameter.ordering\", \"semantics\": \"response_shape\", \"target_id\": \"ordering\", \"type\": \"string\"}, {\"application_target_id\": \"request_parameter.name\", \"semantics\": \"opaque_query_param\", \"target_id\": \"name\", \"type\": \"string\"}], \"returned_field\": [], \"returned_identity\":",
+      "new": "\"targets_by_kind\": {\"request_parameter\": [], \"returned_field\": [], \"returned_identity\":",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_source_binding",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/bindings_for_fact_1/properties/metric/properties/resolved_input_applications/items/oneOf/0/properties/applications/maxItems",
+      "value": 1
+    },
+    {
+      "tool_name": "submit_source_binding",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/bindings_for_fact_1/properties/metric/properties/resolved_input_applications/items/oneOf/0/properties/applications/items/properties/application_target_id/enum",
+      "value": ["returned_identity.source_3.data.reference.area_area_id_reference"]
+    },
+    {
+      "tool_name": "submit_source_binding",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/bindings_for_fact_1/properties/metric/properties/resolved_input_applications/items/oneOf/0/properties/applications/items/properties/value_component/enum",
+      "value": ["canonical_key"]
+    }
+  ]
+}

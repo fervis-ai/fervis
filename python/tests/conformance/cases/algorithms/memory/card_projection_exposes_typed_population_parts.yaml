@@ -24,7 +24,6 @@ input:
                 answer_expression: {family: scalar_aggregate}
                 answer_subject: {subject_text: orders}
                 answer_population:
-                  population_label: completed orders this month
                   counted_unit: order
                   membership_tests:
                     - test_id: subject_identity

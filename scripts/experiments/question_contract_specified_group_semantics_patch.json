@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Use value_source.kind=specified_question_inputs for concrete supplied group members.",
+      "new": "Use value_source.kind=specified_question_inputs when the group key restricts the result to concrete supplied group members and groups by them. The group key owns those inputs; answer_population must not repeat that restriction.",
+      "expected_count": 1
+    }
+  ]
+}

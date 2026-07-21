@@ -268,6 +268,13 @@ def _parse_binding_decisions(
             f"semantic.{target.requested_fact_id}.{target.binding_target_id}"
         ),
         effective_param_ids=binding.effective_param_ids,
+        prebound_param_ids=tuple(
+            dict.fromkeys(
+                param_binding.param_id
+                for binding_set in binding.input_applications.param_binding_sets
+                for param_binding in binding_set
+            )
+        ),
     )
     row_predicates = parse_row_predicate_filters(
         invocation.row_predicate_reviews,

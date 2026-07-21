@@ -1,0 +1,16 @@
+{
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_subject/properties/subject_text/description",
+      "value": "The complete business candidate kind. Preserve noun compounds that name the kind; exclude independently testable property modifiers."
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/question_inputs/items/oneOf/1/properties/role/description",
+      "value": "A non-identity property value expressed as an independently testable modifier of answer_subject instances."
+    }
+  ]
+}

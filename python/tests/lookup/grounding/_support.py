@@ -34,7 +34,6 @@ from fervis.lookup.grounding.model import (
     IdentifierKind,
     InputBindingCompatibility,
     InputBindingOption,
-    NO_SHOWN_RESOURCE_TYPE,
     ResourceTypeMatch,
     LookupRequestParameter,
     resolver_fit_question_for_option,
@@ -42,6 +41,7 @@ from fervis.lookup.grounding.model import (
 from fervis.lookup.grounding.parser import parse_grounding_compatibility
 from fervis.lookup.grounding.model import (
     GroundingRequest,
+    GroundingRequestedFactCard,
     KnownTimeResolutionTask,
 )
 from fervis.lookup.grounding.prompt import GroundingTurnPrompt
@@ -277,16 +277,15 @@ class _NoCompatibleResolverGroundingModel:
         }
 
 
-class _NoShownResourceTypeGroundingModel:
+class _AllDifferentResourceTypesGroundingModel:
     def generate(self, **kwargs):
         prompt = str(kwargs.get("prompt") or "")
         arguments = _grounding_review_arguments(prompt, selected_by_input={})
         for review in arguments["known_input_binding_reviews"].values():
-            review["resource_type_x"] = NO_SHOWN_RESOURCE_TYPE
-            for option_review in review["option_reviews"].values():
-                option_review["resource_type_match"] = (
-                    ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value
-                )
+            review["resource_type_compatibility"] = {
+                resource_type: ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value
+                for resource_type in review["resource_type_compatibility"]
+            }
         return {
             "answer": json.dumps(
                 {"tool": "submit_grounding", "arguments": arguments}
@@ -367,24 +366,21 @@ def _grounding_review_arguments(
         selected_resource_types = {
             options_by_id[option_id]["resource_type"] for option_id in positive_ids
         }
-        resource_type_x = (
-            next(iter(selected_resource_types))
-            if len(selected_resource_types) == 1
-            else task["shown_resource_types"][0]
-        )
         reviews[known_input_id] = {
             "resource_type_basis": "The input identifies the selected resource type.",
-            "resource_type_x": resource_type_x,
+            "resource_type_compatibility": {
+                resource_type: (
+                    ResourceTypeMatch.SAME_RESOURCE_TYPE.value
+                    if resource_type in selected_resource_types
+                    else ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value
+                )
+                for resource_type in task["shown_resource_types"]
+            },
             "identifier_kind_basis": "The lookup is a descriptive identifier.",
             "identifier_kind": "DESCRIPTIVE",
             "option_reviews": {
                 option["binding_option_id"]: {
                     "resource_type": option["resource_type"],
-                    "resource_type_match": (
-                        "SAME_RESOURCE_TYPE"
-                        if option["resource_type"] == resource_type_x
-                        else "DIFFERENT_RESOURCE_TYPE"
-                    ),
                     "resolver_fit_question": option["resolver_fit_question"],
                     "because": "The read capability was reviewed by the test model.",
                     "resolution": {

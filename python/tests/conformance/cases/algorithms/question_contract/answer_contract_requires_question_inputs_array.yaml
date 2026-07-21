@@ -15,14 +15,7 @@ input:
           subject_text: payment items
           instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
         answer_population:
-          population_label: payment items
-          counted_unit: payment item
           membership_tests:
-            - question_input_use_refs: []
-              test_id: subject_identity
-              kind: SUBJECT_IDENTITY
-              polarity: MUST_PASS
-              test_question: Is this a payment item?
         answer_outputs:
           - description: number of payment items
             role: ANSWER_VALUE

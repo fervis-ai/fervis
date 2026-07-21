@@ -341,6 +341,7 @@ def compile_pattern_answer_plan(
     requested_facts: tuple[RequestedFact, ...] | None = None,
     available_values: tuple[FactValue, ...] = (),
     question_contract: QuestionContract | None = None,
+    source_derived_scalar_values=(),
 ):
     if source_binding_ids_by_requested_fact_id is None:
         source_binding_ids_by_requested_fact_id = _selected_source_ids_by_fact(
@@ -399,6 +400,7 @@ def compile_pattern_answer_plan(
             question_contract=question_contract,
         ),
         requested_facts=requested_facts,
+        source_derived_scalar_values=source_derived_scalar_values,
     )
     return program
 

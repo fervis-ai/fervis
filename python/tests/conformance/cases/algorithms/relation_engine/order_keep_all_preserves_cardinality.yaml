@@ -17,7 +17,6 @@ input:
         kind: order
         input_relation: records
         order_by: [{field: occurred_at, direction: asc}]
-        tie_breakers: [{field: record_id, direction: asc}]
         selection: {kind: keep_all}
 expect:
   result_contains:

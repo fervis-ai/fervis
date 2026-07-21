@@ -3,6 +3,7 @@ from dataclasses import replace
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
+    GroupKeySourceKind,
     RequestedFactAnswerPopulationMembershipTest,
 )
 
@@ -210,7 +211,6 @@ def _question_contract_for(
     )
     answer_subject = RequestedFactAnswerSubject(subject_text=subject_text or text)
     population = default_answer_population(
-        description=text,
         subject_text=answer_subject.subject_text,
         instance_interpretation=answer_subject.instance_interpretation,
     )
@@ -297,6 +297,7 @@ def _requested_fact_answer_expression(
             RequestedFactGroupKey(
                 description="group",
                 domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
             )
             if family == RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
             else None

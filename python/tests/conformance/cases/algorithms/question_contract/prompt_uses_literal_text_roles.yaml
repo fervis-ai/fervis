@@ -5,24 +5,24 @@ algorithm: question_contract.prompt
 input:
   current_question: How much did staff_id 51515151-0000-0000-0002-000000000001 make today?
   contains:
-  - Use reference_value when the input identifies one particular resource.
-  - Use predicate_value when a supplied property value is tested independently against each candidate by equality, membership, or exclusion.
+  - A reference_value is a supplied name, code, or identifier that refers to one particular person, place, organization, object, or record, including when answer_subject instances relate to it.
+  - A predicate_value is a supplied non-identity value expressed as an independently testable property modifier of answer_subject instances.
+  - Copy the user's property-value phrase without inferring catalog field boundaries. One phrase may supply several membership tests.
   - Use threshold_value when a supplied number is the boundary in a predicate evaluated independently for each candidate, such as 1000 in 'records with a measured value over 1000.'
   - Use source=conversation_resolution only for declared resolved question inputs.
   - operand_text contains only the operand.
-  - A predicate_value does not identify one particular resource.
 expect:
   result_contains:
     contains:
-      ? Use reference_value when the input identifies one particular resource.
+      ? A reference_value is a supplied name, code, or identifier that refers to one particular person, place, organization, object, or record, including when answer_subject instances relate to it.
       : true
-      ? Use predicate_value when a supplied property value is tested independently against each candidate by equality, membership, or exclusion.
+      ? A predicate_value is a supplied non-identity value expressed as an independently testable property modifier of answer_subject instances.
+      : true
+      ? Copy the user's property-value phrase without inferring catalog field boundaries. One phrase may supply several membership tests.
       : true
       ? Use threshold_value when a supplied number is the boundary in a predicate evaluated independently for each candidate, such as 1000 in 'records with a measured value over 1000.'
       : true
       ? Use source=conversation_resolution only for declared resolved question inputs.
       : true
       ? operand_text contains only the operand.
-      : true
-      ? A predicate_value does not identify one particular resource.
       : true

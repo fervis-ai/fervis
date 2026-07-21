@@ -49,6 +49,7 @@ from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
+    GroupKeySourceKind,
     KnownInputSource,
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
@@ -575,7 +576,6 @@ def run_source_binding_prompt_surface_case(payload: dict[str, Any]) -> list[str]
                 schema,
                 markers=(
                     "role_match_basis",
-                    "explicit_user_override_applies",
                     "population_consequence",
                     "disposition",
                 ),
@@ -2559,7 +2559,6 @@ def _scoped_review_owned_input_request(
         description="sales for one staff member",
         answer_subject=RequestedFactAnswerSubject(subject_text="sales"),
         answer_population=RequestedFactAnswerPopulation(
-            population_label="sales for one staff member",
             counted_unit="sales",
             membership_tests=tuple(membership_tests),
         ),
@@ -3747,6 +3746,12 @@ def _group_key(raw_value: object) -> RequestedFactGroupKey | None:
         id=str(raw_value.get("id") or "group_key"),
         description=str(raw_value.get("description") or "group key"),
         domain=GroupKeyDomainKind(str(raw_value.get("domain") or "")),
+        source_kind=(
+            GroupKeySourceKind(str(raw_value["source_kind"]))
+            if raw_value.get("source_kind")
+            else None
+        ),
+        temporal_grain=str(raw_value.get("grain") or ""),
         question_input_refs=tuple(
             str(item) for item in raw_value.get("question_input_refs") or ()
         ),
@@ -4469,12 +4474,6 @@ def _normal_instance_guard_fields_from_case(
     if isinstance(payload, dict):
         return {
             "role_match_basis": f"{value} was compared to excluded normal-instance roles.",
-            "explicit_user_override_evidence": list(
-                payload.get("explicit_user_override_evidence") or ()
-            ),
-            "explicit_user_override_applies": bool(
-                payload.get("explicit_user_override_applies")
-            ),
             "population_consequence": f"{value} effect for normal_instance_guard is {effect}.",
             "disposition": {
                 "matched_excluded_role": str(
@@ -4498,8 +4497,6 @@ def _normal_instance_guard_fields_from_effect(
     )
     return {
         "role_match_basis": f"{value} was compared to excluded normal-instance roles.",
-        "explicit_user_override_evidence": [],
-        "explicit_user_override_applies": False,
         "population_consequence": f"{value} effect for normal_instance_guard is {effect}.",
         "disposition": {
             "matched_excluded_role": matched_role,

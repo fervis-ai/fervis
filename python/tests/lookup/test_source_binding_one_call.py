@@ -29,6 +29,7 @@ from fervis.lookup.fact_plan.fact_plan import (
 from fervis.lookup.fact_plan.row_sources import api_row_source_id
 from fervis.lookup.answer_program.values import (
     FactValue,
+    LiteralType,
     TimeComponent,
 )
 from fervis.lookup.canonical_data import entity_key_value
@@ -36,6 +37,7 @@ from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
     GroupKeyDomainKind,
+    GroupKeySourceKind,
     KnownInputSource,
     LiteralInputRole,
     NormalInstanceExcludedStateRole,
@@ -254,7 +256,6 @@ def test_source_candidate_discovery_uses_retained_read_authority(
     fact = replace(
         base_request.requested_facts[0],
         answer_population=RequestedFactAnswerPopulation(
-            population_label="stores in Nairobi",
             counted_unit="stores",
             membership_tests=(
                 RequestedFactAnswerPopulationMembershipTest(
@@ -366,6 +367,53 @@ def test_source_candidate_discovery_uses_retained_read_authority(
     assert [candidate["read_id"] for candidate in _source_options(payload)] == [
         "list_location_list"
     ]
+
+
+def test_formula_literal_is_not_projected_as_plan_selection_source(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    base_request = _request_with_optional_params()
+    formula_input = RequestedFactLiteralInput(
+        id="fraction",
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text="10%",
+        resolved_value_text="10%",
+        role=LiteralInputRole.FORMULA_VALUE,
+    )
+    fact = replace(
+        base_request.requested_facts[0],
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR,
+        ),
+        known_inputs=(formula_input,),
+        input_refs=("fraction",),
+    )
+    formula_value = FactValue.literal(
+        id="grounded_fraction",
+        known_input_id="fraction",
+        literal_type=LiteralType.NUMBER,
+        value="0.1",
+        applies_to_requested_fact_ids=("fact_1",),
+    )
+    request = replace(
+        base_request,
+        question_contract=QuestionContract(
+            question_inputs=(formula_input,),
+            requested_facts=(fact,),
+        ),
+        requested_facts=(fact,),
+        available_values=(formula_value,),
+        available_value_uses=(),
+    )
+    monkeypatch.setattr(
+        raw_payload_module,
+        "selected_relation_catalog_payload",
+        lambda *args, **kwargs: {"requested_fact_relations": []},
+    )
+
+    payload = raw_payload_module._raw_source_binding_candidate_payload(request)
+
+    assert "value_source_candidates" not in payload
 
 
 def test_source_binding_registry_candidates_use_model_visible_support_sets():
@@ -647,6 +695,7 @@ def test_grouped_aggregate_source_binding_keeps_selected_group_key_lineage():
                 id="answer_group",
                 description="grouped answer identity",
                 domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
             ),
             selection_kind=ResultSelectionKind.ALL_RESULTS,
         ),
@@ -1567,6 +1616,7 @@ def _ordered_staff_compensation_request() -> SourceBindingRequest:
                 id="answer_group",
                 description="staff member",
                 domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
             ),
             ordering_basis="compensation total",
             ordering_direction=RequestedFactOrderingDirection.DESCENDING,
@@ -1729,6 +1779,7 @@ def _ordered_store_sales_request() -> SourceBindingRequest:
                 id="answer_group",
                 description="store",
                 domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
             ),
             ordering_basis="sales total",
             ordering_direction=RequestedFactOrderingDirection.DESCENDING,
@@ -2609,8 +2660,6 @@ def _choice_population_test_results(
         "role_match_basis": (
             f"The {value.lower()} choice {effect_text} the normal instance test."
         ),
-        "explicit_user_override_evidence": [],
-        "explicit_user_override_applies": False,
         "population_consequence": (
             f"The {value.lower()} choice {effect_text} the normal instance test."
         ),
@@ -2678,8 +2727,6 @@ def _normal_instance_guard_fields(
     choice: str,
     matching_roles: tuple[NormalInstanceExcludedStateRole, ...] = (),
     unknown_role_match: bool = False,
-    override_evidence: tuple[dict[str, str], ...] = (),
-    explicit_user_override_applies: bool = False,
 ) -> dict[str, object]:
     label = choice.capitalize()
     if len(matching_roles) > 1:
@@ -2693,8 +2740,6 @@ def _normal_instance_guard_fields(
     )
     return {
         "role_match_basis": f"{label} was compared to the excluded normal-instance roles.",
-        "explicit_user_override_evidence": list(override_evidence),
-        "explicit_user_override_applies": explicit_user_override_applies,
         "disposition": {
             "matched_excluded_role": matched_role,
             "test_effect": (

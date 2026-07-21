@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Use list_rows for qualifying rows; scalar_value for one direct value; scalar_aggregate for one aggregate over all qualifying candidates; grouped_aggregate for one aggregate per group; computed_scalar for arithmetic over facts or values; and set_difference, coverage_check, existence_check, and comparison_check for their stated set or comparison operations.",
+      "new": "Use list_rows when each result is a qualifying candidate row and no per-group aggregate is needed. Use grouped_aggregate when candidates are grouped and one aggregate is computed for each group, including when groups are ordered or selected by that aggregate. Use scalar_value for one direct value; scalar_aggregate for one aggregate over all qualifying candidates; computed_scalar for arithmetic over facts or values; and set_difference, coverage_check, existence_check, and comparison_check for their stated set or comparison operations.",
+      "expected_count": 1
+    }
+  ]
+}
