@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, time
+from decimal import Decimal, InvalidOperation
 from math import isfinite
 from typing import TypeAlias
 from uuid import UUID
@@ -59,17 +61,12 @@ def parse_catalog_parameter_value(
         if not isinstance(value, dict):
             raise CatalogParameterValueError("object value must be an object")
         return _parse_json_object(value)
-    if normalized_type in {
-        "choice",
-        "date",
-        "datetime",
-        "decimal",
-        "duration",
-        "path",
-        "pk",
-        "string",
-        "time",
-    }:
+    if normalized_type in {"date", "datetime", "decimal", "time"}:
+        if not isinstance(value, str):
+            raise CatalogParameterValueError("text value must be a string")
+        _validate_text_scalar(value, type_name=normalized_type)
+        return value
+    if normalized_type in {"choice", "duration", "path", "pk", "string"}:
         if not isinstance(value, str):
             raise CatalogParameterValueError("text value must be a string")
         if choices and value not in choices:
@@ -85,6 +82,24 @@ def parse_catalog_parameter_value(
     if normalized_type in {"any", "unknown", ""}:
         return _parse_json_value(value)
     raise CatalogParameterValueError(f"unsupported catalog value type {type_name}")
+
+
+def _validate_text_scalar(value: str, *, type_name: str) -> None:
+    try:
+        if type_name == "date":
+            date.fromisoformat(value)
+        elif type_name == "datetime":
+            datetime.fromisoformat(value)
+        elif type_name == "time":
+            time.fromisoformat(value)
+        else:
+            number = Decimal(value)
+            if not number.is_finite():
+                raise CatalogParameterValueError("decimal value must be finite")
+    except (ValueError, InvalidOperation) as exc:
+        raise CatalogParameterValueError(
+            f"{type_name} value has invalid syntax"
+        ) from exc
 
 
 def parse_catalog_parameter_text(

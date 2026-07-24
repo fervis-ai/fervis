@@ -8,7 +8,7 @@ from typing import Any
 
 from fervis.lookup.canonical_data import canonical_runtime_json
 from fervis.lookup.relation_catalog import RowCardinality
-from fervis.lookup.fact_plan.row_sources.model import RowSource
+from fervis.lookup.relation_catalog.row_sources.model import RowSource
 
 
 MISSING = object()

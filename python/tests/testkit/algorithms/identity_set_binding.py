@@ -24,7 +24,6 @@ from fervis.lookup.answer_program.instantiation import ExecutionEnvironment
 from fervis.lookup.answer_program.invocation import RuntimePorts, invoke_answer_program
 from fervis.lookup.memory.projection import LookupMemory
 from fervis.lookup.answer_program.model import FactFulfillment
-from fervis.lookup.fact_plan.fact_plan import FactPlan
 from fervis.lookup.answer_program.operations import (
     Operation,
     NamedExpression,
@@ -55,35 +54,35 @@ from fervis.lookup.answer_program import (
 )
 from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.canonical_data import entity_key_value
+from fervis.lookup.relation_catalog.row_sources import api_row_source_id
+from fervis.lookup.question_contract.semantic_model import RequestedFact
 
 from tests.testkit.assertions import subset_mismatches
-from tests.testkit.question_contract import question_contract_from_payload
+from tests.testkit.semantic_question_contracts import (
+    semantic_question_contract,
+    semantic_relation_guarantees,
+)
 from tests.testkit.serialization import portable_value
 
 
 def run_identity_set_binding_case(payload: dict[str, Any]) -> list[str]:
     input_payload = payload["input"]
     data_access = _DataAccess(responses=tuple(input_payload["responses"]))
-    question_contract = question_contract_from_payload(
-        {
-            "requested_facts": [
-                {
-                    "id": "fact_1",
-                    "description": "sales for prior stores",
-                    "answer_outputs": [{"id": "answer_1", "role": "ANSWER_VALUE"}],
-                }
-            ]
-        }
+    question_contract = semantic_question_contract(
+        requested_fact_id="fact_1",
+        output_ids=("answer_1",),
+        description="sales for prior stores",
     )
     catalog = _catalog(param_type=str(input_payload.get("param_type") or "uuid"))
-    draft = _plan(param_value=tuple(input_payload["identity_values"]))
-    if not isinstance(draft.outcome, AnswerProgram):
-        raise ValueError("identity-set fixture requires answer program")
+    draft, draft_bindings = _plan(
+        param_value=tuple(input_payload["identity_values"]),
+        requested_fact=question_contract.requested_facts[0],
+    )
     program, bindings = compile_answer_program(
-        draft.outcome,
+        draft,
         question_contract=question_contract,
         catalog=catalog,
-        bindings=draft.bindings,
+        bindings=draft_bindings,
     )
     result = invoke_answer_program(
         program=program,
@@ -203,7 +202,9 @@ def _catalog(*, param_type: str) -> RelationCatalog:
     )
 
 
-def _plan(*, param_value: object) -> FactPlan:
+def _plan(
+    *, param_value: object, requested_fact: RequestedFact
+) -> tuple[AnswerProgram, BindingSet]:
     identity_values = tuple(str(value) for value in param_value)
     parameter_id = "question.store_ids"
     binding_value = FactValue.identity_set(
@@ -213,19 +214,24 @@ def _plan(*, param_value: object) -> FactPlan:
             for value in identity_values
         ),
     )
-    return FactPlan(
-        bindings=BindingSet.from_bindings(
-            (
-                ParameterBinding(
-                    parameter_id=parameter_id,
-                    value=binding_value,
-                    provenance=BindingProvenance(
-                        kind=BindingProvenanceKind.QUESTION_INPUT,
-                    ),
+    bindings = BindingSet.from_bindings(
+        (
+            ParameterBinding(
+                parameter_id=parameter_id,
+                value=binding_value,
+                provenance=BindingProvenance(
+                    kind=BindingProvenanceKind.QUESTION_INPUT,
                 ),
-            )
-        ),
-        outcome=AnswerProgram(
+            ),
+        )
+    )
+    return (
+        AnswerProgram(
+            relation_guarantees=semantic_relation_guarantees(
+                requested_fact,
+                relation_ids=("sales_rows",),
+                proof_refs_by_relation={"sales_rows": ("sales",)},
+            ),
             parameters=(
                 ParameterDeclaration(
                     id=parameter_id,
@@ -246,6 +252,7 @@ def _plan(*, param_value: object) -> FactPlan:
                     source=RelationSource(
                         kind=SourceKind.API_READ,
                         read_id="sales",
+                        row_source_id=api_row_source_id("sales", "results"),
                         param_bindings=(
                             EndpointParamBinding(
                                 param_id="store_id",
@@ -294,6 +301,7 @@ def _plan(*, param_value: object) -> FactPlan:
                 ),
             ),
         ),
+        bindings,
     )
 
 

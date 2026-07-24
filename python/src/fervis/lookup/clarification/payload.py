@@ -20,7 +20,6 @@ from fervis.lookup.clarification.model import (
     ConversationInterpretationCandidate,
     ConversationInterpretationEvidence,
     ConversationResolutionContinuation,
-    FactPlanningCatalogInputContinuation,
     GroundingContinuation,
     QuestionContractContinuation,
     SourceBindingCatalogInputContinuation,
@@ -119,13 +118,6 @@ def _continuation_payload(
             "requestedFactId": continuation.requested_fact_id,
             "target": _catalog_target_payload(continuation.target),
         }
-    if isinstance(continuation, FactPlanningCatalogInputContinuation):
-        return {
-            "kind": "fact_planning_catalog_input",
-            "requestedFactId": continuation.requested_fact_id,
-            "planningRequirementId": continuation.planning_requirement_id,
-            "target": _catalog_target_payload(continuation.target),
-        }
     raise TypeError("unsupported clarification continuation")
 
 
@@ -171,14 +163,6 @@ def _continuation_from_payload(
     if kind == "source_binding_catalog_input":
         return SourceBindingCatalogInputContinuation(
             requested_fact_id=_required_text(payload, "requestedFactId"),
-            target=target,
-        )
-    if kind == "fact_planning_catalog_input":
-        return FactPlanningCatalogInputContinuation(
-            requested_fact_id=_required_text(payload, "requestedFactId"),
-            planning_requirement_id=_required_text(
-                payload, "planningRequirementId"
-            ),
             target=target,
         )
     raise ValueError(f"unsupported clarification continuation: {kind}")

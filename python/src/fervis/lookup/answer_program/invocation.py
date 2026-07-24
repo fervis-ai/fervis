@@ -60,13 +60,10 @@ from fervis.lookup.lineage.source_reads import (
     require_catalog_endpoint_for_lineage,
     source_read_key_from_index,
 )
-from fervis.lookup.answer_program.expression_instantiation import (
-    ResolvedPopulationChoice,
-)
 from fervis.lookup.outcomes.model import FactResult
 from fervis.lookup.outcomes.classification import classify_answer_result
 from fervis.lookup.outcomes.errors import ExecutionIssue
-from fervis.lookup.fact_plan.row_sources import (
+from fervis.lookup.relation_catalog.row_sources import (
     CALENDAR_DATE_FIELD_ID,
     CALENDAR_END_PARAM_REF,
     CALENDAR_MAX_ROWS,
@@ -83,7 +80,7 @@ from fervis.lookup.answer_program.relations import (
     SourceKind,
 )
 from fervis.lookup.answer_program.values import BindingSet
-from fervis.lookup.answer_program.codec import answer_program_id
+from fervis.lookup.contract_codec import answer_program_id
 from fervis.lookup.answer_program.persistence import ProgramInvocationBinding
 from fervis.lineage.enums import ProgramInvocationKind
 from fervis.lookup.question_contract import RequestedFact
@@ -189,11 +186,6 @@ def execute_verified_program(
             endpoint_arg_proofs=endpoint_arg_proofs,
             endpoint_arg_proofs_by_param=endpoint_arg_proofs_by_param,
             authority_ref=execution.authority_ref,
-            population_choices=tuple(
-                item
-                for item in instantiated_inputs.population_choices
-                if item.relation_id == relation.id
-            ),
         )
         for relation in answer.relations
     )
@@ -293,7 +285,6 @@ def _relation_rows(
     endpoint_arg_proofs: dict[str, tuple[str, ...]],
     endpoint_arg_proofs_by_param: dict[str, dict[str, tuple[str, ...]]],
     authority_ref: str,
-    population_choices: tuple[ResolvedPopulationChoice, ...],
 ) -> _RelationExecutionRows:
     rows = _source_relation_rows(
         relation.source,
@@ -310,17 +301,14 @@ def _relation_rows(
     scope_fingerprint = _scope_fingerprint(
         endpoint_args.get(relation.id) or {},
         endpoint_arg_proofs_by_param.get(relation.id, {}),
-        population_choices,
     )
-    if population_choices:
-        rows = _RelationExecutionRows(
-            relation=rows.relation.with_scope(
-                proof_refs=_population_choice_proof_refs(population_choices),
-                scope_fingerprint=scope_fingerprint,
-            ),
-            row_context=rows.row_context,
-        )
-    return rows
+    return _RelationExecutionRows(
+        relation=rows.relation.with_scope(
+            proof_refs=endpoint_arg_proofs.get(relation.id, ()),
+            scope_fingerprint=scope_fingerprint,
+        ),
+        row_context=rows.row_context,
+    )
 
 
 def _source_relation_rows(
@@ -458,7 +446,6 @@ def _source_relation_rows(
                     scope_fingerprint=_scope_fingerprint(
                         endpoint_args.get(relation.id) or {},
                         endpoint_arg_proofs_by_param.get(relation.id, {}),
-                        (),
                     ),
                     reached_terminal_page=True,
                     truncated=bool(api_read.result.get("truncated") is True),
@@ -774,18 +761,9 @@ def _endpoint_arg_proofs_by_relation_param(
     return grouped
 
 
-def _population_choice_proof_refs(
-    population_choices: tuple[ResolvedPopulationChoice, ...],
-) -> tuple[str, ...]:
-    return _dedupe_refs(
-        tuple(ref for item in population_choices for ref in item.proof_refs)
-    )
-
-
 def _scope_fingerprint(
     endpoint_args: dict[str, Any],
     endpoint_arg_proof_refs: dict[str, tuple[str, ...]],
-    population_choices: tuple[ResolvedPopulationChoice, ...] = (),
 ) -> str:
     scope: dict[str, Any] = {
         "endpointArgs": endpoint_args,
@@ -795,19 +773,6 @@ def _scope_fingerprint(
             if param_ref in endpoint_args and proof_refs
         },
     }
-    if population_choices:
-        scope["populationChoices"] = [
-            {
-                "controllerKind": item.controller_kind.value,
-                "controllerId": item.controller_id,
-                "fieldId": item.field_id,
-                "requestedFactIds": list(item.requested_fact_ids),
-                "semanticControlRef": item.semantic_control_ref,
-                "includedValues": list(item.included_values),
-                "excludedValues": list(item.excluded_values),
-            }
-            for item in population_choices
-        ]
     return canonical_runtime_json(scope)
 
 

@@ -118,6 +118,15 @@ class CatalogParam:
     semantics: str = ""
 
 
+def requires_caller_supplied_input(param: object) -> bool:
+    """Return whether one declared parameter needs a caller-provided value."""
+
+    return bool(
+        getattr(param, "required", False)
+        and getattr(param, "default", None) is None
+    )
+
+
 @dataclass(frozen=True)
 class RowPath:
     id: str

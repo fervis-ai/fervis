@@ -682,15 +682,17 @@ def _continue_and_follow(
     principal: QuestionPrincipal,
     wait_seconds: float,
 ) -> AskResult | None:
-    clarification_id = _first_clarification_id(previous)
-    if not clarification_id:
+    clarification = _first_clarification(previous)
+    if clarification is None:
         return None
+    clarification_id = str(clarification.get("id") or "").strip()
     result = questions.respond_to_clarification(
         ClarificationResponseRequest(
             question_id=previous.question_id,
             run_id=previous.run_id,
             clarification_id=clarification_id,
             response_text=answer,
+            selected_option_id=_matching_option_id(clarification, answer=answer),
             principal=principal,
             execution_mode=ExecutionMode.QUEUED,
         ),
@@ -722,13 +724,47 @@ def _follow_result(
     return result
 
 
-def _first_clarification_id(result: AskResult) -> str:
+def _first_clarification(result: AskResult) -> Mapping[str, object] | None:
     for item in result_data_clarifications(result.result_data):
         if isinstance(item, Mapping):
             clarification_id = str(item.get("id") or "").strip()
             if clarification_id:
-                return clarification_id
-    return ""
+                return item
+    return None
+
+
+def _matching_option_id(
+    clarification: Mapping[str, object],
+    *,
+    answer: str,
+) -> str:
+    exact_answer = answer.strip()
+    matches: list[str] = []
+    subjects = clarification.get("subjects")
+    if not isinstance(subjects, list):
+        return ""
+    for subject in subjects:
+        if not isinstance(subject, Mapping):
+            continue
+        options = subject.get("options")
+        if not isinstance(options, list):
+            continue
+        for option in options:
+            if not isinstance(option, Mapping):
+                continue
+            option_id = str(option.get("id") or "").strip()
+            if option_id and exact_answer in _option_response_values(option):
+                matches.append(option_id)
+    unique_matches = tuple(dict.fromkeys(matches))
+    return unique_matches[0] if len(unique_matches) == 1 else ""
+
+
+def _option_response_values(option: Mapping[str, object]) -> frozenset[str]:
+    return frozenset(
+        text
+        for field in ("id", "label", "value", "matchedLabel", "matchedValue")
+        if (text := str(option.get(field) or "").strip())
+    )
 
 
 def _write_ledger(path: Path, results: tuple[GoldsetCaseResult, ...]) -> None:

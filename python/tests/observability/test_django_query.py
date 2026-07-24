@@ -243,7 +243,6 @@ def test_django_observability_query_answer_scope_includes_previous_runs() -> Non
                     run_id="run_2",
                     produced_by_step_id="step_contract",
                     fact_key="fact_1",
-                    answer_expression_family="scalar_aggregate",
                 ),
             ),
             fact_results=(
@@ -438,7 +437,6 @@ def test_django_observability_query_answer_scope_includes_clarification_lineage(
                     run_id="run_1",
                     produced_by_step_id="step_run_1_contract",
                     fact_key="fact_1",
-                    answer_expression_family="scalar_aggregate",
                 ),
             ),
             fact_results=(

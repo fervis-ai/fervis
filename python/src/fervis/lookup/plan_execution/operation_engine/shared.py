@@ -29,7 +29,6 @@ from fervis.lookup.answer_program.operations import (
     JoinKey,
     JoinSpec,
     OrderSpec,
-    Predicate,
     NamedExpression,
     ProjectSpec,
     ProjectToKeySpec,
@@ -39,7 +38,7 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
-from fervis.lookup.answer_program.expressions import FieldRef
+from fervis.lookup.answer_program.expressions import Expression, FieldRef
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
 )
@@ -52,9 +51,11 @@ from fervis.lookup.outcomes.operation_semantics import (
 from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.plan_execution.declared_values import (
     declared_equal,
+    declared_key,
     declared_number,
     declared_order_key,
 )
+from .expression_evaluator import ExpressionEnvironment, evaluate_condition
 
 
 def _role_relation(
@@ -262,16 +263,23 @@ def _operation_scalar_refs(operation: ExecutableOperation) -> tuple[str, ...]:
             *(expression_input_id(item) for item in references.constants),
         )
     if isinstance(spec, FilterSpec):
-        return _predicate_scalar_refs(spec.predicate)
+        return _expression_scalar_refs(spec.condition)
     if isinstance(spec, UniversalConditionSpec):
-        return _predicate_scalar_refs(spec.predicate)
+        return _expression_scalar_refs(spec.condition)
+    if isinstance(spec, AggregateSpec):
+        return tuple(
+            dict.fromkeys(
+                scalar_ref
+                for aggregation in spec.aggregations
+                if aggregation.filter is not None
+                for scalar_ref in _expression_scalar_refs(aggregation.filter)
+            )
+        )
     return ()
 
 
-def _predicate_scalar_refs(predicate: Predicate) -> tuple[str, ...]:
-    if predicate.right is None:
-        return ()
-    references = expression_references(predicate.right)
+def _expression_scalar_refs(expression: Expression) -> tuple[str, ...]:
+    references = expression_references(expression)
     return (
         *(item.output_id for item in references.outputs),
         *(expression_input_id(item) for item in references.parameters),
@@ -477,27 +485,45 @@ def _require_rows_have_fields(
                 raise RelationEngineError(f"{label} missing field {field}")
 
 
-def _raise_undefined_empty_aggregation(
-    aggregations: tuple[AggregationSpec, ...],
-) -> None:
-    for aggregation in aggregations:
-        reason = empty_aggregation_undefined_reason(aggregation.function)
-        if reason is not None:
-            raise UndefinedOperationError(
-                reason_code=reason,
-                input_refs=(aggregation.input_field,),
-            )
-
-
 def _aggregate_value(
     aggregation: AggregationSpec,
     rows: list[Row],
     field_types: dict[str, str],
+    *,
+    scalars: dict[str, RuntimeValue],
+    scalar_types: dict[str, str],
 ) -> RuntimeValue:
+    if aggregation.filter is not None:
+        rows = [
+            row
+            for row in rows
+            if evaluate_condition(
+                aggregation.filter,
+                environment=ExpressionEnvironment(
+                    row=row,
+                    field_types=field_types,
+                    scalars=scalars,
+                    scalar_types=scalar_types,
+                ),
+            )
+        ]
     function = aggregation.function
-    if function == AggregationFunction.COUNT:
+    if function == AggregationFunction.COUNT and not aggregation.input_field:
         return len(rows)
-    values = [_field(row, aggregation.input_field) for row in rows]
+    values = [
+        value
+        for row in rows
+        if (value := _field(row, aggregation.input_field)) is not None
+    ]
+    if aggregation.distinct_argument:
+        values = list(
+            {
+                declared_key(value, field_types.get(aggregation.input_field)): value
+                for value in values
+            }.values()
+        )
+    if function == AggregationFunction.COUNT:
+        return len(values)
     if not values:
         reason = empty_aggregation_undefined_reason(function)
         if reason is not None:

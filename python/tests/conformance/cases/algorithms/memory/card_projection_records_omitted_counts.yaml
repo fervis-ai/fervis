@@ -5,7 +5,6 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
-  current_question: How about those?
   max_cards: 12
   conversation_context:
     factArtifacts:
@@ -13,29 +12,7 @@ input:
         outcome: answered
         sourceQuestion: How much money did we make yesterday?
         sourceAnswer: We made 100.
-        provenance: &question_contract
-          question_contract:
-            question_inputs: []
-            answer_requests:
-              - id: fact_1
-                answer_fact: money we made yesterday
-                answer_outputs:
-                  - id: answer_1
-                    description: total sales amount
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                    role: ANSWER_VALUE
-                used_question_inputs: []
+        provenance: &question_contract {}
         addresses: &answer_addresses
           - address: value.total
             kind: value

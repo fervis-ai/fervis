@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing_extensions import assert_never
 
-from fervis.lookup.answer_program.codec import canonical_contract_fingerprint
+from fervis.lookup.contract_codec import canonical_contract_fingerprint
 from fervis.lookup.answer_program.model import (
     ANSWER_PROGRAM_SCHEMA_REVISION,
     AnswerProgram,
@@ -18,11 +18,11 @@ from fervis.lookup.answer_program.relations import (
     RelationSource,
     SourceKind,
 )
-from fervis.lookup.fact_plan.row_sources.builder import (
+from fervis.lookup.relation_catalog.row_sources.builder import (
     build_row_source_catalog,
     memory_row_source_id,
 )
-from fervis.lookup.fact_plan.row_sources.model import (
+from fervis.lookup.relation_catalog.row_sources.model import (
     CALENDAR_ROW_SOURCE_ID,
     RowSourceCatalog,
 )
@@ -86,9 +86,7 @@ def compatibility_requirements(
 def build_program_compatibility(
     program: AnswerProgram,
     *,
-    catalog: RelationCatalog,
     row_sources: RowSourceCatalog,
-    memory_relations: tuple[RelationRows, ...],
 ) -> ProgramCompatibility:
     """Pin the exact current contracts required by a program graph."""
 
@@ -109,9 +107,7 @@ def build_program_compatibility(
                 source_id=key.source_id,
                 fingerprint=_current_source_fingerprint(
                     key,
-                    catalog=catalog,
                     row_sources=row_sources,
-                    memory_relations=memory_relations,
                 ),
             )
             for key in requirements.source_keys
@@ -150,9 +146,7 @@ def verify_program_compatibility(
         try:
             current_fingerprint = _current_source_fingerprint(
                 SourceContractKey(kind=pin.kind, source_id=pin.source_id),
-                catalog=catalog,
                 row_sources=row_sources,
-                memory_relations=memory_relations,
             )
         except (KeyError, StopIteration) as exc:
             raise VerificationError("incompatible_source_contract") from exc
@@ -187,7 +181,7 @@ def _source_contract_key(source: RelationSource) -> SourceContractKey:
     if source.kind is SourceKind.API_READ:
         return SourceContractKey(
             kind=SourceContractKind.CATALOG_READ,
-            source_id=source.read_id,
+            source_id=source.row_source_id,
         )
     if source.kind is SourceKind.GENERATED_CALENDAR:
         return SourceContractKey(
@@ -205,20 +199,6 @@ def _source_contract_key(source: RelationSource) -> SourceContractKey:
 def _current_source_fingerprint(
     key: SourceContractKey,
     *,
-    catalog: RelationCatalog,
     row_sources: RowSourceCatalog,
-    memory_relations: tuple[RelationRows, ...],
 ) -> str:
-    if key.kind is SourceContractKind.CATALOG_READ:
-        return canonical_contract_fingerprint(catalog.read(key.source_id))
-    elif key.kind is SourceContractKind.GENERATED_SOURCE:
-        return canonical_contract_fingerprint(row_sources.source(key.source_id))
-    elif key.kind is SourceContractKind.MEMORY_RELATION:
-        relation = next(
-            relation
-            for relation in memory_relations
-            if memory_row_source_id(relation.id) == key.source_id
-        )
-        return canonical_contract_fingerprint(relation)
-    else:
-        assert_never(key.kind)
+    return canonical_contract_fingerprint(row_sources.source(key.source_id))

@@ -12,11 +12,15 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     IdentitySetValuePayload,
     IdentityValuePayload,
+    TimeValuePayload,
+    ValueProjectionKind,
+    project_fact_value,
 )
 from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.relation_catalog.parameter_values import (
     parse_catalog_parameter_value,
 )
+from fervis.lookup.relation_catalog.model import EntityKeyComponentTarget
 
 
 def canonical_param_value(value: Any) -> str:
@@ -75,21 +79,88 @@ def identity_parameter_component_value(
 ) -> RuntimeValue:
     """Project and validate one identity component for a declared parameter."""
 
-    component_value = value.identity_key_component(component_id)
-    if isinstance(component_value, tuple) and type_name not in {"array", "list"}:
+    return fact_value_parameter_projection(
+        value,
+        projection=ValueProjectionKind.IDENTITY_COMPONENT,
+        component_id=component_id,
+        type_name=type_name,
+        choices=choices,
+    )
+
+
+def fact_value_parameter_projection(
+    value: FactValue,
+    *,
+    projection: ValueProjectionKind,
+    component_id: str | None,
+    type_name: str,
+    choices: tuple[str, ...],
+) -> RuntimeValue:
+    """Project and validate one value against a declared parameter contract."""
+
+    projected = project_fact_value(
+        value,
+        projection=projection,
+        component_id=component_id,
+    )
+    if isinstance(projected, tuple) and type_name not in {"array", "list"}:
         return tuple(
             parse_catalog_parameter_value(
                 _parameter_wire_value(item),
                 type_name=type_name,
                 choices=choices,
             )
-            for item in component_value
+            for item in projected
         )
     return parse_catalog_parameter_value(
-        _parameter_wire_value(component_value),
+        _parameter_wire_value(projected),
         type_name=type_name,
         choices=choices,
     )
+
+
+def compatible_fact_value_projections(
+    value: FactValue,
+    *,
+    type_name: str,
+    choices: tuple[str, ...],
+    entity_target: EntityKeyComponentTarget | None,
+) -> tuple[tuple[ValueProjectionKind, str | None], ...]:
+    """Return intrinsic value projections accepted by one declared parameter."""
+
+    payload = value.payload
+    candidates: tuple[tuple[ValueProjectionKind, str | None], ...]
+    if isinstance(payload, (IdentityValuePayload, IdentitySetValuePayload)):
+        if (
+            entity_target is None
+            or entity_target.entity_kind != payload.entity_kind
+            or entity_target.key_id != payload.key_id
+        ):
+            return ()
+        candidates = (
+            (ValueProjectionKind.IDENTITY_COMPONENT, entity_target.component_id),
+        )
+    elif isinstance(payload, TimeValuePayload):
+        candidates = (
+            (ValueProjectionKind.TEMPORAL_START, None),
+            (ValueProjectionKind.TEMPORAL_END, None),
+        )
+    else:
+        candidates = ((ValueProjectionKind.WHOLE_VALUE, None),)
+    compatible: list[tuple[ValueProjectionKind, str | None]] = []
+    for projection, component_id in candidates:
+        try:
+            fact_value_parameter_projection(
+                value,
+                projection=projection,
+                component_id=component_id,
+                type_name=type_name,
+                choices=choices,
+            )
+        except ValueError:
+            continue
+        compatible.append((projection, component_id))
+    return tuple(compatible)
 
 
 def compatible_identity_parameter_component_ids(
@@ -128,6 +199,8 @@ def _parameter_wire_value(value: RuntimeValue) -> object:
 __all__ = [
     "canonical_param_value",
     "compatible_identity_parameter_component_ids",
+    "compatible_fact_value_projections",
+    "fact_value_parameter_projection",
     "identity_key_component_ids",
     "identity_parameter_component_value",
     "identity_value_matches_entity_target",

@@ -1,0 +1,5 @@
+{
+  "kind": "finite_choice_binding",
+  "question": "How many observations have high priority?",
+  "operand": "high"
+}

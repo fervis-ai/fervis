@@ -85,7 +85,7 @@ def test_fervis_usage_supports_provider_model_and_usage_filters() -> None:
     rendered = stdout.getvalue()
     assert "cost total: USD 0.000080" in rendered
     assert "output_tokens: 2 tokens" in rendered
-    assert "fact_planning#1: anthropic/claude-test succeeded" in rendered
+    assert "plan_selection#1: anthropic/claude-test succeeded" in rendered
     assert "source_binding#1: openai/gpt-test succeeded" not in rendered
 
 

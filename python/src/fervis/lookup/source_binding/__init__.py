@@ -1,71 +1,43 @@
-"""Source binding public surface for lookup orchestration."""
+"""Semantic source-binding boundary."""
 
-from fervis.lookup.source_binding.candidates import (
-    bound_sources_prompt_payload,
-    same_scope_read_ids,
-    source_binding_candidate_payload,
-    source_candidate_discovery_registry,
-    source_candidate_discovery_payload,
-)
-from fervis.lookup.source_binding.model import (
-    AnswerPopulation,
-    BoundSource,
-    SourceEvidenceItem,
-    SourceField,
-    SourceFulfillment,
-    SourceMetricFitBasis,
+from .semantic import (
+    AssociationRealizationKind,
+    CatalogProvidedValue,
+    FactRealization,
+    MissingCatalogValue,
+    SemanticSourceBindingRequest,
+    SourceBindingClarification,
     SourceBindingPlan,
-    SourceBindingRequest,
-    SourceBindingResult,
-    SourceCandidateDiscoveryRequest,
+    SourceMechanicKind,
+    SubjectChoiceReview,
+    SubjectSurfaceReview,
+    source_binding_clarification,
+    source_required_inputs_are_satisfiable,
 )
-from fervis.lookup.source_binding.candidates.contracts import (
-    CandidateKeyEvidence,
-    EntityReferenceEvidence,
-    EvidenceComponent as EntityEvidenceComponent,
-    entity_evidence_entity_kind,
-    entity_evidence_key_id,
-)
-from fervis.lookup.source_binding.prompt import (
-    SourceBindingTurnPrompt,
-)
-from fervis.lookup.source_binding.parser import (
-    parse_source_binding,
-)
-from fervis.lookup.source_binding.turn import (
-    SourceBindingGenerationError,
-    SourceBindingTurnResult,
-    generate_source_binding,
-)
-from fervis.lookup.source_binding.terminal_outcomes import (
-    backend_impossible_without_answer_candidates,
+from .binding_plan_compilation import compile_source_binding_plan
+from .semantic_prompt import SemanticSourceBindingTurnPrompt
+from .semantic_verification import (
+    SourceStrategyVerificationFailure,
+    VerifiedSourceStrategy,
+    verify_source_strategy,
 )
 
 __all__ = [
-    "AnswerPopulation",
-    "BoundSource",
-    "CandidateKeyEvidence",
-    "EntityEvidenceComponent",
-    "EntityReferenceEvidence",
-    "entity_evidence_entity_kind",
-    "entity_evidence_key_id",
-    "SourceEvidenceItem",
-    "SourceField",
-    "SourceFulfillment",
-    "SourceMetricFitBasis",
-    "SourceBindingGenerationError",
+    "AssociationRealizationKind",
+    "SemanticSourceBindingRequest",
+    "SemanticSourceBindingTurnPrompt",
+    "SourceStrategyVerificationFailure",
+    "FactRealization",
+    "CatalogProvidedValue",
+    "MissingCatalogValue",
+    "SourceBindingClarification",
     "SourceBindingPlan",
-    "SourceBindingRequest",
-    "SourceBindingResult",
-    "SourceBindingTurnResult",
-    "SourceBindingTurnPrompt",
-    "SourceCandidateDiscoveryRequest",
-    "bound_sources_prompt_payload",
-    "backend_impossible_without_answer_candidates",
-    "generate_source_binding",
-    "parse_source_binding",
-    "same_scope_read_ids",
-    "source_binding_candidate_payload",
-    "source_candidate_discovery_registry",
-    "source_candidate_discovery_payload",
+    "SourceMechanicKind",
+    "SubjectChoiceReview",
+    "SubjectSurfaceReview",
+    "VerifiedSourceStrategy",
+    "compile_source_binding_plan",
+    "verify_source_strategy",
+    "source_binding_clarification",
+    "source_required_inputs_are_satisfiable",
 ]

@@ -1,49 +1,21 @@
 id: time_components_compile_to_endpoint_params
-description: Grounded time start and end components compile to endpoint date arguments.
-migrates:
-  - api/tests/fervis/lookup/fact_planning/test_values.py::test_time_value_compiles_to_explicit_start_and_end_param_components
+description: One resolved time value projects its start and end into distinct typed endpoint parameters.
 kind: algorithm
-algorithm: planning.value_uses
+algorithm: source_binding.parameter_alternatives
 input:
-  catalog:
-    reads:
-      - id: records
-        endpoint_name: list_records
-        params:
-          - ref: records.query.start_date
-            name: start_date
-            source: query
-            type: date
-          - ref: records.query.end_date
-            name: end_date
-            source: query
-            type: date
-  relations:
-    - id: records_rows
-      source:
-        kind: api_read
-        read_id: records
-        param_bindings:
-          - param_id: start_date
-            value_id: since_jan_13
-            value_component: start
-          - param_id: end_date
-            value_id: since_jan_13
-            value_component: end
-  values:
-    - id: since_jan_13
-      kind: time
-      expression: since Jan 13th
-      intent:
-        kind: open_range
-        start: {year: 2026, month: 1, day: 13}
-      resolved_start: "2026-01-13"
-      resolved_end: "2026-05-05"
-      granularity: day
+  projected_parameter_constraints:
+    - target_id: start_date
+      type: date
+      projection: TEMPORAL_START
+      values:
+        - {id: period, kind: time, expression: March 2026, resolved_start: "2026-03-01", resolved_end: "2026-03-31", granularity: month, proof_refs: [input:period]}
+    - target_id: end_date
+      type: date
+      projection: TEMPORAL_END
+      values:
+        - {id: period, kind: time, expression: March 2026, resolved_start: "2026-03-01", resolved_end: "2026-03-31", granularity: month, proof_refs: [input:period]}
 expect:
   result_contains:
-    endpoint_args:
-      - param_ref: records.query.start_date
-        value: "2026-01-13"
-      - param_ref: records.query.end_date
-        value: "2026-05-05"
+    binding_sets:
+      - start_date: {value: "2026-03-01", proof_refs: [input:period]}
+        end_date: {value: "2026-03-31", proof_refs: [input:period]}

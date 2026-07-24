@@ -15,6 +15,8 @@ from fervis.lookup.plan_execution.relations import (
     Row,
 )
 from fervis.lookup.outcomes.errors import IncompleteEvidenceError
+from fervis.lookup.outcomes.errors import UndefinedOperationError
+from fervis.lookup.outcomes.operation_semantics import empty_aggregation_undefined_reason
 from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     SortDirection,
@@ -36,7 +38,6 @@ from .shared import (
     _aggregate_value,
     _field,
     _operation_relation,
-    _raise_undefined_empty_aggregation,
     _relation,
 )
 
@@ -46,6 +47,8 @@ def _aggregate(
     spec: AggregateSpec,
     relations: dict[str, RelationRows],
     *,
+    scalars: dict[str, RuntimeValue],
+    scalar_types: dict[str, str],
     operation_refs: tuple[str, ...] = (),
 ) -> RelationRows:
     input_relation = _relation(relations, spec.input_relation)
@@ -55,7 +58,13 @@ def _aggregate(
             proof_refs=input_relation.completeness.proof_refs,
         )
     if not input_relation.rows:
-        _raise_undefined_empty_aggregation(spec.aggregations)
+        for aggregation in spec.aggregations:
+            reason = empty_aggregation_undefined_reason(aggregation.function)
+            if reason is not None:
+                raise UndefinedOperationError(
+                    reason_code=reason,
+                    input_refs=(aggregation.input_field,),
+                )
     field_types = dict(input_relation.field_types or {})
     grouped: OrderedDict[tuple[object, ...], list[Row]] = OrderedDict()
     for row in input_relation.rows:
@@ -74,7 +83,11 @@ def _aggregate(
         )
         for aggregation in spec.aggregations:
             result[aggregation.output_field] = _aggregate_value(
-                aggregation, rows, field_types
+                aggregation,
+                rows,
+                field_types,
+                scalars=scalars,
+                scalar_types=scalar_types,
             )
         output.append(result)
     return _operation_relation(
@@ -116,12 +129,17 @@ def _order(
     def key(row: Row) -> tuple[object, ...]:
         values: list[object] = []
         for sort in order_by:
-            value = declared_order_key(
-                _field(row, sort.field), field_types.get(sort.field)
+            raw_value = _field(row, sort.field)
+            if raw_value is None:
+                values.append((1, ""))
+                continue
+            value = declared_order_key(raw_value, field_types.get(sort.field))
+            directed = (
+                _Descending(value)
+                if sort.direction == SortDirection.DESC
+                else value
             )
-            values.append(
-                _Descending(value) if sort.direction == SortDirection.DESC else value
-            )
+            values.append((0, directed))
         return tuple(values)
 
     sorted_keyed_rows = sorted(

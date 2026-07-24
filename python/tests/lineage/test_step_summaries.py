@@ -6,49 +6,38 @@ from fervis.lineage.step_summary import (
     StepSemanticItem,
     step_summary_json,
     step_semantic_items_from_json,
+    step_summary_items_from_json,
 )
-from fervis.lookup.answer_program.values import FactValue, LiteralType
-from fervis.lookup.grounding.model import CanonicalInputLedger
 from fervis.lookup.lineage.explanation_metadata import (
     lineage_explanation_metadata,
 )
 from fervis.lookup.lineage.step_summaries import (
-    add_grounding_result_semantics,
     model_turn_output_summary,
-)
-from fervis.lookup.question_contract import (
-    KnownInputSource,
-    LiteralInputRole,
-    QuestionContract,
-    RequestedFact,
-    RequestedFactAnswerOutput,
-    RequestedFactLiteralInput,
 )
 from fervis.model_io.turns import ModelTurnPurpose
 from fervis.observability.event_contracts import EventPayloadKey
 
 
-def test_source_binding_model_turn_summary_projects_metric_fit_basis() -> None:
+def test_source_binding_model_turn_summary_projects_semantic_mapping_bases() -> None:
     summary = model_turn_output_summary(
         {
             EventPayloadKey.PURPOSE: ModelTurnPurpose.SOURCE_BINDING,
             EventPayloadKey.PARSED_ARGUMENTS: {
-                "outcome": {
-                    "kind": "source_bindings",
-                    "metric_fit_bases": {
-                        "fact_1": {
-                            "metric_1": {
-                                "fit_basis": "row-level payroll amount",
-                            }
+                "set_bindings": {
+                    "fact_1:set:s1": [
+                        {
+                            "mapping_basis": "Sale rows realize the requested set.",
+                            "source_ref": "source_1",
                         }
-                    },
-                    "fit_basis_interpretations": {
-                        "fact_1": {
-                            "metric_1": {
-                                "interpretation": "FITS_REQUESTED_ANSWER",
-                            }
+                    ]
+                },
+                "fact_bindings": {
+                    "fact_1:fact:f1": [
+                        {
+                            "mapping_basis": "The amount field supplies revenue.",
+                            "source_ref": "source_1",
                         }
-                    },
+                    ]
                 },
             },
         }
@@ -56,13 +45,17 @@ def test_source_binding_model_turn_summary_projects_metric_fit_basis() -> None:
 
     assert summary == step_summary_json(
         StepSummaryItem(
-            text="metric_1: row-level payroll amount -> FITS_REQUESTED_ANSWER",
+            text="Sale rows realize the requested set.",
             is_explanation=True,
-            subject="metric_1",
-            disposition="FITS_REQUESTED_ANSWER",
-            basis="row-level payroll amount",
-            path=("outcome", "metric_fit_bases", "fact_1", "metric_1", "fit_basis"),
-        )
+            basis="Sale rows realize the requested set.",
+            path=("set_bindings", "fact_1:set:s1", "0", "mapping_basis"),
+        ),
+        StepSummaryItem(
+            text="The amount field supplies revenue.",
+            is_explanation=True,
+            basis="The amount field supplies revenue.",
+            path=("fact_bindings", "fact_1:fact:f1", "0", "mapping_basis"),
+        ),
     )
 
 
@@ -107,93 +100,6 @@ def test_conversation_resolution_model_turn_summary_projects_clause_semantics() 
     ]
 
 
-def test_source_binding_model_turn_summary_projects_decision_basis() -> None:
-    summary = model_turn_output_summary(
-        {
-            EventPayloadKey.PURPOSE: ModelTurnPurpose.SOURCE_BINDING,
-            EventPayloadKey.PARSED_ARGUMENTS: {
-                "outcome": {
-                    "kind": "source_bindings",
-                    "metric_fit_bases": {},
-                    "fit_basis_interpretations": {},
-                    "bindings_for_fact_1": {
-                        "plan_shape": "aggregate_scalar",
-                        "metric": {
-                            "binding_target_id": "target.source_5",
-                            "answer_population": {
-                                "match_basis_explanation": (
-                                    "Payroll summary rows match the requested "
-                                    "staff population."
-                                )
-                            },
-                            "fulfillment_decisions": {
-                                "answer_1": {
-                                    "fulfillment_choice_id": "choice_staff_name",
-                                    "match_basis_explanation": (
-                                        "staff_name identifies the returned staff."
-                                    ),
-                                }
-                            },
-                            "param_decisions": {
-                                "month": {
-                                    "param_decision_id": "param_month",
-                                    "match_basis_explanation": (
-                                        "The requested month must bind the month param."
-                                    ),
-                                }
-                            },
-                        },
-                    },
-                },
-            },
-        }
-    )
-
-    assert summary == step_summary_json(
-        StepSummaryItem(
-            text="Source binding target.source_5",
-            detail=StepSummaryDetail.VERBOSE,
-        ),
-        StepSummaryItem(
-            text="Population basis: Payroll summary rows match the requested staff population.",
-            detail=StepSummaryDetail.VERBOSE,
-            is_explanation=True,
-            path=("answer_population", "match_basis_explanation"),
-            subject="answer_population",
-            disposition="selected",
-            basis="Payroll summary rows match the requested staff population.",
-        ),
-        StepSummaryItem(
-            text=(
-                "Fulfillment basis answer_1/choice_staff_name: "
-                "staff_name identifies the returned staff."
-            ),
-            detail=StepSummaryDetail.VERBOSE,
-            is_explanation=True,
-            path=(
-                "fulfillment_decisions",
-                "answer_1",
-                "match_basis_explanation",
-            ),
-            subject="answer_1",
-            disposition="choice_staff_name",
-            basis="staff_name identifies the returned staff.",
-        ),
-        StepSummaryItem(
-            text=(
-                "Param basis month/param_month: "
-                "The requested month must bind the month param."
-            ),
-            detail=StepSummaryDetail.VERBOSE,
-            is_explanation=True,
-            path=("param_decisions", "month", "match_basis_explanation"),
-            subject="month",
-            disposition="param_month",
-            basis="The requested month must bind the month param.",
-        ),
-    )
-
-
 def test_model_turn_summary_projects_generic_explanation_fields() -> None:
     summary = model_turn_output_summary(
         {
@@ -208,32 +114,44 @@ def test_model_turn_summary_projects_generic_explanation_fields() -> None:
                 ),
             ),
             EventPayloadKey.PARSED_ARGUMENTS: {
-                "requested_fact_assessments": {
-                    "fact_1": {
-                        "canonical_inputs": {},
-                        "read_candidate_reviews": {
-                            "source_1": {
-                                "retention_basis": (
-                                    "Area rows can ground the named London population scope."
-                                ),
-                                "relevant_row_path_tokens": ["source_1.row"],
-                                "relevant_field_tokens": ["name"],
-                                "retention_decision": "RETAIN",
-                            }
-                        },
+                "identity_outcomes": {
+                    "grounding_task_1": {
+                        "canonical_option_assessments": [],
+                        "canonical_option_basis": (
+                            "The input denotes the Area primary identity."
+                        ),
+                        "canonical_option_id": "Area.primary_key",
+                        "resolver_route_assessments": [],
+                        "resolver_route_basis": (
+                            "The route validates the supplied primary key."
+                        ),
+                        "resolver_route_id": "get_area_detail",
+                        "evidence_refs": [],
+                        "outcome": "SELECTED",
                     }
-                }
+                },
+                "read_assessments_by_requested_fact": {
+                    "fact_1": {
+                        "source_1": {
+                            "assessment_basis": (
+                                "Area rows can ground the named London population scope."
+                            ),
+                            "relevant_field_refs": ["data.area_id", "data.name"],
+                            "decision": "RETAIN",
+                        }
+                    }
+                },
             },
         }
     )
 
-    assert summary == step_summary_json(
+    assert step_summary_items_from_json(summary) == (
         StepSummaryItem(
             text="Read eligibility: retained 1 source candidates, dropped 0.",
         ),
         StepSummaryItem(
             text=(
-                "source_1: RETAIN - rows=1 - fields=1 - "
+                "source_1: RETAIN - fields=2 - "
                 "Area rows can ground the named London population scope."
             ),
             detail=StepSummaryDetail.VERBOSE,
@@ -243,6 +161,21 @@ def test_model_turn_summary_projects_generic_explanation_fields() -> None:
             basis="Area rows can ground the named London population scope.",
         ),
     )
+    assert step_semantic_items_from_json(summary) == (
+        StepSemanticItem(
+            kind="identity_selection",
+            payload={
+                "input_id": "grounding_task_1",
+                "canonical_option_id": "Area.primary_key",
+                "resolver_route_id": "get_area_detail",
+                "basis": (
+                    "The input denotes the Area primary identity. "
+                    "The route validates the supplied primary key."
+                ),
+                "outcome": "SELECTED",
+            },
+        ),
+    )
 
 
 def test_plan_selection_model_turn_summary_projects_reviewed_candidates() -> None:
@@ -250,26 +183,13 @@ def test_plan_selection_model_turn_summary_projects_reviewed_candidates() -> Non
         {
             EventPayloadKey.PURPOSE: ModelTurnPurpose.PLAN_SELECTION,
             EventPayloadKey.PARSED_ARGUMENTS: {
-                "outcome": {
-                    "kind": "source_alignment_reviews",
-                    "reviews_by_requested_fact": {
-                        "fact_1": {
-                            "source_1": {
-                                "source_candidate_id": "source_1",
-                                "basis": (
-                                    "Location rows do not expose compensation measures."
-                                ),
-                                "source_alignment": "NOT_ALIGNED",
-                            },
-                            "source_8": {
-                                "source_candidate_id": "source_8",
-                                "basis": (
-                                    "Payout rows expose amounts but no location key."
-                                ),
-                                "source_alignment": "PARTIAL",
-                            },
+                "source_assessments_by_requested_fact": {
+                    "fact_1": {
+                        "source_1": {
+                            "basis": "Location rows provide the complete fact.",
+                            "alignment": "DIRECT",
                         }
-                    },
+                    }
                 }
             },
         }
@@ -277,26 +197,15 @@ def test_plan_selection_model_turn_summary_projects_reviewed_candidates() -> Non
 
     assert summary == step_summary_json(
         StepSummaryItem(
-            text="Plan selection reviewed source candidates: source_1, source_8.",
+            text="Plan selection assessed sources: source_1.",
         ),
         StepSummaryItem(
-            text=(
-                "source_1: NOT_ALIGNED - "
-                "Location rows do not expose compensation measures."
-            ),
+            text="source_1: DIRECT - Location rows provide the complete fact.",
             detail=StepSummaryDetail.VERBOSE,
             is_explanation=True,
             subject="source_1",
-            disposition="NOT_ALIGNED",
-            basis="Location rows do not expose compensation measures.",
-        ),
-        StepSummaryItem(
-            text="source_8: PARTIAL - Payout rows expose amounts but no location key.",
-            detail=StepSummaryDetail.VERBOSE,
-            is_explanation=True,
-            subject="source_8",
-            disposition="PARTIAL",
-            basis="Payout rows expose amounts but no location key.",
+            disposition="DIRECT",
+            basis="Location rows provide the complete fact.",
         ),
     )
 
@@ -308,29 +217,75 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
         {
             EventPayloadKey.PURPOSE: ModelTurnPurpose.QUESTION_CONTRACT,
             EventPayloadKey.PARSED_ARGUMENTS: {
-                "kind": "question_contract",
-                "question_inputs": [
-                    {
-                        "input_ref": "fact_1_entity_1",
-                        "kind": "literal_text",
-                        "role": "reference_value",
-                        "source_text": "ABC Mall",
-                        "value_meaning_hint": "store",
-                        "resolved_value_text": "ABC Mall",
-                    },
-                    {
-                        "input_ref": "fact_1_time_1",
-                        "kind": "literal_text",
-                        "role": "time_value",
-                        "source_text": "this month",
-                        "resolved_value_text": "this month",
-                    },
-                ],
-                "answer_requests": [
-                    {
-                        "answer_fact": "sales at ABC Mall this month",
-                    }
-                ],
+                "decision_basis": "The question requests one result.",
+                "outcome": {
+                    "kind": "question_meaning",
+                    "answer_requests": [
+                        {
+                            "result_kind": "scalar",
+                            "qualifying_row_kind": {
+                                "meaning": "sales",
+                                "origin": {
+                                    "kind": "question",
+                                    "resolved_input_ref": None,
+                                },
+                            },
+                            "grouping_meanings": [],
+                            "return_request_basis": (
+                                "The question asks for the number of sales."
+                            ),
+                            "returned_result": {"kind": "values"},
+                            "answer_values": [
+                                {
+                                    "value_ref": "v1",
+                                    "meaning": "sale count",
+                                    "origin": {
+                                        "kind": "question",
+                                        "resolved_input_ref": None,
+                                    },
+                                }
+                            ],
+                            "returned_value_refs": ["v1"],
+                            "ordering_value_refs": [],
+                            "selection": {"kind": "all_results", "limit": None},
+                            "universal_shape": "none",
+                        },
+                    ],
+                    "supplied_values": [
+                        {
+                            "meaning": "the named store",
+                            "denotation": {
+                                "basis": "ABC Mall names a store.",
+                                "kind": "identity_reference",
+                                "instance_kind": "store",
+                            },
+                            "value": {
+                                "operands": ["ABC Mall"],
+                                "value_type": {"kind": "identity_name_or_code"},
+                                "origin": {
+                                    "kind": "question",
+                                    "resolved_input_ref": None,
+                                },
+                            },
+                        },
+                        {
+                            "meaning": "the reporting period",
+                            "denotation": {
+                                "basis": "this month states a time interval.",
+                                "kind": "scalar",
+                                "instance_kind": None,
+                            },
+                            "value": {
+                                "operands": ["this month"],
+                                "value_type": {"kind": "temporal_scope"},
+                                "origin": {
+                                    "kind": "resolved_context",
+                                    "resolved_input_ref": "time_scope",
+                                },
+                            },
+                        },
+                    ],
+                },
             },
         }
     )
@@ -340,28 +295,28 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
             kind="requested_fact",
             payload={
                 "requested_fact_id": "fact_1",
-                "description": "sales at ABC Mall this month",
+                "description": "The question asks for the number of sales.",
             },
         ),
         StepSemanticItem(
             kind="known_input",
             payload={
-                "input_id": "fact_1_entity_1",
+                "input_id": "ABC Mall",
                 "text": "ABC Mall",
-                "kind": "literal_text",
-                "role": "reference_value",
-                "description": "store",
+                "kind": "IDENTITY_REFERENCE",
+                "role": "",
+                "description": "the named store",
                 "resolved_value_text": "ABC Mall",
             },
         ),
         StepSemanticItem(
             kind="known_input",
             payload={
-                "input_id": "fact_1_time_1",
+                "input_id": "time_scope",
                 "text": "this month",
-                "kind": "literal_text",
-                "role": "time_value",
-                "description": "",
+                "kind": "NON_IDENTITY_SCALAR",
+                "role": "",
+                "description": "the reporting period",
                 "resolved_value_text": "this month",
             },
         ),
@@ -373,20 +328,13 @@ def test_enrichment_and_grounding_summaries_project_semantic_resolver_records() 
         {
             EventPayloadKey.PURPOSE: ModelTurnPurpose.QUERY_ENRICHMENT,
             EventPayloadKey.PARSED_ARGUMENTS: {
-                "entity_target_catalog_search_terms": [
+                "recall_bucket_matches": [],
+                "input_resource_search_terms": [
                     {
-                        "target_id": "fact_1_entity_1",
-                        "catalog_search_terms": [
-                            {
-                                "term": "location",
-                                "basis": (
-                                    "location can identify ABC Mall because "
-                                    "target meaning is store or location."
-                                ),
-                            },
-                        ],
+                        "input_use_ref": "fact_1:input_use:e1:1",
+                        "catalog_search_terms": ["location"],
                     }
-                ]
+                ],
             },
         }
     )
@@ -394,35 +342,46 @@ def test_enrichment_and_grounding_summaries_project_semantic_resolver_records() 
         {
             EventPayloadKey.PURPOSE: ModelTurnPurpose.GROUNDING,
             EventPayloadKey.PARSED_ARGUMENTS: {
-                "known_input_binding_reviews": {
-                    "fact_1_entity_1": {
-                        "option_reviews": {
-                            "bind_fact_1_entity_1_1": {
-                                "resolver_fit_question": "Can this route resolve ABC Mall?",
-                                "because": (
-                                    "The resolver can search location records "
-                                    "by the provided lookup text."
+                "time_resolutions": {},
+                "reference_reviews": {
+                    "grounding_task_1": {
+                        "identifier_kind_basis": "ABC Mall is a descriptive name.",
+                        "identifier_kind": "DESCRIPTIVE",
+                        "resource_type_reviews": {
+                            "location": {
+                                "compatibility_basis": (
+                                    "A location could be the place named ABC Mall."
                                 ),
-                                "decision": "CAN_RESOLVE_LOOKUP_TEXT",
+                                "compatibility": "POSSIBLE_DENOTED_KIND",
+                                "route_reviews": {
+                                    "bind_fact_1_entity_1_1": {
+                                        "assessment_basis": (
+                                            "The resolver can search location records "
+                                            "by the provided lookup text."
+                                        ),
+                                        "resolution": {
+                                            "decision": "CAN_RESOLVE_LOOKUP_TEXT",
+                                            "lookup_request_params": ["name"],
+                                            "returned_identity_verification_fields": [
+                                                "name"
+                                            ],
+                                        },
+                                    }
+                                },
                             }
-                        }
+                        },
                     }
-                }
+                },
             },
         }
     )
 
     assert step_semantic_items_from_json(enrichment_summary) == (
         StepSemanticItem(
-            kind="resolver_candidate",
+            kind="resource_recall",
             payload={
-                "input_id": "fact_1_entity_1",
-                "resolver_read_id": "",
-                "resolver_label": "Location",
-                "basis": (
-                    "location can identify ABC Mall because "
-                    "target meaning is store or location."
-                ),
+                "input_use_ref": "fact_1:input_use:e1:1",
+                "resource_name": "location",
             },
         ),
     )
@@ -430,9 +389,9 @@ def test_enrichment_and_grounding_summaries_project_semantic_resolver_records() 
         StepSemanticItem(
             kind="resolver_candidate",
             payload={
-                "input_id": "fact_1_entity_1",
-                "resolver_read_id": "",
-                "resolver_label": "bind_fact_1_entity_1_1",
+                "input_id": "grounding_task_1",
+                "resolver_read_id": "bind_fact_1_entity_1_1",
+                "resolver_label": "Bind Fact 1 Entity 1 1",
                 "basis": (
                     "The resolver can search location records "
                     "by the provided lookup text."
@@ -443,129 +402,33 @@ def test_enrichment_and_grounding_summaries_project_semantic_resolver_records() 
 
 
 def test_grounding_summary_projects_time_interpretations_as_semantic_inputs() -> None:
-    summary = add_grounding_result_semantics(
-        {},
-        ledger=CanonicalInputLedger(
-            values=(
-                FactValue.time(
-                    id="value_time_1",
-                    expression="this month",
-                    resolved_start="2026-06-01",
-                    resolved_end="2026-06-30",
-                    granularity="month",
-                    proof_refs=("known_input:fact_1_time_1",),
-                ),
-            )
-        ),
-        question_contract=QuestionContract(
-            requested_facts=(
-                RequestedFact(
-                    id="fact_1",
-                    description="sales at ABC Mall this month",
-                    answer_outputs=(
-                        RequestedFactAnswerOutput("answer_1", role="ANSWER_VALUE"),
-                    ),
-                    known_inputs=(
-                        RequestedFactLiteralInput(
-                            id="fact_1_time_1",
-                            source=KnownInputSource.QUESTION_CONTEXT,
-                            text="this month",
-                            role=LiteralInputRole.TIME_VALUE,
-                            resolved_value_text="this month",
-                        ),
-                    ),
-                ),
-            )
-        ),
-    )
-
-    assert step_semantic_items_from_json(summary) == (
-        StepSemanticItem(
-            kind="interpreted_input",
-            payload={
-                "input_id": "fact_1_time_1",
-                "input_text": "this month",
-                "kind": "time",
-                "value": "2026-06-01 to 2026-06-30",
-                "label": "this month",
-                "detail": "month",
-            },
-        ),
-    )
-
-
-def test_grounding_summary_projects_literal_interpretations_as_semantic_inputs() -> (
-    None
-):
-    summary = add_grounding_result_semantics(
-        {},
-        ledger=CanonicalInputLedger(
-            values=(
-                FactValue.literal(
-                    id="value_limit_1",
-                    literal_type=LiteralType.NUMBER,
-                    value="10",
-                    label="top 10",
-                    proof_refs=("known_input:fact_1_limit_1",),
-                ),
-            )
-        ),
-        question_contract=QuestionContract(
-            requested_facts=(
-                RequestedFact(
-                    id="fact_1",
-                    description="top 10 salespeople this month",
-                    answer_outputs=(
-                        RequestedFactAnswerOutput("answer_1", role="ANSWER_VALUE"),
-                    ),
-                    known_inputs=(
-                        RequestedFactLiteralInput(
-                            id="fact_1_limit_1",
-                            source=KnownInputSource.QUESTION_CONTEXT,
-                            text="top 10",
-                            role=LiteralInputRole.RESULT_LIMIT,
-                            resolved_value_text="10",
-                            value_meaning_hint="rank limit",
-                        ),
-                    ),
-                ),
-            )
-        ),
-    )
-
-    assert step_semantic_items_from_json(summary) == (
-        StepSemanticItem(
-            kind="interpreted_input",
-            payload={
-                "input_id": "fact_1_limit_1",
-                "input_text": "top 10",
-                "kind": "literal_number",
-                "value": "10",
-                "label": "top 10",
-                "detail": "",
-            },
-        ),
-    )
-
-
-def test_fact_planning_model_turn_summary_projects_selected_binding() -> None:
     summary = model_turn_output_summary(
         {
-            EventPayloadKey.PURPOSE: ModelTurnPurpose.FACT_PLAN,
-            EventPayloadKey.ARGUMENTS: {
-                "outcome": {
-                    "answers": [
-                        {
-                            "requested_fact_id": "fact_1",
-                            "metric": {"field_id": "calculated_pay"},
-                            "function": {"value": "sum"},
+            EventPayloadKey.PURPOSE: ModelTurnPurpose.GROUNDING,
+            EventPayloadKey.PARSED_ARGUMENTS: {
+                "reference_reviews": {},
+                "time_resolutions": {
+                    "time_task_1": {
+                        "date_intent": {
+                            "expression": "this month",
+                            "intent": {"time_shape": "period_named", "unit": "month"},
                         }
-                    ]
-                }
+                    }
+                },
             },
         }
     )
 
-    assert summary == step_summary_json(
-        StepSummaryItem(text="Binding: metric=calculated_pay function=sum")
+    assert step_semantic_items_from_json(summary) == (
+        StepSemanticItem(
+            kind="interpreted_input",
+            payload={
+                "input_id": "time_task_1",
+                "input_text": "this month",
+                "kind": "time",
+                "value": "this month",
+                "label": "this month",
+                "detail": "month",
+            },
+        ),
     )

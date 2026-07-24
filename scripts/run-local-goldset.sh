@@ -23,6 +23,8 @@ Options:
   --python PATH           Python executable. Defaults to <project-root>/.venv/bin/python.
   --wait-seconds SECONDS  Per-case wait timeout. Defaults to 300.
   --stable-runs N         Required independent successful runs per case. Defaults to 1.
+  --max-failures N        Stop after N failed cases. Defaults to 5 for batches
+                          larger than 10 cases; otherwise unlimited.
   --enforce-structured-determinism
                           Require identical structured results across repeats.
   --attempts N            Attempts for retryable provider failures. Defaults to 1.
@@ -50,6 +52,7 @@ ledger_dir=""
 python_bin=""
 wait_seconds="300"
 stable_runs="1"
+max_failures=""
 enforce_structured_determinism="0"
 attempts="1"
 retry_provider_failures="0"
@@ -99,6 +102,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --stable-runs)
       stable_runs="${2:-}"
+      shift 2
+      ;;
+    --max-failures)
+      max_failures="${2:-}"
       shift 2
       ;;
     --enforce-structured-determinism)
@@ -215,20 +222,34 @@ repo_root = pathlib.Path(sys.argv[1]).resolve()
 expected = (repo_root / "python" / "src" / "fervis").resolve()
 
 import fervis
-import fervis.lookup.question_contract.prompt as question_contract_prompt
+from fervis.lookup.question_contract import SemanticQuestionContractTurnPrompt
 
 actual = pathlib.Path(fervis.__file__).resolve()
-prompt_path = pathlib.Path(inspect.getsourcefile(question_contract_prompt) or "").resolve()
+prompt_path = pathlib.Path(
+    inspect.getsourcefile(SemanticQuestionContractTurnPrompt) or ""
+).resolve()
 if expected not in (actual, *actual.parents):
     raise SystemExit(f"wrong fervis import: {actual} does not come from {expected}")
 if expected not in (prompt_path, *prompt_path.parents):
     raise SystemExit(
-        f"wrong question_contract prompt import: {prompt_path} does not come from {expected}"
+        f"wrong semantic Question Contract import: {prompt_path} does not come from {expected}"
     )
 PY
 
 IFS=',' read -r -a cases <<< "$case_ids"
-failed=0
+if [[ -z "$max_failures" ]]; then
+  if (( ${#cases[@]} > 10 )); then
+    max_failures=5
+  else
+    max_failures=0
+  fi
+fi
+if ! [[ "$max_failures" =~ ^[0-9]+$ ]]; then
+  echo "Maximum failures must be a non-negative integer: $max_failures" >&2
+  exit 2
+fi
+
+failure_count=0
 for raw_case in "${cases[@]}"; do
   case_id="$(printf '%s' "$raw_case" | xargs)"
   [[ -n "$case_id" ]] || continue
@@ -367,9 +388,13 @@ if diagnostics:
 PY
 
   if [[ "$exit_code" -ne 0 ]]; then
-    failed=1
+    failure_count=$((failure_count + 1))
+    if (( max_failures > 0 && failure_count >= max_failures )); then
+      echo "Stopping after $failure_count failed cases (--max-failures $max_failures)."
+      break
+    fi
   fi
 done
 
 echo "Artifacts: $ledger_dir"
-exit "$failed"
+(( failure_count == 0 ))

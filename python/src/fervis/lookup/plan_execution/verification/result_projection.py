@@ -1,4 +1,4 @@
-"""Render-reference checks for fact-plan verification."""
+"""Result-projection checks for answer-program verification."""
 
 from ._shared import (
     AnswerProgram,
@@ -8,11 +8,11 @@ from ._shared import (
     VerificationError,
 )
 from .contract_types import (
-    PopulationCoverage,
     ProofLineage,
     RelationContract,
     RelationEntityKey,
     RelationEntityKeyComponent,
+    RelationSemanticGuarantee,
 )
 from .contracts import _scalar_contracts
 from .operations import _operation_input_refs
@@ -38,6 +38,32 @@ def _result_output_fact_refs(
     return {output_id: proof.fulfillment_refs() for output_id, proof in proofs.items()}
 
 
+def _result_output_semantic_guarantees(
+    answer: AnswerProgram,
+    *,
+    relation_contracts: dict[str, RelationContract],
+    operation_inputs: tuple[ResolvedOperationInput, ...],
+) -> dict[str, dict[str, RelationSemanticGuarantee]]:
+    output = {
+        item.id: dict(relation_contracts[item.relation_id].semantic_guarantees)
+        for item in answer.result_projection.relation_outputs
+        if item.relation_id in relation_contracts
+    }
+    scalar_contracts = _scalar_contracts(
+        answer,
+        relation_contracts=relation_contracts,
+        operation_inputs=operation_inputs,
+    )
+    output.update(
+        {
+            item.id: dict(scalar_contracts[item.scalar_id].semantic_guarantees)
+            for item in answer.result_projection.scalar_outputs
+            if item.scalar_id in scalar_contracts
+        }
+    )
+    return output
+
+
 def _result_output_proofs(
     answer: AnswerProgram,
     *,
@@ -57,10 +83,7 @@ def _result_output_proofs(
         proofs[result_output.id] = ProofLineage(
             value_refs=frozenset(
                 ref for field_proof in field_proofs for ref in field_proof.value_refs
-            ),
-            population_coverage=PopulationCoverage.guaranteed_by_every(
-                tuple(field_proof.population_coverage for field_proof in field_proofs)
-            ),
+            )
         )
     scalar_contracts = _scalar_contracts(
         answer,

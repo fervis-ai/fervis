@@ -9,8 +9,6 @@ from typing_extensions import assert_never
 
 from fervis.lookup.answer_program.expressions import Expression, expression_input_id
 from fervis.lookup.answer_program.values import ConstantRef, ParameterRef
-from fervis.lookup.answer_program.relations import PopulationCoverageClaim
-from fervis.lookup.predicate_operators import PredicateOperator
 
 
 class OperationKind(StrEnum):
@@ -63,13 +61,6 @@ class RelationRoleRef:
 
 
 @dataclass(frozen=True)
-class Predicate:
-    left: Expression
-    operator: PredicateOperator
-    right: Expression | None = None
-
-
-@dataclass(frozen=True)
 class SortKey:
     field: str
     direction: SortDirection
@@ -93,14 +84,15 @@ class AggregationSpec:
     function: AggregationFunction
     output_field: str
     input_field: str = ""
+    filter: Expression | None = None
+    distinct_argument: bool = False
 
 
 @dataclass(frozen=True)
 class FilterSpec:
     input_relation: str
-    predicate: Predicate
+    condition: Expression
     proof_refs: tuple[str, ...] = ()
-    population_coverage_claims: tuple[PopulationCoverageClaim, ...] = ()
     kind: OperationKind = field(default=OperationKind.FILTER, init=False)
 
 
@@ -167,7 +159,7 @@ class UniversalConditionSpec:
     observation: RelationRoleRef
     subject_keys: tuple[JoinKey, ...]
     dimension_keys: tuple[JoinKey, ...]
-    predicate: Predicate
+    condition: Expression
     output_fields: tuple[NamedExpression, ...]
     kind: OperationKind = field(
         default=OperationKind.UNIVERSAL_CONDITION,
@@ -205,26 +197,10 @@ class OrderSpec:
 
 
 @dataclass(frozen=True)
-class ComputeInputPopulationCoverage:
-    input_id: str
-    claims: tuple[PopulationCoverageClaim, ...]
-
-    def __post_init__(self) -> None:
-        if not self.input_id:
-            raise ValueError("compute input population coverage requires input")
-
-
-@dataclass(frozen=True)
 class ComputeSpec:
     expression: Expression
     output_scalar: str = ""
-    input_population_coverage: tuple[ComputeInputPopulationCoverage, ...] = ()
     kind: OperationKind = field(default=OperationKind.COMPUTE, init=False)
-
-    def __post_init__(self) -> None:
-        input_ids = tuple(item.input_id for item in self.input_population_coverage)
-        if len(set(input_ids)) != len(input_ids):
-            raise ValueError("compute input population coverage must be unique")
 
 
 def compute_value_input_id(expression: Expression) -> str:

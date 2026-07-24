@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 
 from fervis.host_api.contracts.authority import ReadContextRef
 from fervis.lineage.enums import ProgramInvocationKind
-from fervis.lookup.answer_program import AnswerProgram, BindingSet, answer_program_id
+from fervis.lookup.answer_program import AnswerProgram, BindingSet
+from fervis.lookup.contract_codec import answer_program_id
 from fervis.lookup.answer_program.persistence import (
     StoredProgramInvocation,
     program_invocation,

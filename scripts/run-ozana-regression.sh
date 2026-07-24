@@ -4,7 +4,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cases=(
-  no_data_low_completed_sales_future_date
+  completed_sales_count_explicit_date
   clarification_missing_factual_question
   clarification_missing_staff_entity
   clarification_missing_date_range

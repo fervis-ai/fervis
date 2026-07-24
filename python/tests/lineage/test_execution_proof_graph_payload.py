@@ -27,37 +27,6 @@ def test_execution_proof_graph_payload_rejects_unknown_node_kind() -> None:
         )
 
 
-def test_execution_proof_graph_payload_accepts_population_choice_node() -> None:
-    payload = read_execution_proof_graph_payload(
-        payload_schema=EXECUTION_PROOF_GRAPH_SCHEMA,
-        payload_schema_rev=EXECUTION_PROOF_GRAPH_SCHEMA_REV,
-        payload_json={
-            "nodes": [
-                {
-                    "id": "population_choice:source_1:row_predicate:status",
-                    "kind": "population_choice",
-                    "label": "Included status values [OPEN]",
-                    "population_coverage": {
-                        "row_tests": [
-                            {
-                                "requested_fact_id": "fact_1",
-                                "membership_test_id": "open_status",
-                            }
-                        ],
-                        "condition_tests": [],
-                    },
-                }
-            ],
-            "edges": [],
-        },
-    )
-
-    assert payload.nodes[0].kind.value == "population_choice"
-    assert payload.nodes[0].row_population_test_refs[0].membership_test_id == (
-        "open_status"
-    )
-
-
 def test_execution_proof_graph_payload_rejects_unknown_edge_role() -> None:
     with pytest.raises(ValueError, match="unsupported proof graph edge role"):
         read_execution_proof_graph_payload(

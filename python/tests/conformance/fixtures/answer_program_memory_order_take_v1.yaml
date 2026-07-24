@@ -1,9 +1,12 @@
-schema_revision: 6
+schema_revision: 8
 program:
   $type: AnswerProgram
   fields:
+    inputs: {$tuple: []}
+    input_denotations: {$tuple: []}
     fact_template: {$tuple: []}
     fulfillment: {$tuple: []}
+    relation_guarantees: {$tuple: []}
     parameters: {$tuple: []}
     capabilities: {$tuple: []}
     relations: {$tuple: []}
@@ -65,7 +68,7 @@ program:
     compatibility:
       $type: ProgramCompatibility
       fields:
-        schema_revision: 6
+        schema_revision: 8
         compiler_version: ""
         function_semantics: {$tuple: []}
         source_contracts: {$tuple: []}

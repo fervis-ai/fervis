@@ -1,0 +1,22 @@
+id: retained_read_prefers_shallow_covering_row_source
+description: A retained endpoint exposes the shallowest row set that covers its selected fields while deeper row sets remain available for their own fields.
+kind: algorithm
+algorithm: semantic.kernel
+input:
+  mode: retained_read_row_sources
+  sources:
+    - id: sales
+      read_id: list_sales
+      row_path_id: sales
+      row_path: data
+      field_refs: [sale_id, sold_at]
+    - id: sale_items
+      read_id: list_sales
+      row_path_id: sale_items
+      row_path: data.items
+      field_refs: [sale_id, sold_at, sale_item_id]
+  retained_field_tokens: [sold_at]
+expect:
+  result_contains:
+    retained_source_refs: [sales]
+    retained_source_count: 1

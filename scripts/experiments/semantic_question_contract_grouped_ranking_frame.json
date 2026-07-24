@@ -1,0 +1,48 @@
+{
+  "decision_basis": "The result groups qualifying deliveries by courier and ranks the delivery counts.",
+  "outcome": {
+    "kind": "question_meaning",
+    "answer_requests": [
+      {
+        "result_kind": "grouped_results",
+        "qualifying_row_kind": {
+          "meaning": "delivery occurrences",
+          "origin": {"kind": "question"}
+        },
+        "grouping_meanings": [
+          {
+            "meaning": "courier identity",
+            "origin": {"kind": "question"}
+          }
+        ],
+        "return_request_basis": "Return the winning courier identity.",
+        "returned_result": {"kind": "identities"},
+        "answer_values": [
+          {
+            "value_ref": "v1",
+            "meaning": "delivery count",
+            "origin": {"kind": "question"}
+          }
+        ],
+        "returned_value_refs": [],
+        "ordering_value_refs": ["v1"],
+        "selection": {"kind": "first_rank_with_ties"},
+        "universal_shape": "none"
+      }
+    ],
+    "supplied_values": [
+      {
+        "meaning": "the requested delivery period",
+        "denotation": {
+          "basis": "March 2026 supplies the period in which deliveries qualify.",
+          "kind": "scalar"
+        },
+        "value": {
+          "operands": ["March 2026"],
+          "value_type": {"kind": "temporal_scope"},
+          "origin": {"kind": "question"}
+        }
+      }
+    ]
+  }
+}

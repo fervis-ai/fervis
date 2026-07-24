@@ -1,43 +1,19 @@
-from fervis.lookup.plan_selection.model import (
-    BoundSourceStrategyMember,
-    BoundSelectedSourceStrategy,
-    BoundPlanSelectionSet,
-    SelectedSourceStrategy,
-    PlanSelectionSet,
-    SourceStrategy,
-    SourceStrategyMember,
-    PlanSelectionRequest,
-    PlanSelectionResult,
-    BoundRoleTarget,
+"""Semantic plan-selection boundary."""
+
+from .semantic import (
+    CandidateSourceStrategy,
+    SemanticPlanSelectionRequest,
+    SourceAlignment,
+    SourceAlignmentAssessment,
 )
-from fervis.lookup.plan_selection.parser import parse_plan_selection
-from fervis.lookup.plan_selection.prompt import (
-    PLAN_SELECTION_TOOL_NAME,
-    PlanSelectionTurnPrompt,
-)
-from fervis.lookup.plan_selection.schema import build_plan_selection_schema
-from fervis.lookup.plan_selection.turn import (
-    PlanSelectionGenerationError,
-    PlanSelectionTurnResult,
-    generate_plan_selection,
-)
+from .semantic_parser import parse_semantic_plan_selection
+from .semantic_prompt import SemanticPlanSelectionTurnPrompt
 
 __all__ = [
-    "BoundSelectedSourceStrategy",
-    "BoundSourceStrategyMember",
-    "BoundRoleTarget",
-    "BoundPlanSelectionSet",
-    "SelectedSourceStrategy",
-    "PlanSelectionSet",
-    "PLAN_SELECTION_TOOL_NAME",
-    "SourceStrategy",
-    "PlanSelectionGenerationError",
-    "SourceStrategyMember",
-    "PlanSelectionRequest",
-    "PlanSelectionResult",
-    "PlanSelectionTurnPrompt",
-    "PlanSelectionTurnResult",
-    "build_plan_selection_schema",
-    "generate_plan_selection",
-    "parse_plan_selection",
+    "CandidateSourceStrategy",
+    "SemanticPlanSelectionRequest",
+    "SemanticPlanSelectionTurnPrompt",
+    "SourceAlignment",
+    "SourceAlignmentAssessment",
+    "parse_semantic_plan_selection",
 ]

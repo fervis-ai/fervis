@@ -23,7 +23,7 @@ input:
         - parameter_id: semantic.sale_states
           value: {kind: string_set, values: [COMPLETED]}
           provenance: {kind: semantic_choice}
-      evidence:
+      evidence: &first_evidence
         - request:
             endpoint_name: list_sale_list
             args: {sales.query.store_id: store_1}
@@ -44,6 +44,9 @@ input:
               results:
                 - {sale_id: sale_1, store_id: store_1}
                 - {sale_id: sale_2, store_id: store_1}
+    - id: repeated_first_snapshot
+      bindings: *bindings
+      evidence: *first_evidence
 expect:
   result_contains:
     invocations:
@@ -65,6 +68,16 @@ expect:
             rows:
               - {answer_sale_id: sale_1, store_id: store_1}
               - {answer_sale_id: sale_2, store_id: store_1}
+        requests:
+          - endpoint_name: list_sale_list
+            args: {sales.query.store_id: store_1}
+      - id: repeated_first_snapshot
+        status: completed
+        relations:
+          - {id: sales_rows}
+          - id: answer_rows
+            rows:
+              - {answer_sale_id: sale_1, store_id: store_1}
         requests:
           - endpoint_name: list_sale_list
             args: {sales.query.store_id: store_1}

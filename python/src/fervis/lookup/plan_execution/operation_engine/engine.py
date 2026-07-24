@@ -221,6 +221,8 @@ def _execute_operation(
             operation,
             spec,
             relations,
+            scalars=scalars,
+            scalar_types=scalar_types,
             operation_refs=operation_proof_refs.get(operation.id, ()),
         )
     if isinstance(spec, OrderSpec):

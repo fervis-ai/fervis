@@ -15,7 +15,6 @@ from fervis.lookup.answer_program.contracts import (
     NamedValueExpression,
     ParameterBinding,
     ParameterDeclaration,
-    ParameterRole,
     ParameterValueType,
     ProgramInputs,
     SetParameter,
@@ -31,6 +30,8 @@ from fervis.lookup.answer_program.values import (
     ParameterRef,
     TimeComponent,
     ValueComponent,
+    ValueProjectionKind,
+    project_fact_value,
 )
 from fervis.lookup.answer_program.expressions import Expression, expression_references
 from fervis.lookup.answer_program.model import AnswerProgram
@@ -42,7 +43,6 @@ from fervis.lookup.answer_program.operations import (
     FilterSpec,
     JoinSpec,
     Operation,
-    Predicate,
     ProjectSpec,
     ProjectToKeySpec,
     OrderSpec,
@@ -51,7 +51,6 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
-from fervis.lookup.fact_planning.value_components import value_component
 
 
 @dataclass(frozen=True)
@@ -100,36 +99,22 @@ def compile_answer_program_inputs(
     *,
     bindings: BindingSet,
 ) -> CompiledProgramInputs:
+    try:
+        expressions = program_value_expressions(program)
+    except (AssertionError, TypeError):
+        raise AnswerProgramContractError(
+            "unclassified_value_origin",
+            "answer program contains a value with no declared value origin",
+        ) from None
     compiled = compile_program_inputs(
         ProgramInputs(
             parameters=program.parameters,
             bindings=bindings,
-            expressions=program_value_expressions(program),
+            expressions=expressions,
         )
     )
-    _validate_population_choice_parameters(program, compiled.parameters)
     _validate_compute_parameters(program, compiled.parameters)
     return compiled
-
-
-def _validate_population_choice_parameters(
-    program: AnswerProgram,
-    parameters: tuple[ParameterDeclaration, ...],
-) -> None:
-    by_id = {parameter.id: parameter for parameter in parameters}
-    for relation in program.relations:
-        for choice in relation.source.population_choices:
-            declaration = by_id[choice.selection_expr.parameter_id]
-            if (
-                declaration.role is not ParameterRole.SEMANTIC_CONTROL
-                or declaration.value_type is not ParameterValueType.STRING_SET
-                or choice.selection_expr.component != ValueComponent.VALUE.value
-                or choice.selection_expr.item_index is not None
-            ):
-                raise AnswerProgramContractError(
-                    "invalid_population_choice_parameter",
-                    "population choice requires a whole semantic-control string set",
-                )
 
 
 def _validate_compute_parameters(
@@ -173,13 +158,6 @@ def program_value_expressions(
                     binding.value_expr,
                 )
             )
-        for choice in relation.source.population_choices:
-            expressions.append(
-                NamedValueExpression(
-                    f"relation.{relation.id}.population.{choice.controller_id}",
-                    choice.selection_expr,
-                )
-            )
     for operation in program.operations:
         expressions.extend(_operation_value_expressions(operation))
     return tuple(expressions)
@@ -207,7 +185,7 @@ def _operation_value_expressions(
             )
         )
     if isinstance(spec, FilterSpec):
-        return _predicate_value_expressions(operation.id, spec.predicate)
+        return _condition_value_expressions(operation.id, spec.condition)
     if isinstance(spec, ProjectSpec):
         return tuple(
             NamedValueExpression(
@@ -217,7 +195,19 @@ def _operation_value_expressions(
             for output in spec.outputs
         )
     if isinstance(spec, UniversalConditionSpec):
-        return _predicate_value_expressions(operation.id, spec.predicate)
+        return _condition_value_expressions(operation.id, spec.condition)
+    if isinstance(spec, AggregateSpec):
+        return tuple(
+            NamedValueExpression(
+                sink=f"operation.{operation.id}.aggregate.{index}.filter.{leaf_index}",
+                expression=leaf,
+            )
+            for index, aggregation in enumerate(spec.aggregations)
+            if aggregation.filter is not None
+            for leaf_index, leaf in enumerate(
+                expression_references(aggregation.filter).leaves
+            )
+        )
     if isinstance(
         spec,
         (
@@ -227,7 +217,6 @@ def _operation_value_expressions(
             RoleExpandSpec,
             CrossJoinSpec,
             AntiJoinSpec,
-            AggregateSpec,
             OrderSpec,
         ),
     ):
@@ -235,20 +224,17 @@ def _operation_value_expressions(
     assert_never(spec)
 
 
-def _predicate_value_expressions(
+def _condition_value_expressions(
     operation_id: str,
-    predicate: Predicate,
+    condition: Expression,
 ) -> tuple[NamedValueExpression, ...]:
     return tuple(
         NamedValueExpression(
-            sink=f"operation.{operation_id}.predicate.{index}",
+            sink=f"operation.{operation_id}.condition.{index}",
             expression=expression,
         )
         for index, expression in enumerate(
-            (
-                predicate.left,
-                *((predicate.right,) if predicate.right is not None else ()),
-            )
+            expression_references(condition).leaves
         )
     )
 
@@ -381,26 +367,39 @@ def _fact_value_component(value: Any, component: str) -> Any:
                 f"value does not carry {component}",
             )
         try:
-            return value.identity_key_component(
-                component.removeprefix(key_component_prefix)
+            return project_fact_value(
+                value,
+                projection=ValueProjectionKind.IDENTITY_COMPONENT,
+                component_id=component.removeprefix(key_component_prefix),
             )
-        except ValueError as exc:
+        except (KeyError, ValueError) as exc:
             raise AnswerProgramContractError(
                 "unsupported_value_component",
                 f"value does not carry {component}",
             ) from exc
     try:
-        typed_component = (
-            TimeComponent(component)
-            if component in {item.value for item in TimeComponent}
-            else ValueComponent(component)
-        )
-    except ValueError as exc:
+        projection = {
+            ValueComponent.VALUE.value: ValueProjectionKind.WHOLE_VALUE,
+            TimeComponent.START.value: ValueProjectionKind.TEMPORAL_START,
+            TimeComponent.END.value: ValueProjectionKind.TEMPORAL_END,
+        }[component]
+    except KeyError as exc:
         raise AnswerProgramContractError(
             "unsupported_value_component",
             f"unsupported value component {component}",
         ) from exc
-    return value_component(value, typed_component)
+    if not isinstance(value, FactValue):
+        raise AnswerProgramContractError(
+            "unsupported_value_component",
+            f"value does not carry {component}",
+        )
+    try:
+        return project_fact_value(value, projection=projection)
+    except ValueError as exc:
+        raise AnswerProgramContractError(
+            "unsupported_value_component",
+            f"value does not carry {component}",
+        ) from exc
 
 
 def _indexed_value(value: Any, item_index: int | None) -> Any:

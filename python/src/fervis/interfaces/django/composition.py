@@ -58,7 +58,7 @@ def lookup_conversation_context(
 def question_run_request_limits() -> AskRequestLimits:
     return AskRequestLimits(
         max_budget_usd=getattr(settings, "FERVIS_MAX_REQUEST_BUDGET_USD", 10.0),
-        max_thinking_tokens=getattr(settings, "FERVIS_MAX_THINKING_TOKENS", 4096),
+        max_thinking_tokens=getattr(settings, "FERVIS_MAX_THINKING_TOKENS", 8192),
     )
 
 

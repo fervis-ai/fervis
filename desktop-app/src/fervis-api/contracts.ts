@@ -222,8 +222,7 @@ export type ClarificationOwner =
   | "conversation_resolution"
   | "question_contract"
   | "grounding"
-  | "source_binding"
-  | "fact_planning";
+  | "source_binding";
 
 export interface CatalogInputTarget {
   readonly rowSourceId: string;
@@ -259,12 +258,6 @@ export type ClarificationContinuation =
   | {
       readonly kind: "source_binding_catalog_input";
       readonly requestedFactId: string;
-      readonly target: CatalogInputTarget;
-    }
-  | {
-      readonly kind: "fact_planning_catalog_input";
-      readonly requestedFactId: string;
-      readonly planningRequirementId: string;
       readonly target: CatalogInputTarget;
     };
 
@@ -361,8 +354,9 @@ export interface RunStep {
 export interface StepSemantic {
   readonly requestedFacts: readonly SemanticRequestedFact[];
   readonly knownInputs: readonly SemanticKnownInput[];
+  readonly resourceRecalls: readonly SemanticResourceRecall[];
   readonly resolverCandidates: readonly SemanticResolverCandidate[];
-  readonly groundingResults: readonly SemanticGroundingResult[];
+  readonly identitySelections: readonly SemanticIdentitySelection[];
   readonly interpretedInputs: readonly SemanticInterpretedInput[];
   readonly conversationClauses: readonly SemanticConversationClause[];
 }
@@ -380,6 +374,11 @@ export interface SemanticKnownInput {
   readonly lookupText: string;
 }
 
+export interface SemanticResourceRecall {
+  readonly inputUseRef: string;
+  readonly resourceName: string;
+}
+
 export interface SemanticResolverCandidate {
   readonly inputId: string;
   readonly resolverReadId: string;
@@ -387,15 +386,12 @@ export interface SemanticResolverCandidate {
   readonly basis: string;
 }
 
-export interface SemanticGroundingResult {
+export interface SemanticIdentitySelection {
   readonly inputId: string;
-  readonly inputText: string;
-  readonly resolverReadId: string;
-  readonly resolverLabel: string;
-  readonly entityKind: string;
-  readonly matchedField: string;
-  readonly matchedValue: string;
-  readonly matchedLabel: string;
+  readonly canonicalOptionId: string;
+  readonly resolverRouteId: string;
+  readonly basis: string;
+  readonly outcome: string;
 }
 
 export interface SemanticInterpretedInput {

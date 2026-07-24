@@ -237,8 +237,29 @@ describe("Fervis API boundary decoder", () => {
                     resolvedValueText: "51515151-0000-0000-0002-000000009999"
                   }
                 ],
-                resolverCandidates: [],
-                groundingResults: [],
+                resourceRecalls: [
+                  {
+                    inputUseRef: "fact_1:identity:q1",
+                    resourceName: "staff"
+                  }
+                ],
+                resolverCandidates: [
+                  {
+                    basis: "The read accepts the shown staff identifier.",
+                    inputId: "q1",
+                    resolverLabel: "Get Staff Detail",
+                    resolverReadId: "get_staff_detail"
+                  }
+                ],
+                identitySelections: [
+                  {
+                    basis: "The route validates the supplied canonical identifier.",
+                    canonicalOptionId: "Staff.primary_key",
+                    inputId: "q1",
+                    outcome: "SELECTED",
+                    resolverRouteId: "get_staff_detail"
+                  }
+                ],
                 interpretedInputs: [],
                 conversationClauses: []
               }
@@ -256,6 +277,21 @@ describe("Fervis API boundary decoder", () => {
     expect(decoded.value.runs[0]?.steps[0]?.semantic.knownInputs[0]?.lookupText).toBe(
       "51515151-0000-0000-0002-000000009999"
     );
+    expect(decoded.value.runs[0]?.steps[0]?.semantic.resourceRecalls).toEqual([
+      {
+        inputUseRef: "fact_1:identity:q1",
+        resourceName: "staff"
+      }
+    ]);
+    expect(decoded.value.runs[0]?.steps[0]?.semantic.identitySelections).toEqual([
+      {
+        basis: "The route validates the supplied canonical identifier.",
+        canonicalOptionId: "Staff.primary_key",
+        inputId: "q1",
+        outcome: "SELECTED",
+        resolverRouteId: "get_staff_detail"
+      }
+    ]);
   });
 
   it("decodes the current conversation-resolution clause projection", () => {
@@ -273,8 +309,9 @@ describe("Fervis API boundary decoder", () => {
               semantic: {
                 requestedFacts: [],
                 knownInputs: [],
+                resourceRecalls: [],
                 resolverCandidates: [],
-                groundingResults: [],
+                identitySelections: [],
                 interpretedInputs: [],
                 conversationClauses: [
                   {
@@ -344,8 +381,9 @@ describe("Fervis API boundary decoder", () => {
                         semantic: {
                           requestedFacts: [],
                           knownInputs: [],
+                          resourceRecalls: [],
                           resolverCandidates: [],
-                          groundingResults: [],
+                          identitySelections: [],
                           interpretedInputs: [],
                           conversationClauses: []
                         },
@@ -680,6 +718,45 @@ describe("Fervis API boundary decoder", () => {
       throw new Error("expected decode failure");
     }
     expect(decoded.error.message).toContain("must include an actionable clarification");
+  });
+
+  it("rejects the deleted Fact Planning clarification contract", () => {
+    const broken = {
+      ...freeTextClarificationRunFixture,
+      resultData: {
+        kind: "needs_clarification",
+        details: {
+          clarifications: [
+            {
+              id: "clarification_1",
+              need: "catalog_input",
+              reason: "missing_catalog_input",
+              owner: "fact_planning",
+              continuation: {
+                kind: "fact_planning_catalog_input",
+                requestedFactId: "fact_1",
+                planningRequirementId: "requirement_1",
+                target: {
+                  rowSourceId: "source_1",
+                  paramId: "status",
+                  paramRef: "source_1.status",
+                  valueType: "choice",
+                  choices: ["OPEN", "CLOSED"]
+                }
+              },
+              question: "Which status should be used?",
+              requestedFactId: "fact_1",
+              subjects: [],
+              evidence: []
+            }
+          ]
+        }
+      }
+    };
+
+    const decoded = decodeRun(broken);
+
+    expect(decoded.ok).toBe(false);
   });
 
   it("rejects a clarification with an empty id", () => {

@@ -444,10 +444,10 @@ class RequestedFactWrite:
     run_id: str
     produced_by_step_id: str
     fact_key: str
-    answer_expression_family: str
     description: str = ""
+    requested_fact_fingerprint: str = ""
     requested_fact_json: JsonObject = field(default_factory=dict)
-    answer_requests_json: JsonObject = field(default_factory=dict)
+    inputs_json: JsonObject = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

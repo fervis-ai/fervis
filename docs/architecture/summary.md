@@ -227,13 +227,13 @@ question + visible conversation context
 -> optional conversation resolution
 -> either:
      raw question + any typed resolution
-       -> question contract
+       -> semantic Question Contract
        -> query enrichment and catalog selection
-       -> resolver capability review
-       -> read eligibility, selected resolver execution, and canonical constraints
+       -> Grounding resolver review and scalar/time certification
+       -> Read Eligibility, selected identity-resolver execution, and canonical values
        -> plan selection and source binding
-       -> fact planning
-       -> AnswerProgram compilation + initial BindingSet
+       -> deterministic fact compilation
+       -> AnswerProgram + initial BindingSet
    or:
      canonical callable prior frame
        -> ground changed arguments
@@ -274,22 +274,22 @@ factual answer cannot outlive failure to persist its audit truth.
 | Turn | Model chooses | Backend owns |
 | --- | --- | --- |
 | Conversation resolution | Complete resolved clauses, attributed values, retained fixed frame parts, an optional complete call to a shown prior frame, or a structured unresolved outcome. | Canonical context sources and frames, source-reference parsing, frame-call signature checking, persisted-program loading, and the execution-path split. |
-| Question contract | Requested facts, answer shapes, outputs, populations, and literal or row-set question inputs from the raw question plus typed prior meaning. | Stable IDs, catalog blindness, contract parsing, omission of duplicate current-only values, and preservation of uncompiled time text. |
-| Query enrichment | Resource and entity search terms grounded in the current question contract. | Catalog and resolver recall. |
-| Grounding | Whether each shown resolver read can resolve one named input and produce its declared canonical key, including selected request values and exact returned-resource match fields. More than one typed binding may be positive. | Resolver-option construction from catalog authority and the shared API-read projection, typed binding validation, and deterministic time resolution. |
-| Read eligibility | Fact-local canonical interpretation, retain/drop decisions, and relevant evidence hints. | Read-card construction, structural option validation, execution of selected typed resolver bindings, exact verification, canonical-key production, and retained-read caps. |
-| Plan selection | Which source strategy to evaluate. | Strategy construction from retained reads. |
-| Source binding | Source invocations, resolved-input applications to selected invocation targets, answer population, params and omission, finite-choice effects, fulfillment evidence, metric fit, and role-qualified targets. | Review-scope construction, ID and param validation, resolved-input application validation and compilation, target compatibility, and executable consistency. |
-| Fact planning | A typed operation plan. | Parsing the planning IR and compiling one closed `AnswerProgram` plus initial bindings. |
+| Question Contract: question frame | Independent requested results first, followed by the complete supplied-value inventory and each value's identity or scalar denotation. | Strict result-local schema branches, atomic requested-fact IDs, exact inventory coverage, typed value declarations, and one denotation per supplied value. |
+| Question Contract: relational contract | Local sets, associations, facts, typed expressions, qualification, grouping, outputs, ordering, and selection for every requested fact. | Local-reference parsing, type inference, graph invariants, input-use derivation, and the canonical semantic index. |
+| Query enrichment | Exhaustive and matching catalog resource-name recall for each semantic requirement, plus search terms for identity references only. | Bounded catalog grouping, exact task coverage, declared-resource validation, and candidate selection from exhaustive recall. |
+| Grounding | Identifier kind and compatible resolver mechanics for each identity-reference use; temporal interpretation where needed. | Resolver cards from framework-introspected catalog authority, scalar certification, time authority, and typed canonical-value/task construction. |
+| Read Eligibility | Requirement support for each candidate read, then basis-first canonical identity meaning and resolver-route selection. | Read grouping, strict assessment coverage, mechanical association validation, execution of the selected resolver, and canonical-key production. |
+| Plan Selection | DIRECT, PARTIAL, or NOT_ALIGNED assessment for every candidate source. | Complete source strategies derived from retained reads and deterministic coverage structure. |
+| Source Binding | Semantic term realization, association realization, invocation applications, and source mechanics for the selected strategy. | IDs, types, parameter projections, completeness, source-contract evidence, and exact post-binding verification. |
 
 `requested_facts` are immutable inside a run. Downstream turns satisfy,
 clarify, or block them; they do not rewrite what the user asked.
 
 ## Answer Programs And Operations
 
-Fact planning emits typed planning IR. It does not emit Python and is not the
-persisted executable contract. Deterministic compilation produces an immutable,
-canonically serialized, content-addressed `AnswerProgram` containing:
+Fact compilation deterministically lowers the verified source strategy and
+semantic Question Contract into an immutable, canonically serialized,
+content-addressed `AnswerProgram` containing:
 
 - requested-fact templates and output fulfillment;
 - typed parameter declarations and declared revision capabilities;
@@ -322,14 +322,12 @@ reads current evidence, so deterministic means stable execution meaning—not a
 promise that mutable source data yields the same numeric answer. Programs or
 values that depend on conversation memory are not admitted to this rerun path.
 
-Operation-family code under `lookup/operation_families/`,
-`lookup/fact_planning/`, `lookup/fact_plan/`, `lookup/answer_program/`, and
-`lookup/plan_execution/` owns operation support construction, schemas, parsing,
-compilation, verification, and execution.
-
-Adding a new operation should add one operation-family implementation and
-portable outcome tests. It should not require changing unrelated model turns or
-introducing another executor beside `AnswerProgram` invocation.
+`lookup/fact_compilation/` owns the one semantic-to-program lowering path.
+`lookup/answer_program/` owns the executable contract and typed values.
+`lookup/plan_execution/operation_engine/` owns the one implementation of each
+relational operation. Adding an operation extends those existing homes and its
+portable outcome cases; it does not add an operation-family registry, another
+planning turn, or another executor beside `AnswerProgram` invocation.
 
 ## Lineage And Proof
 
@@ -405,8 +403,9 @@ pipeline from conversation resolution; it is never injected directly into ground
 
 Memory is not a shortcut around proof. Successful prior requests project typed
 context sources and backend-owned canonical frames. A frame separates fixed
-question-shape parts—subject, outputs, population, and grouping—from bindable
-values such as identities, time scopes, limits, and row sets. When its program
+question-shape parts—subject, qualification, grouping, requested outputs,
+ordering, selection, and canonical output identity—from bindable input values.
+When its program
 permits later binding, it also exposes a callable signature whose persisted
 program fixes the computation.
 
@@ -417,7 +416,7 @@ copied spans, visible source IDs, canonical frame-part IDs, complete arguments,
 and persisted-program identity. It does not compare domain nouns, infer edits,
 or decide whether the follow-up means the same fact.
 
-A valid frame call bypasses question contract and fact planning, grounds only
+A valid frame call bypasses Question Contract and fact compilation, grounds only
 changed arguments, and invokes the prior program. A shape-changing follow-up
 continues through the ordinary model-assisted compiler using the raw question
 plus typed resolved meaning. Any prior-context contribution to the new answer
@@ -503,7 +502,7 @@ lookup/answer_program/      Canonical program, bindings, revisions, invocation
 lineage/                    Canonical audit models, payloads, and views
 memory/                     Conversation memory projection
 model_io/                   Provider routing, structured output, pricing
-observability/              Lineage-backed inspect, usage, prompt views
+observability/              Debug diagnostics, usage, prompt views
 delivery/                   Disposable presentation delivery use cases
 interfaces/                 CLI and framework HTTP adapters
 evaluation/goldsets/        Path-loaded runtime goldset runner

@@ -1,0 +1,6 @@
+{
+  "kind": "explicit_choice_override",
+  "question": "How many sales were canceled in March 2026?",
+  "requested_choice": "CANCELED",
+  "expected_override": true
+}

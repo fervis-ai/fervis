@@ -19,7 +19,7 @@ if TYPE_CHECKING:
         PriorProgramInvocationReader,
         ProgramInvocationBinding,
     )
-    from fervis.lookup.fact_planning.request import RuntimeValueContext
+    from fervis.lookup.runtime_values import RuntimeValueContext
     from fervis.lookup.lineage.steps import LineageRuntimeStepSink
     from fervis.lookup.clarification.model import ClarificationOwnerResponse
 

@@ -1,22 +1,10 @@
 id: incomplete_window_intent_fails_validation
-description: Time value validation rejects zero-length relative windows.
-migrates:
-  - api/tests/fervis/lookup/fact_planning/test_values.py::test_time_value_contract_rejects_incomplete_period_and_window_intents
+description: Time intent validation rejects a zero-length relative window.
 kind: algorithm
-algorithm: planning.value_contract
+algorithm: business_time.resolve
 input:
-  values:
-    - id: time_value
-      kind: time
-      expression: time
-      resolved_start: "2026-01-01"
-      resolved_end: "2026-01-01"
-      granularity: day
-      intent:
-        kind: window
-        unit: day
-        count: 0
-        direction: past
+  expression: time
+  anchor_date: "2026-01-01"
+  intent: {kind: window, unit: day, count: 0, direction: past}
 expect:
-  result_contains:
-    status: rejected
+  result_contains: {status: rejected, code: invalid_time_intent}

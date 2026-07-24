@@ -320,10 +320,10 @@ def test_django_lineage_recorder_rejects_artifact_model_call_from_other_step() -
             kind=RunStepKind.MODEL_TURN,
         ),
         RunStepWrite(
-            step_id="step_fact_planning",
+            step_id="step_plan_selection",
             run_id="run_1",
             sequence=2,
-            step_key=RunStepKey.FACT_PLANNING,
+            step_key=RunStepKey.PLAN_SELECTION,
             kind=RunStepKind.MODEL_TURN,
         ),
     ):
@@ -345,7 +345,7 @@ def test_django_lineage_recorder_rejects_artifact_model_call_from_other_step() -
             RunArtifactWrite(
                 artifact_id="artifact_wrong_step",
                 run_id="run_1",
-                step_id="step_fact_planning",
+                step_id="step_plan_selection",
                 model_call_id="call_1",
                 artifact_kind=ArtifactKind.PROMPT,
                 content_hash="sha256:prompt",
@@ -743,9 +743,8 @@ def test_django_lineage_recorder_persists_answer_lineage_primitives_idempotently
         produced_by_step_id="step_contract",
         fact_key="fact_1",
         description="open store count",
-        answer_expression_family="scalar_aggregate",
         requested_fact_json={"description": "open store count"},
-        answer_requests_json={"outputs": ["answer_1"]},
+        inputs_json={"inputs": []},
     )
     fact_result = FactResultWrite(
         fact_result_id="fact_result_1",
@@ -864,7 +863,6 @@ def test_django_lineage_recorder_records_answered_result_atomically() -> None:
                     run_id="run_1",
                     produced_by_step_id="step_contract",
                     fact_key="fact_1",
-                    answer_expression_family="scalar_aggregate",
                 ),
             ),
             fact_results=(
@@ -978,7 +976,6 @@ def test_django_lineage_recorder_rolls_back_answered_result_on_late_failure() ->
                         run_id="run_1",
                         produced_by_step_id="step_contract",
                         fact_key="fact_1",
-                        answer_expression_family="scalar_aggregate",
                     ),
                 ),
                 fact_results=(
@@ -1046,7 +1043,6 @@ def test_django_lineage_recorder_preserves_no_data_terminal_proof() -> None:
                     run_id="run_1",
                     produced_by_step_id="step_contract",
                     fact_key="fact_1",
-                    answer_expression_family="scalar_aggregate",
                 ),
             ),
             fact_results=(
@@ -1203,7 +1199,6 @@ def test_django_lineage_recorder_rejects_cross_run_lineage_references() -> None:
                 run_id="run_1",
                 produced_by_step_id="step_other_run",
                 fact_key="fact_1",
-                answer_expression_family="scalar_aggregate",
             )
         )
 
@@ -1248,7 +1243,6 @@ def test_django_lineage_recorder_rejects_cross_run_memory_artifact_refs() -> Non
             run_id="run_2",
             produced_by_step_id="step_other_run",
             fact_key="fact_1",
-            answer_expression_family="scalar_aggregate",
         )
     )
     recorder.record_fact_result(
@@ -1445,7 +1439,6 @@ def test_django_lineage_recorder_rejects_answer_output_without_proof_graph() -> 
             run_id="run_1",
             produced_by_step_id="step_contract",
             fact_key="fact_1",
-            answer_expression_family="scalar_aggregate",
         )
     )
     recorder.record_fact_result(
@@ -1528,7 +1521,6 @@ def test_django_lineage_recorder_rejects_missing_source_read_proof_ref() -> None
             run_id="run_1",
             produced_by_step_id="step_contract",
             fact_key="fact_1",
-            answer_expression_family="scalar_aggregate",
         )
     )
     recorder.record_fact_result(
@@ -1712,7 +1704,6 @@ def _record_answered_lineage_prerequisites(recorder: LineageRecorderPort) -> Non
             run_id="run_1",
             produced_by_step_id="step_contract",
             fact_key="fact_1",
-            answer_expression_family="scalar_aggregate",
         )
     )
     recorder.record_fact_result(
@@ -1868,7 +1859,6 @@ def _answered_result_write() -> AnsweredRunResultWrite:
                 run_id="run_1",
                 produced_by_step_id="step_contract",
                 fact_key="fact_1",
-                answer_expression_family="scalar_aggregate",
             ),
         ),
         fact_results=(

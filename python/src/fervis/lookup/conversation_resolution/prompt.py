@@ -167,9 +167,10 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "retained_frame_parts is the sole representation of fixed prior "
                     "question shape that the resolved clause still uses but the "
                     "current clause omits.",
-                    "Select only retained subject, output, population, or grouping "
-                    "parts. Do not select a part that explicit current meaning replaces.",
-                    "Do not repeat retained frame meaning in resolved values.",
+                    "Select retained subject, qualification, grouping, requested "
+                    "output, ordering, selection, and canonical output identity parts.",
+                    "Explicit current meaning replaces the corresponding prior part. "
+                    "Omitted prior meaning remains through retained_frame_parts.",
                 ),
             ),
             builder.instruction_block(
@@ -177,7 +178,7 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                 (
                     "Create a resolved value for every value needed to interpret the "
                     "current clause that is established by a current span, context "
-                    "anchor, or value-like prior frame part.",
+                    "anchor, or prior input frame part.",
                     "resolved_text states the value's standalone meaning.",
                     "A current_span source copies one exact occurrence from the current "
                     "clause. A context_anchor source copies one shown typed anchor. A "

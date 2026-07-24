@@ -15,8 +15,6 @@ from fervis.lookup.answer_program.operations import (
     JoinSpec,
     NamedExpression,
     Operation,
-    Predicate,
-    PredicateOperator,
     ProjectSpec,
     ProjectToKeySpec,
     KeepAll,
@@ -30,26 +28,10 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
-from fervis.lookup.answer_program.expressions import FieldRef, expression_references
-
-
-BINARY_PREDICATE_OPERATORS = frozenset(
-    {
-        PredicateOperator.EQUALS,
-        PredicateOperator.NOT_EQUALS,
-        PredicateOperator.LT,
-        PredicateOperator.LTE,
-        PredicateOperator.GT,
-        PredicateOperator.GTE,
-        PredicateOperator.IN,
-        PredicateOperator.CONTAINS,
-    }
-)
-UNARY_PREDICATE_OPERATORS = frozenset(
-    {
-        PredicateOperator.IS_NULL,
-        PredicateOperator.NOT_NULL,
-    }
+from fervis.lookup.answer_program.expressions import (
+    Expression,
+    FieldRef,
+    expression_references,
 )
 
 
@@ -59,7 +41,7 @@ def verify_operation(operation: Operation) -> None:
         raise VerificationError(f"{operation.id} requires output relation")
     if isinstance(spec, FilterSpec):
         _require_input(spec.input_relation, "filter")
-        _require_predicate(spec.predicate, "filter")
+        _require_condition(spec.condition, "filter")
     elif isinstance(spec, ProjectSpec):
         _require_input(spec.input_relation, "project")
         if not spec.outputs:
@@ -174,7 +156,7 @@ def _require_universal_condition(spec: UniversalConditionSpec) -> None:
         raise VerificationError("universal_condition requires dimension keys")
     if not spec.output_fields:
         raise VerificationError("universal_condition requires output fields")
-    _require_predicate(spec.predicate, "universal_condition")
+    _require_condition(spec.condition, "universal_condition")
     _require_unique_fields(
         tuple(output.output_field for output in spec.output_fields),
         "universal_condition",
@@ -215,17 +197,9 @@ def _require_compute(spec: ComputeSpec) -> None:
         raise VerificationError("compute requires output scalar")
 
 
-def _require_predicate(predicate: Predicate, label: str) -> None:
-    if not predicate.left or not predicate.operator:
-        raise VerificationError(f"{label} requires predicate")
-    if predicate.operator not in set(PredicateOperator):
-        raise VerificationError(f"{label} requires supported predicate operator")
-    if predicate.operator in BINARY_PREDICATE_OPERATORS:
-        if predicate.right is None:
-            raise VerificationError(f"{label} requires a right-hand side")
-        return
-    if predicate.operator in UNARY_PREDICATE_OPERATORS and predicate.right is not None:
-        raise VerificationError(f"{label} does not accept a right-hand side")
+def _require_condition(condition: Expression, label: str) -> None:
+    if not expression_references(condition).leaves:
+        raise VerificationError(f"{label} requires condition")
 
 
 def _require_aggregations(spec: AggregateSpec) -> None:
@@ -240,6 +214,14 @@ def _require_aggregations(spec: AggregateSpec) -> None:
             and not aggregation.input_field
         ):
             raise VerificationError("aggregate requires input field")
+        if not isinstance(aggregation.distinct_argument, bool):
+            raise VerificationError("aggregate distinct flag must be boolean")
+        if aggregation.distinct_argument and not aggregation.input_field:
+            raise VerificationError(
+                "distinct row count requires an explicit argument field"
+            )
+        if aggregation.filter is not None:
+            _require_condition(aggregation.filter, "aggregate filter")
         output_fields.append(aggregation.output_field)
     _require_unique_fields(tuple(output_fields), "aggregate")
 

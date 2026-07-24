@@ -1,0 +1,73 @@
+id: identity_input_owns_target_set_and_direct_association
+description: An identity input's fixed denotation supplies its target set while an observed identifier fact supplies the direct association from the candidate set.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts: ["How many facilities are in River District?"]
+  frame_payload:
+    decision_basis: The question asks for one count of qualifying facilities.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+        - result_kind: scalar
+          qualifying_row_kind: {meaning: facilities, origin: {kind: question}}
+          grouping_meanings: []
+          return_request_basis: Return the facility count.
+          returned_result: {kind: values}
+          answer_values:
+            - {value_ref: v1, meaning: facility count, origin: {kind: question}}
+          returned_value_refs: [v1]
+          ordering_value_refs: []
+          selection: {kind: all_results}
+          universal_shape: none
+      supplied_values:
+        - meaning: the district containing the qualifying facilities
+          denotation:
+            basis: River District is a descriptive identifier for one district.
+            kind: identity_reference
+            instance_kind: district
+          value: {operands: [River District], value_type: {kind: text}, origin: {kind: question}}
+  payload:
+    decision_basis: Count facilities whose observed district identity equals the supplied district.
+    outcome:
+      kind: question_contract
+      answer_requests:
+        - requested_fact_ref: fact_1
+          origin: {source: question_context, meaning: facility count in River District, resolved_input_ref: null}
+          other_sets:
+            - id: s2
+              origin: {source: question_context, meaning: district instances related to facilities, resolved_input_ref: null}
+          other_associations:
+            - id: a1
+              from_set_ref: s1
+              to_set_ref: s2
+              origin: {source: question_context, meaning: facilities in districts, resolved_input_ref: null}
+          candidate_set: {instance_interpretation: normal_business_instance}
+          qualification:
+            kind: input_comparison
+            input: {kind: input_ref, input_ref: i1}
+            operator: equals
+            fact:
+              kind: fact
+              observed_for_ref: a1
+              value_type: {kind: identifier, set_ref: s2}
+              origin: {source: question_context, meaning: facility district identity, resolved_input_ref: null}
+          grouping: []
+          ordering: []
+          selection: null
+          distinct_by: []
+          outputs:
+            - {expression: {kind: aggregate, function: count, argument: {kind: set_ref, set_ref: s1}, distinct_argument: false}}
+expect:
+  result_contains:
+    input_refs: [i1]
+    requested_facts:
+      - id: fact_1
+        result_grain: singleton
+        input_use_refs: [i1]
+        identity_input_refs: [i1]
+        source_requirement_refs: ["fact_1:association:a1", "fact_1:fact:f1", "fact_1:set:s1", "fact_1:set:s2"]
+    grounding_partitions:
+      - input_ref: i1
+        expected_set_ref: "fact_1:set:s2"
+        operand_meaning: the district containing the qualifying facilities

@@ -14,10 +14,15 @@ from fervis.lookup.answer_program.result_projection import ResultProjection
 from fervis.lookup.answer_program.values import (
     ParameterDeclaration,
 )
-from fervis.lookup.question_contract import RequestedFact
+from fervis.lookup.question_contract import (
+    InputDenotation,
+    InputTerm,
+    RequestedFact,
+)
+from fervis.lookup.qualification import QualificationGuarantee, SubjectGuarantee
 
 
-ANSWER_PROGRAM_SCHEMA_REVISION = 6
+ANSWER_PROGRAM_SCHEMA_REVISION = 8
 
 
 @dataclass(frozen=True)
@@ -25,6 +30,19 @@ class FactFulfillment:
     requested_fact_id: str
     answer_output_id: str
     result_output_id: str
+
+
+@dataclass(frozen=True)
+class RelationGuaranteeDeclaration:
+    relation_id: str
+    qualification: QualificationGuarantee
+    subject: SubjectGuarantee
+
+    def __post_init__(self) -> None:
+        if not self.relation_id:
+            raise ValueError("relation guarantee requires relation")
+        if self.qualification.requested_fact_id != self.subject.requested_fact_id:
+            raise ValueError("relation guarantee must belong to one requested fact")
 
 
 @dataclass(frozen=True)
@@ -56,8 +74,11 @@ class ProgramCompatibility:
 
 @dataclass(frozen=True)
 class AnswerProgram:
+    inputs: tuple[InputTerm, ...] = ()
+    input_denotations: tuple[InputDenotation, ...] = ()
     fact_template: tuple[RequestedFact, ...] = ()
     fulfillment: tuple[FactFulfillment, ...] = ()
+    relation_guarantees: tuple[RelationGuaranteeDeclaration, ...] = ()
     parameters: tuple[ParameterDeclaration, ...] = ()
     capabilities: tuple[NarrowPopulationCapability, ...] = ()
     relations: tuple[Relation, ...] = ()

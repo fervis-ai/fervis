@@ -3,20 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 from typing_extensions import assert_never
 
 from fervis.lookup.relation_catalog.model import RelationCatalog
 from fervis.lookup.plan_execution.errors import VerificationError
 from fervis.lookup.answer_program.relations import (
     EndpointParamBinding,
-    PopulationChoiceControllerKind,
     Relation,
-    RelationSourcePopulationChoice,
-    RelationSourceReviewScopeDecision,
     SourceKind,
 )
-from fervis.lookup.fact_plan.row_sources import (
+from fervis.lookup.relation_catalog.row_sources import (
     RowSource,
     RowSourceCatalog,
     RowSourceKind,
@@ -33,6 +30,7 @@ from fervis.lookup.answer_program.values import (
     LiteralType,
     ParameterRef,
 )
+from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
 from fervis.lookup.answer_program.contracts import (
     AnswerProgramContractError,
     BindingSet,
@@ -54,23 +52,8 @@ class ResolvedEndpointArg:
 
 
 @dataclass(frozen=True)
-class ResolvedPopulationChoice:
-    relation_id: str
-    controller_kind: PopulationChoiceControllerKind
-    controller_id: str
-    field_id: str
-    requested_fact_ids: tuple[str, ...]
-    semantic_control_ref: str
-    included_values: tuple[str, ...]
-    excluded_values: tuple[str, ...]
-    proof_refs: tuple[str, ...] = ()
-    review_scope_decisions: tuple[RelationSourceReviewScopeDecision, ...] = ()
-
-
-@dataclass(frozen=True)
 class InstantiatedProgramInputs:
     endpoint_args: tuple[ResolvedEndpointArg, ...] = ()
-    population_choices: tuple[ResolvedPopulationChoice, ...] = ()
 
 
 def instantiate_program_expressions(
@@ -88,7 +71,6 @@ def instantiate_program_expressions(
     )
 
     endpoint_args: list[ResolvedEndpointArg] = []
-    population_choices: list[ResolvedPopulationChoice] = []
     endpoint_arg_targets: set[tuple[str, str]] = set()
 
     _append_relation_source_endpoint_args(
@@ -99,96 +81,7 @@ def instantiate_program_expressions(
         bindings=bindings,
         parameters=parameters,
     )
-    _append_relation_source_population_choices(
-        population_choices,
-        relations=relations,
-        bindings=bindings,
-        parameters=parameters,
-    )
-    return InstantiatedProgramInputs(
-        endpoint_args=tuple(endpoint_args),
-        population_choices=tuple(population_choices),
-    )
-
-
-def _append_relation_source_population_choices(
-    population_choices: list[ResolvedPopulationChoice],
-    *,
-    relations: tuple[Relation, ...],
-    bindings: BindingSet,
-    parameters: tuple[ParameterDeclaration, ...],
-) -> None:
-    for relation in relations:
-        for choice in relation.source.population_choices:
-            compiled = _compiled_population_choice(
-                relation_id=relation.id,
-                choice=choice,
-                bindings=bindings,
-                parameters=parameters,
-            )
-            if compiled is not None:
-                population_choices.append(compiled)
-
-
-def _compiled_population_choice(
-    *,
-    relation_id: str,
-    choice: RelationSourcePopulationChoice,
-    bindings: BindingSet,
-    parameters: tuple[ParameterDeclaration, ...],
-) -> ResolvedPopulationChoice | None:
-    resolved = _resolve_omittable_expression(
-        choice.selection_expr,
-        bindings=bindings,
-        parameters=parameters,
-    )
-    if resolved is None:
-        return None
-    included_values = cast(tuple[str, ...], resolved.value)
-    excluded_values = tuple(
-        value for value in choice.allowed_values if value not in set(included_values)
-    )
-    semantic_control_ref = _population_choice_semantic_control_ref(
-        choice,
-        parameters=parameters,
-    )
-    return ResolvedPopulationChoice(
-        relation_id=relation_id,
-        controller_kind=choice.controller_kind,
-        controller_id=choice.controller_id,
-        field_id=choice.field_id,
-        requested_fact_ids=choice.requested_fact_ids,
-        semantic_control_ref=semantic_control_ref,
-        included_values=included_values,
-        excluded_values=excluded_values,
-        proof_refs=_dedupe_refs((*choice.proof_refs, *resolved.proof_refs)),
-        review_scope_decisions=choice.review_scope_decisions,
-    )
-
-
-def _population_choice_semantic_control_ref(
-    choice: RelationSourcePopulationChoice,
-    *,
-    parameters: tuple[ParameterDeclaration, ...],
-) -> str:
-    expression = choice.selection_expr
-    declaration = next(
-        (
-            parameter
-            for parameter in parameters
-            if parameter.id == expression.parameter_id
-        ),
-        None,
-    )
-    if declaration is None:
-        raise VerificationError(
-            f"population choice references unknown parameter {expression.parameter_id}"
-        )
-    if not declaration.semantic_control_ref:
-        raise VerificationError(
-            "population choice parameter requires semantic-control identity"
-        )
-    return declaration.semantic_control_ref
+    return InstantiatedProgramInputs(endpoint_args=tuple(endpoint_args))
 
 
 def _append_relation_source_endpoint_args(
@@ -231,7 +124,7 @@ def _append_relation_source_endpoint_args(
                 parameters=parameters,
             )
             if resolved is None:
-                if param.required and param.default is None:
+                if requires_caller_supplied_input(param):
                     raise VerificationError(
                         f"relation {relation.id} requires source param {param.id}"
                     )

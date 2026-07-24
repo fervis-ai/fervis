@@ -163,8 +163,9 @@ def test_answer_explanation_json_exposes_semantic_step_contract() -> None:
                 "resolvedValueText": "ABC Mall",
             }
         ],
+        "resourceRecalls": [],
         "resolverCandidates": [],
-        "groundingResults": [],
+        "identitySelections": [],
         "interpretedInputs": [
             {
                 "inputId": "fact_1_time_1",

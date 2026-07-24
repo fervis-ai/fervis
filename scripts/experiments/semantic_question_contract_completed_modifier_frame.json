@@ -1,0 +1,59 @@
+{
+  "decision_basis": "The question asks for one count of completed sales on a supplied date.",
+  "outcome": {
+    "kind": "question_meaning",
+    "answer_requests": [
+      {
+        "result_kind": "scalar",
+        "qualifying_row_kind": {
+          "meaning": "completed sales",
+          "origin": {
+            "kind": "question"
+          }
+        },
+        "grouping_meanings": [],
+        "return_request_basis": "How many completed sales happened on November 1, 2025?",
+        "returned_result": {
+          "kind": "values"
+        },
+        "answer_values": [
+          {
+            "value_ref": "v1",
+            "meaning": "count of completed sales",
+            "origin": {
+              "kind": "question"
+            }
+          }
+        ],
+        "returned_value_refs": [
+          "v1"
+        ],
+        "ordering_value_refs": [],
+        "selection": {
+          "kind": "all_results"
+        },
+        "universal_shape": "none"
+      }
+    ],
+    "supplied_values": [
+      {
+        "meaning": "November 1, 2025",
+        "denotation": {
+          "basis": "date used to limit qualifying sales",
+          "kind": "scalar"
+        },
+        "value": {
+          "operands": [
+            "November 1, 2025"
+          ],
+          "value_type": {
+            "kind": "temporal_scope"
+          },
+          "origin": {
+            "kind": "question"
+          }
+        }
+      }
+    ]
+  }
+}

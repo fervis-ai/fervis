@@ -16,8 +16,6 @@ from fervis.lookup.clarification.model import (
     ConversationResolutionResponse,
     ConversationInterpretationCandidate,
     ConversationInterpretationEvidence,
-    FactPlanningCatalogInputContinuation,
-    FactPlanningCatalogInputResponse,
     GroundingContinuation,
     GroundingIdentityResponse,
     QuestionContractContinuation,
@@ -75,16 +73,6 @@ def clarification_response_payload(
             "target": vars(response.target),
             "value": response.value,
         }
-    if isinstance(response, FactPlanningCatalogInputResponse):
-        return {
-            "kind": "fact_planning_catalog_input",
-            "responseId": response.response_id,
-            "clarificationId": response.clarification_id,
-            "requestedFactId": response.requested_fact_id,
-            "planningRequirementId": response.planning_requirement_id,
-            "target": vars(response.target),
-            "value": response.value,
-        }
     raise TypeError("unsupported clarification owner response")
 
 
@@ -127,15 +115,6 @@ def clarification_response_from_payload(
             response_id=_required_text(payload, "responseId"),
             clarification_id=_required_text(payload, "clarificationId"),
             requested_fact_id=_required_text(payload, "requestedFactId"),
-            target=_target_from_payload(_mapping(payload, "target")),
-            value=_required_text(payload, "value"),
-        )
-    if kind == "fact_planning_catalog_input":
-        return FactPlanningCatalogInputResponse(
-            response_id=_required_text(payload, "responseId"),
-            clarification_id=_required_text(payload, "clarificationId"),
-            requested_fact_id=_required_text(payload, "requestedFactId"),
-            planning_requirement_id=_required_text(payload, "planningRequirementId"),
             target=_target_from_payload(_mapping(payload, "target")),
             value=_required_text(payload, "value"),
         )
@@ -346,15 +325,6 @@ def parse_clarification_response(
             response_id=response_id,
             clarification_id=clarification.id,
             requested_fact_id=continuation.requested_fact_id,
-            target=continuation.target,
-            value=_catalog_value(continuation.target, selected, response_text),
-        )
-    if isinstance(continuation, FactPlanningCatalogInputContinuation):
-        return FactPlanningCatalogInputResponse(
-            response_id=response_id,
-            clarification_id=clarification.id,
-            requested_fact_id=continuation.requested_fact_id,
-            planning_requirement_id=continuation.planning_requirement_id,
             target=continuation.target,
             value=_catalog_value(continuation.target, selected, response_text),
         )

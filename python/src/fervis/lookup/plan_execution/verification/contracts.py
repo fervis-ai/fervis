@@ -1,4 +1,4 @@
-"""Relation contract construction for fact-plan verification."""
+"""Relation contracts for answer-program verification."""
 
 from ._shared import (
     AnswerProgram,
@@ -12,14 +12,13 @@ from ._shared import (
     row_source_field_evidence_ref,
 )
 from .contract_types import (
-    PopulationCoverage,
     ProofLineage,
     RelationContract,
     RelationEntityKey,
     RelationEntityKeyComponent,
+    RelationSemanticGuarantee,
     ScalarContract,
 )
-from fervis.lookup.answer_program.relations import PopulationCoverageRole
 from .execution_proof import ExecutionProofContext
 from .operation_contracts import _operation_relation_contract
 from fervis.lookup.answer_program.operations import (
@@ -40,24 +39,66 @@ def _relation_contracts(
     row_sources: RowSourceCatalog,
     proof_context: ExecutionProofContext,
 ) -> dict[str, RelationContract]:
-    contracts = {
-        relation.id: _base_relation_contract(
+    declarations = {item.relation_id: item for item in answer.relation_guarantees}
+    if len(declarations) != len(answer.relation_guarantees):
+        raise ValueError("answer program repeats a relation guarantee")
+    contracts = {}
+    for relation in answer.relations:
+        contract = _base_relation_contract(
             relation,
             catalog=catalog,
             row_sources=row_sources,
             proof_context=proof_context,
         )
-        for relation in answer.relations
-    }
+        contracts[relation.id] = _with_declared_semantic_guarantee(
+            contract,
+            declarations.pop(relation.id, None),
+        )
     for operation in answer.operations:
         if not operation.output_relation:
             continue
-        contracts[operation.output_relation] = _operation_relation_contract(
+        contract = _operation_relation_contract(
             operation,
             contracts,
             proof_context=proof_context,
         )
+        contracts[operation.output_relation] = _with_declared_semantic_guarantee(
+            contract,
+            declarations.pop(operation.output_relation, None),
+        )
+    if declarations:
+        raise ValueError("relation guarantee references an unknown relation")
     return contracts
+
+
+def _with_declared_semantic_guarantee(contract, declaration):
+    if declaration is None:
+        return contract
+    fact_id = declaration.qualification.requested_fact_id
+    if fact_id in contract.semantic_guarantees:
+        raise ValueError("relation repeats a fact guarantee")
+    required_refs = {
+        ref
+        for proof in declaration.qualification.atom_proofs
+        for ref in proof.proof_refs
+    } | set(declaration.subject.proof_refs)
+    if not required_refs <= set(contract.row_proof.value_refs):
+        raise ValueError("relation guarantee lacks executable proof evidence")
+    return RelationContract(
+        fields=dict(contract.fields),
+        grain_keys=contract.grain_keys,
+        field_proofs=dict(contract.field_proofs),
+        field_types=dict(contract.field_types),
+        entity_keys=contract.entity_keys,
+        row_proof=contract.row_proof,
+        semantic_guarantees={
+            **contract.semantic_guarantees,
+            fact_id: RelationSemanticGuarantee(
+                qualification=declaration.qualification,
+                subject=declaration.subject,
+            ),
+        },
+    )
 
 
 def _scalar_contracts(
@@ -68,16 +109,15 @@ def _scalar_contracts(
 ) -> dict[str, ScalarContract]:
     """Fold scalar proof through the existing compute-expression graph."""
 
-    inputs = _declared_scalar_input_contracts(answer)
+    inputs: dict[tuple[str, str], ScalarContract] = {}
     for item in operation_inputs:
         key = (item.operation_id, item.input_id)
         declared = inputs.get(key, ScalarContract())
         inputs[key] = ScalarContract(
             proof=ProofLineage(
-                value_refs=frozenset({*declared.proof.value_refs, *item.proof_refs}),
-                population_coverage=declared.proof.population_coverage,
+                value_refs=frozenset({*declared.proof.value_refs, *item.proof_refs})
             ),
-            population_derived=declared.population_derived,
+            semantic_guarantees=dict(declared.semantic_guarantees),
         )
     operations = {operation.id: operation for operation in answer.operations}
     scalars: dict[str, ScalarContract] = {}
@@ -123,39 +163,6 @@ def _combine_scalar_contracts(
     return output
 
 
-def _declared_scalar_input_contracts(
-    answer: AnswerProgram,
-) -> dict[tuple[str, str], ScalarContract]:
-    contracts: dict[tuple[str, str], ScalarContract] = {}
-    for operation in answer.operations:
-        spec = operation.spec
-        if not isinstance(spec, ComputeSpec):
-            continue
-        for input_coverage in spec.input_population_coverage:
-            claims = input_coverage.claims
-            contracts[(operation.id, input_coverage.input_id)] = ScalarContract(
-                proof=ProofLineage(
-                    value_refs=frozenset(
-                        proof_ref for claim in claims for proof_ref in claim.proof_refs
-                    ),
-                    population_coverage=PopulationCoverage(
-                        row_tests=frozenset(
-                            claim.test_ref
-                            for claim in claims
-                            if claim.role is PopulationCoverageRole.ROW_POPULATION
-                        ),
-                        condition_tests=frozenset(
-                            claim.test_ref
-                            for claim in claims
-                            if claim.role is PopulationCoverageRole.OPERATION_CONDITION
-                        ),
-                    ),
-                ),
-                population_derived=True,
-            )
-    return contracts
-
-
 def _scalar_input_contract(
     inputs: dict[tuple[str, str], ScalarContract],
     *,
@@ -186,7 +193,7 @@ def _node_output_contract(
         return ScalarContract()
     return ScalarContract(
         proof=relation.field_proofs.get(ref.output_id, ProofLineage()),
-        population_derived=True,
+        semantic_guarantees=dict(relation.semantic_guarantees),
     )
 
 
@@ -198,7 +205,7 @@ def _base_relation_contract(
     proof_context: ExecutionProofContext,
 ) -> RelationContract:
     fields = {field.field_id: frozenset(field.roles) for field in relation.fields}
-    population_proof = _relation_source_population_proof(
+    row_proof = _relation_source_row_proof(
         relation,
         catalog=catalog,
         row_sources=row_sources,
@@ -210,7 +217,7 @@ def _base_relation_contract(
             field.field_id,
             catalog=catalog,
             row_sources=row_sources,
-        ).merge(population_proof)
+        ).merge(row_proof)
         for field in relation.fields
     }
     field_types: dict[str, str] = {}
@@ -233,7 +240,8 @@ def _base_relation_contract(
         field_proofs=field_proofs,
         field_types=field_types,
         entity_keys=_relation_entity_keys(relation, row_sources=row_sources),
-        population_proof=population_proof,
+        row_proof=row_proof,
+        semantic_guarantees={},
     )
 
 
@@ -286,7 +294,7 @@ def _relation_entity_keys(
     return tuple(dict.fromkeys(keys))
 
 
-def _relation_source_population_proof(
+def _relation_source_row_proof(
     relation: Relation,
     *,
     catalog: RelationCatalog | None,
@@ -310,23 +318,7 @@ def _relation_source_population_proof(
     else:
         value_refs.add(row_source_evidence_ref(row_source.id))
     proof_refs.update(endpoint_arg_scope_refs.get(relation.id, frozenset()))
-    row_tests = frozenset(
-        claim.test_ref
-        for claim in relation.source.population_coverage_claims
-        if claim.role is PopulationCoverageRole.ROW_POPULATION
-    )
-    condition_tests = frozenset(
-        claim.test_ref
-        for claim in relation.source.population_coverage_claims
-        if claim.role is PopulationCoverageRole.OPERATION_CONDITION
-    )
-    return ProofLineage(
-        value_refs=frozenset({*value_refs, *proof_refs}),
-        population_coverage=PopulationCoverage(
-            row_tests=row_tests,
-            condition_tests=condition_tests,
-        ),
-    )
+    return ProofLineage(value_refs=frozenset({*value_refs, *proof_refs}))
 
 
 def _binding_proof(

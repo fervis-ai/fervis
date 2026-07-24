@@ -1,0 +1,15 @@
+{
+  "question": "How many members named Ada are there?",
+  "operand": "Ada",
+  "input_meaning": "member name",
+  "operand_meaning": "the member named Ada",
+  "expected_set_meaning": "members",
+  "resource_type": "member",
+  "key_component": "member_id",
+  "expected_read": "list_member",
+  "subject_surface": {
+    "id": "kind",
+    "choices": ["MEMBER", "WAREHOUSE"]
+  },
+  "expected_subject_values": ["MEMBER"]
+}

@@ -12,7 +12,6 @@ from fervis.memory.conversation_context.model import (
 )
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import FactArtifact
-from fervis.memory.prior_requests import PriorRequestMemory
 
 
 @dataclass(frozen=True)
@@ -76,8 +75,6 @@ def _expanded_memory_card_payload(
     context: _ActivationContext,
 ) -> dict[str, Any]:
     if activation.kind is ConversationMemoryActivationKind.PRIOR_REQUEST:
-        prior_request = activation.prior_request
-        assert prior_request is not None
         artifact = _artifact_for_id(
             activation.memory_id,
             artifact_id=activation.artifact_id,
@@ -85,7 +82,7 @@ def _expanded_memory_card_payload(
         )
         return _expanded_prior_request_payload(
             artifact=artifact,
-            prior_request=prior_request,
+            activation=activation,
         )
     artifact = _artifact_for_id(
         activation.memory_id,
@@ -131,12 +128,12 @@ def _address_for_id(
 def _expanded_prior_request_payload(
     *,
     artifact: FactArtifact,
-    prior_request: PriorRequestMemory,
+    activation: ConversationMemoryActivation,
 ) -> dict[str, Any]:
     return {
         "kind": "prior_answer_request",
         "source_question": artifact.source_question,
-        "request_shape": prior_request.request_shape_payload(),
+        "semantic_frame": dict(activation.card.details or {}).get("semantic_frame", {}),
     }
 
 

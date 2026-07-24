@@ -18,7 +18,7 @@ input:
         program_invocations:
           - run_id: run_base
             kind: compiled_question
-            program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/memory_backed}
+            program_kind: memory_relation
             bindings: []
       command:
         question_id: question_1
@@ -36,7 +36,7 @@ input:
         program_invocations:
           - run_id: run_base
             kind: compiled_question
-            program: {$ref: ../../../fixtures/answer_program_memory_constant_v1.yaml}
+            program_kind: memory_constant
             bindings: []
       command:
         question_id: question_1
@@ -54,7 +54,7 @@ input:
         program_invocations:
           - run_id: run_base
             kind: compiled_question
-            program: {$ref: ../../../fixtures/answer_program_memory_order_take_v1.yaml}
+            program_kind: memory_rank_limit
             bindings: []
       command:
         question_id: question_1

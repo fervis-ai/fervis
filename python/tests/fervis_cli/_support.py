@@ -305,7 +305,7 @@ def _lineage_dataset() -> dict[str, object]:
                 "produced_by_step_id": "step_source_binding",
                 "fact_key": "fact_1",
                 "description": "staff member who earned the most compensation",
-                "answer_expression_family": "ranked_groups",
+                "requested_fact_fingerprint": "fingerprint-1",
             }
         ],
         "fact_results": [
@@ -762,8 +762,8 @@ def _anthropic_model_call() -> ObservabilityModelCall:
     return ObservabilityModelCall(
         model_call_id="call_2",
         run_id="run_1",
-        step_id="step_fact_planning",
-        step_key=RunStepKey.FACT_PLANNING,
+        step_id="step_plan_selection",
+        step_key=RunStepKey.PLAN_SELECTION,
         step_sequence=3,
         call_index=1,
         provider="anthropic",

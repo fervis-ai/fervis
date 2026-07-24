@@ -22,11 +22,8 @@ from fervis.lookup.answer_program.expression_instantiation import (
     InstantiatedProgramInputs,
     instantiate_program_expressions,
 )
-from fervis.lookup.answer_program.fact_materialization import (
-    materialize_requested_facts,
-)
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
-from fervis.lookup.fact_plan.row_sources.model import RowSourceCatalog
+from fervis.lookup.relation_catalog.row_sources.model import RowSourceCatalog
 from fervis.lookup.answer_program.values import (
     ConstantRef,
     FactValue,
@@ -34,6 +31,7 @@ from fervis.lookup.answer_program.values import (
 )
 from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.answer_program.operations import (
+    AggregateSpec,
     ComputeSpec,
     FilterSpec,
     OrderSpec,
@@ -58,8 +56,7 @@ from fervis.lookup.answer_program.expressions import (
     expression_input_id,
     expression_references,
 )
-from fervis.lookup.question_contract import QuestionContract, RequestedFact
-from fervis.lookup.question_contract import MembershipTestRef
+from fervis.lookup.question_contract import InputTerm, RequestedFact
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
     ResolvedOperationInput,
@@ -68,9 +65,6 @@ from fervis.lookup.plan_execution.operation_runtime import (
 if TYPE_CHECKING:
     from fervis.lookup.plan_execution.authorized_sources import (
         AuthorizedExecutionSources,
-    )
-    from fervis.lookup.plan_execution.verification.contract_types import (
-        PopulationCoverage,
     )
 
 
@@ -93,8 +87,6 @@ class ExecutionProofNode:
     label: str = ""
     value: Any = None
     operator: str = ""
-    row_population_test_refs: tuple[MembershipTestRef, ...] = ()
-    condition_test_refs: tuple[MembershipTestRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -230,19 +222,17 @@ def instantiate_answer_program(
         catalog=catalog,
         memory_relations=environment.memory_relations,
     )
-    question_contract = QuestionContract(requested_facts=program.fact_template)
-    from fervis.lookup.plan_execution.verification.answer_program import (
-        _verify_answer_program_execution,
-        _verify_answer_program_structure,
+    from fervis.lookup.plan_execution.verification import (
+        prepare_answer_program,
+        verify_prepared_answer_program,
     )
 
-    structured = _verify_answer_program_structure(
+    structured = prepare_answer_program(
         program,
         compiled_inputs=compile_answer_program_inputs(
             program,
             bindings=bindings,
         ),
-        question_contract=question_contract,
         catalog=catalog,
         memory_relations=environment.memory_relations,
         catalog_selection=environment.catalog_selection,
@@ -256,12 +246,9 @@ def instantiate_answer_program(
         authority_ref=environment.authority_ref,
     )
 
-    _verify_answer_program_execution(
+    verify_prepared_answer_program(
         structured,
         materialized=materialized,
-        question_contract=QuestionContract(
-            requested_facts=materialized.effective_requested_facts
-        ),
         catalog=catalog,
         catalog_selection=environment.catalog_selection,
     )
@@ -306,18 +293,7 @@ def _materialize_execution(
         values=_program_input_values(answer, bindings=bindings),
         operation_inputs=operation_inputs,
     )
-    proof_graph = _with_population_coverage(
-        proof_graph,
-        answer=answer,
-        catalog=catalog,
-        row_sources=row_sources,
-        instantiated_inputs=instantiated_inputs,
-        operation_inputs=operation_inputs,
-    )
-    effective_requested_facts = materialize_requested_facts(
-        answer.fact_template,
-        population_choices=instantiated_inputs.population_choices,
-    )
+    effective_requested_facts = answer.fact_template
     return _MaterializedExecution(
         answer=answer,
         bindings=bindings,
@@ -329,76 +305,6 @@ def _materialize_execution(
         proof_graph=_require_valid_proof_graph(proof_graph),
         effective_requested_facts=effective_requested_facts,
         operation_inputs=operation_inputs,
-    )
-
-
-def _with_population_coverage(
-    graph: ExecutionProofGraph,
-    *,
-    answer: AnswerProgram,
-    catalog: RelationCatalog | None,
-    row_sources: RowSourceCatalog,
-    instantiated_inputs: InstantiatedProgramInputs,
-    operation_inputs: tuple[ResolvedOperationInput, ...],
-) -> ExecutionProofGraph:
-    from fervis.lookup.plan_execution.verification.contracts import (
-        _relation_contracts,
-        _scalar_contracts,
-    )
-    from fervis.lookup.plan_execution.verification.execution_proof import (
-        ExecutionProofContext,
-    )
-    from fervis.lookup.plan_execution.verification.result_projection import (
-        _result_output_proofs,
-    )
-
-    proof_context = ExecutionProofContext(
-        endpoint_arg_scope_refs=_instantiated_endpoint_arg_refs(instantiated_inputs),
-        operation_refs=_operation_input_refs(graph),
-    )
-    relation_contracts = _relation_contracts(
-        answer,
-        catalog=catalog,
-        row_sources=row_sources,
-        proof_context=proof_context,
-    )
-    scalar_contracts = _scalar_contracts(
-        answer,
-        relation_contracts=relation_contracts,
-        operation_inputs=operation_inputs,
-    )
-    result_proofs = _result_output_proofs(
-        answer,
-        relation_contracts=relation_contracts,
-        operation_inputs=operation_inputs,
-    )
-    coverage_by_node_id = {
-        **{
-            f"relation:{relation_id}": contract.population_proof.population_coverage
-            for relation_id, contract in relation_contracts.items()
-        },
-        **{
-            f"scalar:{scalar_id}": contract.proof.population_coverage
-            for scalar_id, contract in scalar_contracts.items()
-        },
-        **{
-            _answer_output_node_id(fulfillment): result_proofs[
-                fulfillment.result_output_id
-            ].population_coverage
-            for fulfillment in answer.fulfillment
-            if fulfillment.result_output_id in result_proofs
-        },
-    }
-    return ExecutionProofGraph(
-        nodes=tuple(
-            _node_with_population_coverage(
-                node,
-                coverage_by_node_id.get(node.id),
-            )
-            for node in graph.nodes
-        ),
-        edges=graph.edges,
-        contributions=graph.contributions,
     )
 
 
@@ -449,10 +355,7 @@ def _instantiate_operations(
             inputs.extend(resolved_inputs)
             continue
         if isinstance(spec, (FilterSpec, UniversalConditionSpec)):
-            for expression in (
-                spec.predicate.left,
-                *((spec.predicate.right,) if spec.predicate.right is not None else ()),
-            ):
+            for expression in expression_references(spec.condition).leaves:
                 inputs.extend(
                     _resolve_expression_inputs(
                         expression,
@@ -460,6 +363,18 @@ def _instantiate_operations(
                         operation_id=operation.id,
                     )
                 )
+        if isinstance(spec, AggregateSpec):
+            for aggregation in spec.aggregations:
+                if aggregation.filter is None:
+                    continue
+                for expression in expression_references(aggregation.filter).leaves:
+                    inputs.extend(
+                        _resolve_expression_inputs(
+                            expression,
+                            bindings=bindings,
+                            operation_id=operation.id,
+                        )
+                    )
         if not isinstance(spec, OrderSpec):
             operations.append(
                 ExecutableOperation(
@@ -599,7 +514,7 @@ def _execution_proof_graph(
     nodes: list[ExecutionProofNode] = []
     edges: list[ExecutionProofEdge] = []
     contributions: list[ExecutionProofContribution] = []
-    explicit_labels_by_ref = _explicit_labels_by_proof_ref(answer.fact_template)
+    explicit_labels_by_ref = _explicit_labels_by_proof_ref(answer.inputs)
     relations = answer.relations
     for arg in instantiated_inputs.endpoint_args:
         node_id = f"endpoint_arg:{arg.relation_id}:{arg.param_ref}"
@@ -625,58 +540,6 @@ def _execution_proof_graph(
                 source=node_id,
                 target=f"relation:{arg.relation_id}",
                 role=ProofEdgeRole.SCOPES,
-            )
-        )
-    for choice in instantiated_inputs.population_choices:
-        node_id = (
-            "population_choice:"
-            f"{choice.relation_id}:"
-            f"{choice.controller_kind.value}:"
-            f"{choice.controller_id}"
-        )
-        label = _population_choice_label(
-            choice.field_id,
-            included_values=choice.included_values,
-            excluded_values=choice.excluded_values,
-        )
-        nodes.append(
-            ExecutionProofNode(
-                id=node_id,
-                kind=ProofNodeKind.POPULATION_CHOICE,
-                proof_refs=tuple(choice.proof_refs),
-                label=label,
-                value={
-                    "requested_fact_ids": list(choice.requested_fact_ids),
-                    "semantic_control_ref": choice.semantic_control_ref,
-                    "included_values": list(choice.included_values),
-                    "excluded_values": list(choice.excluded_values),
-                    "review_scope_decisions": [
-                        {
-                            "membership_test_id": decision.membership_test_id,
-                            "decision": decision.decision.value,
-                            "axis_kind": decision.axis_kind,
-                            "axis_id": decision.axis_id,
-                            "owner_surface_ids": list(decision.owner_surface_ids),
-                            "proof_refs": list(decision.proof_refs),
-                        }
-                        for decision in choice.review_scope_decisions
-                    ],
-                },
-            )
-        )
-        contributions.append(
-            ExecutionProofContribution(
-                origin=ContributionOrigin.CONTEXTUAL,
-                label=label,
-                node_refs=(node_id,),
-                proof_refs=tuple(choice.proof_refs),
-            )
-        )
-        edges.append(
-            ExecutionProofEdge(
-                source=node_id,
-                target=f"relation:{choice.relation_id}",
-                role=_population_choice_edge_role(choice.excluded_values),
             )
         )
     for operation_input in operation_inputs:
@@ -859,13 +722,17 @@ def _operation_id_from_node(node_id: str) -> str:
 
 
 def _explicit_labels_by_proof_ref(
-    requested_facts: tuple[RequestedFact, ...],
+    inputs: tuple[InputTerm, ...],
 ) -> dict[str, str]:
-    output: dict[str, str] = {}
-    for fact in requested_facts:
-        for known_input in fact.known_inputs:
-            output.setdefault(f"known_input:{known_input.id}", known_input.text)
-    return output
+    return {
+        proof_ref: (
+            ", ".join(input_term.operand)
+            if isinstance(input_term.operand, tuple)
+            else input_term.operand
+        )
+        for input_term in inputs
+        for proof_ref in (input_term.id, f"question_input:{input_term.id}")
+    }
 
 
 def _node_contributions(
@@ -915,7 +782,7 @@ def _executed_relation_contributions(
 
 
 def _applied_origin(proof_refs: tuple[str, ...]) -> ContributionOrigin:
-    if any(ref.startswith("known_input:") for ref in proof_refs):
+    if any(ref.startswith("question_input:") for ref in proof_refs):
         return ContributionOrigin.DERIVED
     return ContributionOrigin.CONTEXTUAL
 
@@ -928,26 +795,6 @@ def _filter_label(field_id: str, *, operator: str, value: object) -> str:
     if operator == "equals":
         return _assignment_label(field_id, value)
     return f"{_short_ref(field_id)} {operator} {_render_value(value)}"
-
-
-def _population_choice_label(
-    field_id: str,
-    *,
-    included_values: tuple[str, ...],
-    excluded_values: tuple[str, ...],
-) -> str:
-    label = f"Included {_short_ref(field_id)} values [{_render_value(included_values)}]"
-    if excluded_values:
-        return f"{label}. Excluded: {_render_value(excluded_values)}"
-    return label
-
-
-def _population_choice_edge_role(
-    excluded_values: tuple[str, ...],
-) -> ProofEdgeRole:
-    if excluded_values:
-        return ProofEdgeRole.NARROWS
-    return ProofEdgeRole.SCOPES
 
 
 def _short_ref(value: str) -> str:
@@ -989,42 +836,6 @@ def _node_with_proof_refs(
         label=node.label,
         value=node.value,
         operator=node.operator,
-        row_population_test_refs=node.row_population_test_refs,
-        condition_test_refs=node.condition_test_refs,
-    )
-
-
-def _node_with_population_coverage(
-    node: ExecutionProofNode,
-    coverage: PopulationCoverage | None,
-) -> ExecutionProofNode:
-    if coverage is None:
-        return node
-    return ExecutionProofNode(
-        id=node.id,
-        kind=node.kind,
-        proof_refs=node.proof_refs,
-        label=node.label,
-        value=node.value,
-        operator=node.operator,
-        row_population_test_refs=tuple(
-            sorted(
-                coverage.row_tests,
-                key=lambda ref: (
-                    ref.requested_fact_id,
-                    ref.membership_test_id,
-                ),
-            )
-        ),
-        condition_test_refs=tuple(
-            sorted(
-                coverage.condition_tests,
-                key=lambda ref: (
-                    ref.requested_fact_id,
-                    ref.membership_test_id,
-                ),
-            )
-        ),
     )
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-from fervis.lookup.grounding.model import GroundingRequest, InputBindingOption
+from fervis.lookup.grounding.identity import InputBindingOption, InputBindingPurpose
 from fervis.lookup.relation_catalog.parameter_values import (
     CatalogParameterValueError,
     CatalogScalarParameterValue,
@@ -15,7 +15,7 @@ from fervis.lookup.relation_catalog import (
     EndpointRead,
     RelationCatalog,
 )
-from fervis.lookup.fact_plan.row_sources import (
+from fervis.lookup.relation_catalog.row_sources import (
     RowSource,
     RowSourceField,
     RowSourceParam,
@@ -47,8 +47,7 @@ class ResolverOptionSurface:
             list[dict[str, object]], read_payload["input_params"]
         )
         shared_params_by_ref = {
-            str(parameter["param_ref"]): parameter
-            for parameter in shared_input_params
+            str(parameter["param_ref"]): parameter for parameter in shared_input_params
         }
         read_payload["input_params"] = [
             _with_row_source_parameter_overlay(
@@ -66,6 +65,7 @@ class ResolverOptionSurface:
             ]
         return {
             "binding_option_id": self.option.id,
+            "purpose": self.option.purpose.value,
             "resource_type": candidate.entity_kind,
             "api_read": read_payload,
             "canonical_result": {
@@ -217,13 +217,6 @@ class ResolverOptionSurface:
         return True
 
 
-def resolver_option_surface(
-    request: GroundingRequest,
-    option: InputBindingOption,
-) -> ResolverOptionSurface:
-    return resolver_option_surface_from_catalog(request.resolver_catalog, option)
-
-
 def resolver_option_surface_from_catalog(
     catalog: RelationCatalog,
     option: InputBindingOption,
@@ -231,17 +224,26 @@ def resolver_option_surface_from_catalog(
     read = catalog.read(option.candidate.resolver_read_id)
     source = option.candidate.resolver_source
     related_resource_field_ids = source.related_resource_field_ids
-    return ResolverOptionSurface(
-        option=option,
-        read=read,
-        source=source,
-        request_parameters=source.params,
-        response_match_fields=tuple(
+    if option.purpose is InputBindingPurpose.IDENTITY_VALIDATION:
+        request_parameters = option.candidate.identity_validation_request_parameters
+        response_match_fields = tuple(
+            source.field(component.field_id)
+            for component in option.candidate.key_components
+        )
+    else:
+        request_parameters = source.params
+        response_match_fields = tuple(
             field
             for field in source.fields
             if field.id not in related_resource_field_ids
             and _field_supports_exact_match(field)
-        ),
+        )
+    return ResolverOptionSurface(
+        option=option,
+        read=read,
+        source=source,
+        request_parameters=request_parameters,
+        response_match_fields=response_match_fields,
     )
 
 
@@ -276,6 +278,5 @@ def _with_row_source_parameter_overlay(
 
 __all__ = [
     "ResolverOptionSurface",
-    "resolver_option_surface",
     "resolver_option_surface_from_catalog",
 ]

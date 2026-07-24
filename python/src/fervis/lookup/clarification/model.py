@@ -51,7 +51,6 @@ class ClarificationOwner(StrEnum):
     QUESTION_CONTRACT = "question_contract"
     GROUNDING = "grounding"
     SOURCE_BINDING = "source_binding"
-    FACT_PLANNING = "fact_planning"
 
 
 @dataclass(frozen=True)
@@ -186,23 +185,11 @@ class SourceBindingCatalogInputContinuation:
             raise ValueError("source-binding continuation requires requested fact")
 
 
-@dataclass(frozen=True)
-class FactPlanningCatalogInputContinuation:
-    requested_fact_id: str
-    planning_requirement_id: str
-    target: CatalogInputTarget
-
-    def __post_init__(self) -> None:
-        if not self.requested_fact_id or not self.planning_requirement_id:
-            raise ValueError("fact-planning continuation requires planning requirement")
-
-
 ClarificationContinuationSpec = (
     ConversationResolutionContinuation
     | QuestionContractContinuation
     | GroundingContinuation
     | SourceBindingCatalogInputContinuation
-    | FactPlanningCatalogInputContinuation
 )
 
 
@@ -247,8 +234,6 @@ def _continuation_owner(
         return ClarificationOwner.GROUNDING
     if isinstance(continuation, SourceBindingCatalogInputContinuation):
         return ClarificationOwner.SOURCE_BINDING
-    if isinstance(continuation, FactPlanningCatalogInputContinuation):
-        return ClarificationOwner.FACT_PLANNING
     raise TypeError("unsupported clarification continuation")
 
 
@@ -349,20 +334,9 @@ class SourceBindingCatalogInputResponse:
     value: str
 
 
-@dataclass(frozen=True)
-class FactPlanningCatalogInputResponse:
-    response_id: str
-    clarification_id: str
-    requested_fact_id: str
-    planning_requirement_id: str
-    target: CatalogInputTarget
-    value: str
-
-
 ClarificationOwnerResponse = (
     ConversationResolutionResponse
     | QuestionContractResponse
     | GroundingIdentityResponse
     | SourceBindingCatalogInputResponse
-    | FactPlanningCatalogInputResponse
 )

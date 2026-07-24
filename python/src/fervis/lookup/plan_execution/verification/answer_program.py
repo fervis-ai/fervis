@@ -1,16 +1,14 @@
-"""Answer-program checks for fact-plan verification."""
+"""Answer-program structural and execution checks."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 from ._shared import (
     AnswerProgram,
     AuthorizedExecutionSources,
     CatalogSelectionResult,
-    QuestionContract,
-    RequestedFact,
     RelationCatalog,
     RelationRows,
     RowSourceCatalog,
@@ -20,7 +18,7 @@ from ._shared import (
 )
 from .contract_types import RelationContract
 from .contracts import _relation_contracts
-from .execution_proof import ExecutionProofContext
+from .execution_proof import ExecutionProofContext, ExecutionProofSource
 from .operations import (
     _verify_answer_uses_evidence_input,
     _verify_compute_scalar_availability,
@@ -28,55 +26,58 @@ from .operations import (
     _verify_operation_field_references,
     _verify_operation_references,
 )
-from .question_contract import _verify_question_contract
 from .result_projection import (
     _result_output_fact_refs,
-    _result_output_proofs,
+    _result_output_semantic_guarantees,
     _verify_result_output_targets,
     _verify_result_references,
 )
-from fervis.lookup.question_contract import (
-    AnswerPopulationMembershipTestKind,
-    MembershipTestRef,
-)
+from fervis.lookup.question_contract import analyze_requested_fact
+from fervis.lookup.qualification import qualification_entails
 from .sources import (
     _allowed_read_ids,
     _verify_api_relation_catalog_refs,
-    _verify_compute_input_population_coverage_claims,
     _verify_relations,
     _verify_required_source_params,
-    _verify_source_population_coverage_claims,
     _verify_sources,
     _verify_program_expression_targets,
 )
 from fervis.lookup.answer_program.inputs import CompiledProgramInputs
+from fervis.lookup.answer_program.expression_instantiation import (
+    InstantiatedProgramInputs,
+)
 from fervis.lookup.answer_program.values import BindingSet
 from fervis.lookup.answer_program.contracts import AnswerProgramContractError
 from fervis.lookup.answer_program.revisions import verify_capability_declarations
+from fervis.lookup.plan_execution.operation_runtime import ResolvedOperationInput
 
-if TYPE_CHECKING:
-    from fervis.lookup.answer_program.instantiation import _MaterializedExecution
+
+class MaterializedAnswerProgram(ExecutionProofSource, Protocol):
+    @property
+    def instantiated_inputs(self) -> InstantiatedProgramInputs: ...
+
+    @property
+    def operation_inputs(self) -> tuple[ResolvedOperationInput, ...]: ...
 
 
 @dataclass(frozen=True)
-class _StructuredAnswerProgram:
+class PreparedAnswerProgram:
     program: AnswerProgram
     bindings: BindingSet
     row_sources: RowSourceCatalog
 
 
-def _verify_answer_program_structure(
+def prepare_answer_program(
     answer: AnswerProgram,
     *,
     compiled_inputs: CompiledProgramInputs,
-    question_contract: QuestionContract,
     catalog: RelationCatalog | None,
     memory_relations: tuple[RelationRows, ...],
     catalog_selection: CatalogSelectionResult | None,
     authorized_sources: AuthorizedExecutionSources | None,
-) -> _StructuredAnswerProgram:
+) -> PreparedAnswerProgram:
     bindings = compiled_inputs.bindings
-    _verify_question_contract(question_contract)
+    _verify_semantic_templates(answer)
     if not answer.operations:
         raise VerificationError("answer plan requires at least one operation")
     try:
@@ -96,17 +97,6 @@ def _verify_answer_program_structure(
             authorized_sources=authorized_sources,
         ),
     )
-    _verify_source_population_coverage_claims(
-        answer,
-        question_contract=question_contract,
-        row_sources=row_sources,
-        bindings=bindings,
-    )
-    _verify_compute_input_population_coverage_claims(
-        answer,
-        question_contract=question_contract,
-        bindings=bindings,
-    )
     _verify_relations(answer.relations)
     for operation in answer.operations:
         verify_operation(operation)
@@ -125,30 +115,17 @@ def _verify_answer_program_structure(
     _verify_compute_scalar_availability(answer)
     _verify_answer_uses_evidence_input(answer)
     _verify_result_output_targets(answer, require_output=False)
-    relation_contracts = _relation_contracts(
-        answer,
-        catalog=catalog,
-        row_sources=row_sources,
-        proof_context=ExecutionProofContext.empty(),
-    )
-    _verify_population_fulfillment(
-        answer,
-        question_contract=question_contract,
-        relation_contracts=relation_contracts,
-        operation_inputs=(),
-    )
-    return _StructuredAnswerProgram(
+    return PreparedAnswerProgram(
         program=answer,
         bindings=bindings,
         row_sources=row_sources,
     )
 
 
-def _verify_answer_program_execution(
-    structured: _StructuredAnswerProgram,
+def verify_prepared_answer_program(
+    structured: PreparedAnswerProgram,
     *,
-    materialized: _MaterializedExecution,
-    question_contract: QuestionContract,
+    materialized: MaterializedAnswerProgram,
     catalog: RelationCatalog | None,
     catalog_selection: CatalogSelectionResult | None,
 ) -> None:
@@ -178,7 +155,6 @@ def _verify_answer_program_execution(
     _verify_result_references(answer, relation_contracts=relation_contracts)
     _verify_fact_fulfillment(
         answer,
-        question_contract=question_contract,
         relation_contracts=relation_contracts,
         operation_inputs=materialized.operation_inputs,
         catalog_selection=catalog_selection,
@@ -188,14 +164,13 @@ def _verify_answer_program_execution(
 def _verify_fact_fulfillment(
     answer: AnswerProgram,
     *,
-    question_contract: QuestionContract,
     relation_contracts: dict[str, RelationContract],
     operation_inputs,
     catalog_selection: CatalogSelectionResult | None,
 ) -> None:
-    requested = {fact.id: fact for fact in question_contract.requested_facts}
+    requested = {fact.id: fact for fact in answer.fact_template}
     requested_outputs = {
-        fact.id: {output.id for output in fact.support_answer_outputs}
+        fact.id: {output.id for output in fact.outputs}
         for fact in requested.values()
     }
     fulfilled_outputs: set[tuple[str, str]] = set()
@@ -208,12 +183,23 @@ def _verify_fact_fulfillment(
         relation_contracts=relation_contracts,
         operation_inputs=operation_inputs,
     )
-    _verify_population_fulfillment(
+    result_output_guarantees = _result_output_semantic_guarantees(
         answer,
-        question_contract=question_contract,
         relation_contracts=relation_contracts,
         operation_inputs=operation_inputs,
     )
+    semantic_inputs = {item.id: item for item in answer.inputs}
+    semantic_denotations = {
+        item.input_ref: item for item in answer.input_denotations
+    }
+    semantic_indexes = {
+        fact.id: analyze_requested_fact(
+            fact,
+            inputs=semantic_inputs,
+            input_denotations=semantic_denotations,
+        )
+        for fact in answer.fact_template
+    }
     for item in answer.fulfillment:
         fact = requested.get(item.requested_fact_id)
         if fact is None:
@@ -231,68 +217,68 @@ def _verify_fact_fulfillment(
             raise VerificationError("fulfillment result output is not projected")
         if not result_output_fact_refs.get(item.result_output_id):
             raise VerificationError("fulfillment result output requires evidence proof")
-        _verify_fulfillment_input_refs(
-            fact,
-            proof_refs=result_output_fact_refs[item.result_output_id],
-        )
+        semantic_guarantee = result_output_guarantees.get(
+            item.result_output_id, {}
+        ).get(fact.id)
+        if semantic_guarantee is None:
+            raise VerificationError("fulfillment result lacks semantic guarantee")
+        semantic_index = semantic_indexes[fact.id]
+        if not qualification_entails(
+            semantic_guarantee.qualification.formula,
+            semantic_index.qualification,
+        ):
+            raise VerificationError("fulfillment does not enforce qualification")
+        subject = semantic_guarantee.subject
+        obligation = semantic_index.subject_obligation
+        if (
+            subject.subject_set_ref != obligation.subject_set_ref.token
+            or subject.interpretation != type(obligation).__name__
+        ):
+            raise VerificationError("fulfillment does not enforce subject interpretation")
         fulfillments.add(fulfillment_key)
         fulfilled_outputs.add((fact.id, item.answer_output_id))
     missing = {
         (fact.id, output.id)
         for fact in requested.values()
-        for output in fact.support_answer_outputs
+        for output in fact.outputs
     } - fulfilled_outputs
     if missing:
         raise VerificationError("requested fact answer output is not fulfilled")
 
 
-def _verify_fulfillment_input_refs(
-    fact: RequestedFact,
-    *,
-    proof_refs: frozenset[str],
-) -> None:
-    for input_ref in fact.input_refs:
-        if f"known_input:{input_ref}" not in proof_refs:
-            raise VerificationError(
-                f"fulfillment result output missing input proof: {input_ref}"
+def _verify_semantic_templates(answer: AnswerProgram) -> None:
+    if not answer.fact_template:
+        raise VerificationError("answer program requires a semantic fact template")
+    inputs = {item.id: item for item in answer.inputs}
+    denotations = {item.input_ref: item for item in answer.input_denotations}
+    if len(denotations) != len(answer.input_denotations):
+        raise VerificationError("answer program repeats an input denotation")
+    if set(inputs) != set(denotations):
+        raise VerificationError("answer program input denotations are incomplete")
+    if len(inputs) != len(answer.inputs):
+        raise VerificationError("answer program repeats a semantic input")
+    declared_signatures = {
+        parameter.input_ref: frozenset(parameter.input_use_refs)
+        for parameter in answer.parameters
+        if parameter.input_ref
+    }
+    if len(declared_signatures) != sum(
+        bool(parameter.input_ref) for parameter in answer.parameters
+    ):
+        raise VerificationError("answer program repeats an input parameter signature")
+    required_signatures: dict[str, set[str]] = {}
+    for fact in answer.fact_template:
+        try:
+            index = analyze_requested_fact(
+                fact,
+                inputs=inputs,
+                input_denotations=denotations,
             )
-
-
-def _verify_population_fulfillment(
-    answer: AnswerProgram,
-    *,
-    question_contract: QuestionContract,
-    relation_contracts: dict[str, RelationContract],
-    operation_inputs,
-) -> None:
-    facts = {fact.id: fact for fact in question_contract.requested_facts}
-    result_proofs = _result_output_proofs(
-        answer,
-        relation_contracts=relation_contracts,
-        operation_inputs=operation_inputs,
-    )
-    for fulfillment in answer.fulfillment:
-        fact = facts.get(fulfillment.requested_fact_id)
-        proof = result_proofs.get(fulfillment.result_output_id)
-        if fact is None or proof is None:
-            continue
-        population = fact.answer_population
-        if population is None:
-            continue
-        required_test_kind = (
-            AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
-        )
-        required = frozenset(
-            MembershipTestRef(
-                requested_fact_id=fact.id,
-                membership_test_id=test.id,
-            )
-            for test in population.membership_tests
-            if test.kind is required_test_kind
-        )
-        missing = required - proof.population_coverage.row_tests
-        if missing:
-            raise VerificationError(
-                "fulfillment result does not enforce answer population tests: "
-                + ", ".join(sorted(test.membership_test_id for test in missing))
-            )
+        except (TypeError, ValueError) as exc:
+            raise VerificationError("answer program contains an invalid semantic fact") from exc
+        for use in index.input_use_sites:
+            required_signatures.setdefault(use.input_ref, set()).add(use.use_ref)
+    if declared_signatures != {
+        ref: frozenset(use_refs) for ref, use_refs in required_signatures.items()
+    }:
+        raise VerificationError("answer program input signatures do not match semantic uses")

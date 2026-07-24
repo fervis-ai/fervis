@@ -53,7 +53,7 @@ from fervis.lineage.views.service import (
     QuestionLineageService,
 )
 from fervis.lineage.views.timeline import lineage_timeline_view
-from fervis.lookup.answer_program import (
+from fervis.lookup.contract_codec import (
     canonical_binding_patch_json,
     canonical_binding_set_json,
 )
@@ -430,9 +430,11 @@ def _rows(payload: dict) -> LineageRows:
                 produced_by_step_id=str(item["produced_by_step_id"]),
                 fact_key=str(item["fact_key"]),
                 description=str(item.get("description") or ""),
-                answer_expression_family=str(item["answer_expression_family"]),
+                requested_fact_fingerprint=str(
+                    item.get("requested_fact_fingerprint") or ""
+                ),
                 requested_fact_json=dict(item.get("requested_fact_json") or {}),
-                answer_requests_json=dict(item.get("answer_requests_json") or {}),
+                inputs_json=dict(item.get("inputs_json") or {}),
             )
             for item in payload.get("requested_facts", ())
         ),

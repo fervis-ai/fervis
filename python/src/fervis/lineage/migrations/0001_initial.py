@@ -285,9 +285,9 @@ class Migration(migrations.Migration):
                 ('requested_fact_id', models.CharField(max_length=128, primary_key=True, serialize=False)),
                 ('fact_key', models.CharField(max_length=128)),
                 ('description', models.TextField(blank=True, default='')),
-                ('answer_expression_family', models.CharField(max_length=64)),
+                ('requested_fact_fingerprint', models.CharField(max_length=64)),
                 ('requested_fact_json', models.JSONField(blank=True, default=dict)),
-                ('answer_requests_json', models.JSONField(blank=True, default=dict)),
+                ('inputs_json', models.JSONField(blank=True, default=dict)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('run', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='requested_facts', to='fervis_lineage.questionrun')),
             ],
@@ -322,7 +322,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('step_id', models.CharField(max_length=128, primary_key=True, serialize=False)),
                 ('sequence', models.PositiveIntegerField()),
-                ('step_key', models.CharField(choices=[('conversation_resolution', 'conversation_resolution'), ('question_contract', 'question_contract'), ('query_enrichment', 'query_enrichment'), ('catalog_selection', 'catalog_selection'), ('grounding', 'grounding'), ('read_eligibility', 'read_eligibility'), ('plan_selection', 'plan_selection'), ('source_binding', 'source_binding'), ('fact_planning', 'fact_planning'), ('verify', 'verify'), ('compile', 'compile'), ('execute', 'execute'), ('classify', 'classify'), ('render', 'render'), ('answer_synthesis', 'answer_synthesis')], max_length=64)),
+                ('step_key', models.CharField(choices=[('conversation_resolution', 'conversation_resolution'), ('question_contract', 'question_contract'), ('query_enrichment', 'query_enrichment'), ('catalog_selection', 'catalog_selection'), ('grounding', 'grounding'), ('read_eligibility', 'read_eligibility'), ('plan_selection', 'plan_selection'), ('source_binding', 'source_binding'), ('verify', 'verify'), ('compile', 'compile'), ('execute', 'execute'), ('classify', 'classify'), ('render', 'render'), ('answer_synthesis', 'answer_synthesis')], max_length=64)),
                 ('attempt', models.PositiveIntegerField(blank=True, null=True)),
                 ('scope_type', models.CharField(blank=True, choices=[('requested_fact', 'requested_fact'), ('source', 'source'), ('page', 'page')], default='', max_length=64)),
                 ('scope_id', models.CharField(blank=True, default='', max_length=128)),
@@ -343,7 +343,7 @@ class Migration(migrations.Migration):
             name='RunArtifact',
             fields=[
                 ('artifact_id', models.CharField(max_length=128, primary_key=True, serialize=False)),
-                ('artifact_kind', models.CharField(choices=[('system_prompt', 'system_prompt'), ('prompt', 'prompt'), ('schema', 'schema'), ('tool_spec', 'tool_spec'), ('submitted_payload', 'submitted_payload'), ('raw_output', 'raw_output'), ('parsed_payload', 'parsed_payload'), ('deterministic_input', 'deterministic_input'), ('deterministic_output', 'deterministic_output'), ('source_response', 'source_response'), ('row_context', 'row_context')], max_length=64)),
+                ('artifact_kind', models.CharField(choices=[('system_prompt', 'system_prompt'), ('prompt', 'prompt'), ('schema', 'schema'), ('tool_spec', 'tool_spec'), ('submitted_payload', 'submitted_payload'), ('raw_output', 'raw_output'), ('parsed_payload', 'parsed_payload'), ('deterministic_input', 'deterministic_input'), ('deterministic_output', 'deterministic_output'), ('source_response', 'source_response'), ('row_context', 'row_context'), ('source_contract', 'source_contract')], max_length=64)),
                 ('content_hash', models.CharField(max_length=128)),
                 ('content', models.TextField(blank=True, null=True)),
                 ('storage_ref', models.CharField(blank=True, max_length=512, null=True)),
@@ -437,7 +437,7 @@ class Migration(migrations.Migration):
             name='RuntimeErrorDetail',
             fields=[
                 ('runtime_error_detail_id', models.CharField(max_length=128, primary_key=True, serialize=False)),
-                ('error_kind', models.CharField(choices=[('planning_failed', 'planning_failed'), ('fact_plan_parse_failed', 'fact_plan_parse_failed'), ('plan_validation_failed', 'plan_validation_failed'), ('fact_plan_execution_failed', 'fact_plan_execution_failed'), ('fact_plan_verification_failed', 'fact_plan_verification_failed'), ('compiler_invariant_failed', 'compiler_invariant_failed'), ('incomplete_evidence', 'incomplete_evidence'), ('page_cap_truncation', 'page_cap_truncation'), ('provider_runtime_failed', 'provider_runtime_failed'), ('policy_limit_exceeded', 'policy_limit_exceeded'), ('framework_adapter_failed', 'framework_adapter_failed'), ('lineage_persistence_failed', 'lineage_persistence_failed'), ('infrastructure_failed', 'infrastructure_failed')], max_length=64)),
+                ('error_kind', models.CharField(choices=[('planning_failed', 'planning_failed'), ('plan_validation_failed', 'plan_validation_failed'), ('program_execution_failed', 'program_execution_failed'), ('compiler_invariant_failed', 'compiler_invariant_failed'), ('incomplete_evidence', 'incomplete_evidence'), ('page_cap_truncation', 'page_cap_truncation'), ('provider_runtime_failed', 'provider_runtime_failed'), ('policy_limit_exceeded', 'policy_limit_exceeded'), ('framework_adapter_failed', 'framework_adapter_failed'), ('lineage_persistence_failed', 'lineage_persistence_failed'), ('infrastructure_failed', 'infrastructure_failed')], max_length=64)),
                 ('message', models.TextField()),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('failed_step', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='runtime_errors', to='fervis_lineage.runstep')),

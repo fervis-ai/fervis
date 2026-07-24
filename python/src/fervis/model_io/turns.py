@@ -12,6 +12,4 @@ class ModelTurnPurpose(StrEnum):
     READ_ELIGIBILITY = "read_eligibility"
     PLAN_SELECTION = "plan_selection"
     SOURCE_BINDING = "source_binding"
-    PATTERN_FACT_PLANNING = "pattern_fact_planning"
-    FACT_PLAN = "fact_plan"
     ANSWER_SYNTHESIS = "answer_synthesis"

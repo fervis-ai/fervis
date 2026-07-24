@@ -14,11 +14,7 @@ from fervis.lookup.conversation_resolution.tools import (
 
 
 _VALUE_PART_KINDS = frozenset(
-    {
-        ConversationFramePartKind.ENTITY_IDENTITY,
-        ConversationFramePartKind.TIME_SCOPE,
-        ConversationFramePartKind.LIMIT,
-    }
+    {ConversationFramePartKind.INPUT}
 )
 _FIXED_SHAPE_PART_KINDS = frozenset(ConversationFramePartKind) - _VALUE_PART_KINDS
 
@@ -241,7 +237,9 @@ def _frame_parameter_branches(
     callable_signature = frame.callable
     if callable_signature is None:
         raise ValueError("frame is not callable")
-    parameter_ids = [parameter.parameter_id for parameter in callable_signature.parameters]
+    parameter_ids = [
+        parameter.parameter_id for parameter in callable_signature.parameters
+    ]
     return output.FrameParameterOutput.schema(
         {
             "kind": {"type": "string", "enum": ["parameter"]},

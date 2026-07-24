@@ -1,1 +1,0 @@
-"""Comparison-check operation family."""

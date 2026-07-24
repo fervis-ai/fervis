@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from fervis.lookup.answer_program.codec import canonicalize_answer_program
+from fervis.lookup.contract_codec import canonicalize_answer_program
 from fervis.lookup.answer_program.compatibility import (
     build_program_compatibility,
 )
@@ -21,9 +21,9 @@ from fervis.lookup.answer_program.values import (
 from fervis.lookup.question_contract import QuestionContract
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.plan_execution.relations import RelationRows
-from fervis.lookup.fact_plan.row_sources.model import RowSourceCatalog
-from fervis.lookup.fact_plan.row_sources.builder import build_row_source_catalog
-from fervis.lookup.fact_plan.row_sources.lookup import row_source_for_relation
+from fervis.lookup.relation_catalog.row_sources.model import RowSourceCatalog
+from fervis.lookup.relation_catalog.row_sources.builder import build_row_source_catalog
+from fervis.lookup.relation_catalog.row_sources.lookup import row_source_for_relation
 
 
 def compile_answer_program(
@@ -47,13 +47,13 @@ def compile_answer_program(
     )
     closed = replace(
         closed_sources,
+        inputs=question_contract.inputs,
+        input_denotations=question_contract.input_denotations,
         fact_template=question_contract.requested_facts,
         parameters=compiled_inputs.parameters,
         compatibility=build_program_compatibility(
             closed_sources,
-            catalog=catalog,
             row_sources=row_sources,
-            memory_relations=memory_relations,
         ),
     )
     from fervis.lookup.plan_execution.verification import (
@@ -63,7 +63,6 @@ def compile_answer_program(
     verified = verify_answer_program_structure(
         closed,
         compiled_inputs=compiled_inputs,
-        question_contract=question_contract,
         catalog=catalog,
         memory_relations=memory_relations,
     )

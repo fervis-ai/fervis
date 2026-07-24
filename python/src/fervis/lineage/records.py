@@ -615,9 +615,9 @@ REQUESTED_FACT = LineageRowSpec(
         field("produced_by_step_id"),
         field("fact_key"),
         field("description"),
-        field("answer_expression_family"),
+        field("requested_fact_fingerprint"),
         field("requested_fact_json", json_value=True),
-        field("answer_requests_json", json_value=True),
+        field("inputs_json", json_value=True),
     ),
     conflict_lookup=("run_id", "produced_by_step_id", "fact_key"),
     same_run_refs=(

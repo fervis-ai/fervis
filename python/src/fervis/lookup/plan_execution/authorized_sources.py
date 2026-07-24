@@ -1,4 +1,4 @@
-"""Authorized execution-source transport for fact-plan verification/execution."""
+"""Authorized execution-source transport for answer-program verification."""
 
 from __future__ import annotations
 

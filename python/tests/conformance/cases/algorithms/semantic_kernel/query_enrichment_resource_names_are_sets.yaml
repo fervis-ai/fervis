@@ -1,0 +1,17 @@
+id: query_enrichment_resource_names_are_sets
+description: Repeating one recalled resource name does not change the authored semantic set.
+kind: algorithm
+algorithm: semantic.query_enrichment
+input:
+  resource_names: [Event, Operator]
+  recall_buckets:
+    - {bucket_ref: "fact_1:recall:population", kind: population, meaning: event occurrences, requirement_refs: ["fact_1:set:s1"]}
+  reference_tasks: []
+  payload:
+    recall_bucket_matches:
+      - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [Event, Event, Operator], matching_resource_names: [Event, Event]}
+    input_resource_search_terms: []
+expect:
+  result_contains:
+    recall_bucket_matches:
+      - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [Event, Operator], matching_resource_names: [Event]}

@@ -17,6 +17,10 @@ from fervis.model_io.providers.openai_compatible_adapter import (
     OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
     build_openai_compatible_registration,
 )
+from fervis.model_io.providers.openai_responses_adapter import (
+    OPENAI_RESPONSES_PROVIDER_CONFIG,
+    build_openai_responses_registration,
+)
 from fervis.model_io.providers.chat_runtime import (
     ChatProviderConfig,
     ConfiguredChatLoopRuntime,
@@ -225,6 +229,10 @@ def test_provider_registrations_share_model_adapter_boundary(
             build_openai_compatible_registration(config).model_adapter,
             ConfiguredChatModelAdapter,
         )
+    assert isinstance(
+        build_openai_responses_registration().model_adapter,
+        ConfiguredChatModelAdapter,
+    )
 
 
 def test_openai_compatible_specs_use_expected_runtime_config(
@@ -240,9 +248,8 @@ def test_openai_compatible_specs_use_expected_runtime_config(
             configs[provider].base_url,
             configs[provider].api_key_env_var,
         )
-        for provider in ("openai", "fireworks", "baseten", "opencode")
+        for provider in ("fireworks", "baseten", "opencode")
     } == {
-        "openai": (0.0, "https://api.openai.com/v1", "OPENAI_API_KEY"),
         "fireworks": (
             0.0,
             "https://api.fireworks.ai/inference/v1",
@@ -251,6 +258,12 @@ def test_openai_compatible_specs_use_expected_runtime_config(
         "baseten": (0.0, "https://inference.baseten.co/v1", "BASETEN_API_KEY"),
         "opencode": (0.0, "https://opencode.ai/zen/v1", "OPENCODE_API_KEY"),
     }
+    assert (
+        OPENAI_RESPONSES_PROVIDER_CONFIG.temperature,
+        OPENAI_RESPONSES_PROVIDER_CONFIG.base_url,
+        OPENAI_RESPONSES_PROVIDER_CONFIG.api_key_env_var,
+        OPENAI_RESPONSES_PROVIDER_CONFIG.reasoning_effort,
+    ) == (0.0, "https://api.openai.com/v1", "OPENAI_API_KEY", "low")
 
 
 def test_openai_uses_max_completion_tokens_parameter(
@@ -262,9 +275,8 @@ def test_openai_uses_max_completion_tokens_parameter(
 
     assert {
         provider: configs[provider].max_output_tokens_parameter
-        for provider in ("openai", "fireworks", "baseten")
+        for provider in ("fireworks", "baseten")
     } == {
-        "openai": "max_completion_tokens",
         "fireworks": "max_tokens",
         "baseten": "max_tokens",
     }
@@ -320,7 +332,7 @@ def test_supported_provider_specs_are_strict_tool_certified():
             True,
         ),
         "openai": (
-            "openai_chat_completions",
+            "openai_responses",
             "OPENAI_API_KEY",
             True,
             True,

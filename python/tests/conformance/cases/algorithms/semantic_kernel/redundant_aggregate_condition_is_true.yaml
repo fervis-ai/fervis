@@ -1,0 +1,16 @@
+id: redundant_aggregate_condition_is_true
+kind: algorithm
+algorithm: semantic.kernel
+input:
+  mode: relative_qualification
+  requested_fact_id: fact_1
+  given:
+    kind: atom
+    ref: during_period
+  condition:
+    kind: atom
+    ref: during_period
+expect:
+  result_contains:
+    residual_clauses:
+      - []

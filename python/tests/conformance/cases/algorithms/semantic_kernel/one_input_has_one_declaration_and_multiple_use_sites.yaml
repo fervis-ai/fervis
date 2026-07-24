@@ -1,0 +1,72 @@
+id: one_input_has_one_declaration_and_multiple_use_sites
+description: Repeated uses of one supplied operand become one canonical input without model-authored bookkeeping.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts: ["Give the event count and total amount for April 2026."]
+  frame_payload:
+    decision_basis: The question asks for two scalar facts over the same supplied period.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+        - result_kind: scalar
+          qualifying_row_kind: {meaning: events, origin: {kind: question}}
+          grouping_meanings: []
+          return_request_basis: Return the event count.
+          returned_result: {kind: values}
+          answer_values:
+            - {value_ref: v1, meaning: event count, origin: {kind: question}}
+          returned_value_refs: [v1]
+          ordering_value_refs: []
+          selection: {kind: all_results}
+          universal_shape: none
+        - result_kind: scalar
+          qualifying_row_kind: {meaning: events, origin: {kind: question}}
+          grouping_meanings: []
+          return_request_basis: Return the total amount.
+          returned_result: {kind: values}
+          answer_values:
+            - {value_ref: v1, meaning: total amount, origin: {kind: question}}
+          returned_value_refs: [v1]
+          ordering_value_refs: []
+          selection: {kind: all_results}
+          universal_shape: none
+      supplied_values:
+        - meaning: the reporting period
+          denotation: {basis: April 2026 is a period applied to event occurrences., kind: scalar}
+          value: {operands: [April 2026], value_type: {kind: temporal_scope}, origin: {kind: question}}
+  payload:
+    decision_basis: The question asks for two scalar facts over the same supplied period.
+    outcome:
+      kind: question_contract
+      answer_requests:
+        - requested_fact_ref: fact_1
+          origin: &request_origin {source: question_context, meaning: April 2026 event results, resolved_input_ref: null}
+          other_sets: []
+          other_associations: []
+          candidate_set: {instance_interpretation: normal_business_instance}
+          qualification: {kind: within, value: {kind: fact, observed_for_ref: s1, value_type: {kind: date}, origin: &date_origin {source: question_context, meaning: event date, resolved_input_ref: null}}, scope: {kind: input_ref, input_ref: i1}}
+          grouping: []
+          ordering: []
+          selection: null
+          distinct_by: []
+          outputs:
+            - {expression: {kind: aggregate, function: count, argument: {kind: set_ref, set_ref: s1}, distinct_argument: false}}
+        - requested_fact_ref: fact_2
+          origin: *request_origin
+          other_sets: []
+          other_associations: []
+          candidate_set: {instance_interpretation: normal_business_instance}
+          qualification: {kind: within, value: {kind: fact, observed_for_ref: s1, value_type: {kind: date}, origin: *date_origin}, scope: {kind: input_ref, input_ref: i1}}
+          grouping: []
+          ordering: []
+          selection: null
+          distinct_by: []
+          outputs:
+            - {expression: {kind: aggregate, function: sum, argument: {kind: fact, observed_for_ref: s1, value_type: {kind: decimal, measure: {kind: unitless}}, origin: {source: question_context, meaning: amount, resolved_input_ref: null}}, distinct_argument: false}}
+expect:
+  result_contains:
+    input_refs: [i1]
+    requested_facts:
+      - {id: fact_1, result_grain: singleton, input_use_refs: [i1]}
+      - {id: fact_2, result_grain: singleton, input_use_refs: [i1]}

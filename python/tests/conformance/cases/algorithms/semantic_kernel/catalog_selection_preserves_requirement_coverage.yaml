@@ -1,0 +1,21 @@
+id: catalog_selection_preserves_requirement_coverage
+description: A bounded semantic catalog shortlist preserves a complete source explicitly recalled for every requirement.
+kind: algorithm
+algorithm: semantic.query_enrichment
+input:
+  mode: select_catalog
+  max_reads_per_fact: 2
+  catalog:
+    reads:
+      - {id: exact_population, endpoint_name: list_alpha, resource_names: [alpha]}
+      - {id: exact_value_one, endpoint_name: list_beta, resource_names: [beta]}
+      - {id: exact_value_two, endpoint_name: list_gamma, resource_names: [gamma]}
+      - {id: complete_source, endpoint_name: list_combined, resource_names: [alpha beta gamma]}
+  resource_matches:
+    - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [alpha beta gamma, alpha], matching_resource_names: [alpha]}
+    - {bucket_ref: "fact_1:recall:output_1", exhaustive_resource_names: [alpha beta gamma, beta], matching_resource_names: [beta]}
+    - {bucket_ref: "fact_1:recall:output_2", exhaustive_resource_names: [alpha beta gamma, gamma], matching_resource_names: [gamma]}
+expect:
+  result_contains:
+    selected_read_membership:
+      complete_source: true

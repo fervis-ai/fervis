@@ -10,11 +10,6 @@ from fervis.lookup.relation_catalog import (
     primary_stable_key_entity_kinds,
     read_has_primary_stable_key,
 )
-from fervis.lookup.relation_catalog.selection.model import (
-    EntityTargetResolverSelection,
-    ResolverCatalogSelectionRequest,
-    ResolverCatalogSelectionResult,
-)
 
 from .constants import _RESOLVER_ENDPOINT_STOPWORDS
 from .terms import (
@@ -24,42 +19,7 @@ from .terms import (
 )
 
 
-def select_resolver_relation_catalog(
-    request: ResolverCatalogSelectionRequest,
-) -> ResolverCatalogSelectionResult:
-    selected_read_ids: list[str] = []
-    selections: list[EntityTargetResolverSelection] = []
-    reads_by_id = {read.id: read for read in request.relation_catalog.reads}
-    for item in request.entity_target_catalog_search_terms:
-        catalog_search_terms = tuple(term for term in item.catalog_search_terms if term)
-        selected = tuple(
-            read.id
-            for read in _resolver_reads_for_endpoint_terms(
-                request.relation_catalog,
-                catalog_search_terms=catalog_search_terms,
-                limit=request.max_reads_per_target,
-            )
-        )
-        for read_id in selected:
-            if read_id not in selected_read_ids:
-                selected_read_ids.append(read_id)
-        selections.append(
-            EntityTargetResolverSelection(
-                target_id=item.target_id,
-                catalog_search_terms=catalog_search_terms,
-                selected_read_ids=selected,
-            )
-        )
-    return ResolverCatalogSelectionResult(
-        relation_catalog=RelationCatalog(
-            reads=tuple(reads_by_id[read_id] for read_id in selected_read_ids)
-        ),
-        entity_target_selections=tuple(selections),
-        selected_read_ids=tuple(selected_read_ids),
-    )
-
-
-def _resolver_reads_for_endpoint_terms(
+def select_resolver_reads(
     catalog: RelationCatalog,
     *,
     catalog_search_terms: tuple[str, ...],
@@ -103,7 +63,7 @@ def _resolver_reads_for_endpoint_terms(
             )
         )
     ranked.sort(key=_resolver_ranking_key)
-    return _resolver_selection_with_term_coverage(
+    return _resolver_selection_with_primary_class_routes(
         ranked,
         terms=tuple(term_weights),
         limit=limit,
@@ -142,7 +102,7 @@ def _resolver_term_coverage_key(
     )
 
 
-def _resolver_selection_with_term_coverage(
+def _resolver_selection_with_primary_class_routes(
     ranked: list[_ResolverReadRanking],
     *,
     terms: tuple[str, ...],
@@ -150,7 +110,7 @@ def _resolver_selection_with_term_coverage(
 ) -> tuple[EndpointRead, ...]:
     selected: list[_ResolverReadRanking] = []
     selected_ids: set[str] = set()
-    for term in terms:
+    for term_index, term in enumerate(terms):
         candidates = sorted(
             (
                 item
@@ -159,18 +119,16 @@ def _resolver_selection_with_term_coverage(
             ),
             key=lambda item: _resolver_term_coverage_key(item, term=term),
         )
-        candidate = candidates[0] if candidates else None
-        if candidate is None or candidate.read.id in selected_ids:
-            continue
-        selected.append(candidate)
-        selected_ids.add(candidate.read.id)
-        if len(selected) >= limit:
-            return tuple(item.read for item in selected)
+        term_limit = 2 if term_index == 0 else 1
+        for candidate in candidates[:term_limit]:
+            selected.append(candidate)
+            selected_ids.add(candidate.read.id)
+            if len(selected) >= limit:
+                return tuple(item.read for item in selected)
     for item in ranked:
         if item.read.id in selected_ids:
             continue
         selected.append(item)
-        selected_ids.add(item.read.id)
         if len(selected) >= limit:
             break
     return tuple(item.read for item in selected)

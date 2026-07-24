@@ -8,6 +8,10 @@ from typing import Any, Mapping
 
 from fervis.lookup.errors import ErrorCode
 from fervis.lookup.canonical_data import runtime_value_to_payload
+from fervis.lookup.contract_codec import (
+    canonical_contract_fingerprint,
+    canonical_contract_payload,
+)
 from fervis.lookup.clarification import clarification_payload
 from fervis.lineage.enums import (
     AnswerValueKind,
@@ -50,6 +54,7 @@ from fervis.lookup.outcomes.model import (
 from fervis.lookup.outcomes.terminal_details import fact_result_terminal_details
 from fervis.lookup.answer_rendering import RenderedFact
 from fervis.lookup.answer_program.result_projection import EntityKeyValue, ResultValue
+from fervis.lookup.question_contract import InputTerm, RequestedFact
 from fervis.lookup.orchestration.result import LookupResult
 from fervis.lookup.orchestration.request import (
     LineagePorts,
@@ -70,7 +75,7 @@ TERMINAL_FACT_PAYLOAD_SCHEMA_REV = 1
 _ERROR_KIND_BY_CODE = {
     ErrorCode.PLANNING_FAILED: RuntimeErrorKind.PLANNING_FAILED,
     ErrorCode.PLAN_VALIDATION_FAILED: RuntimeErrorKind.PLAN_VALIDATION_FAILED,
-    ErrorCode.FACT_PLAN_EXECUTION_FAILED: RuntimeErrorKind.FACT_PLAN_EXECUTION_FAILED,
+    ErrorCode.PROGRAM_EXECUTION_FAILED: RuntimeErrorKind.PROGRAM_EXECUTION_FAILED,
     ErrorCode.FRAMEWORK_ADAPTER_FAILED: RuntimeErrorKind.FRAMEWORK_ADAPTER_FAILED,
     ErrorCode.PROVIDER_RUNTIME_FAILED: RuntimeErrorKind.PROVIDER_RUNTIME_FAILED,
     ErrorCode.LINEAGE_PERSISTENCE_FAILED: RuntimeErrorKind.LINEAGE_PERSISTENCE_FAILED,
@@ -311,9 +316,7 @@ def record_answered_result_lineage(
             run_id=run_id,
             fact=fact,
             question_contract_step_id=question_contract_step_id,
-            clarification_lineage_refs=(
-                question_contract.clarification_lineage_refs
-            ),
+            inputs=question_contract.inputs,
         )
         for fact in question_contract.requested_facts
     )
@@ -486,9 +489,7 @@ def _terminal_requested_facts(
             run_id=run_id,
             fact=fact,
             question_contract_step_id=produced_by_step_id,
-            clarification_lineage_refs=(
-                question_contract.clarification_lineage_refs
-            ),
+            inputs=question_contract.inputs,
         )
         for fact in question_contract.requested_facts
         if _terminal_applies_to_requested_fact(fact_result, fact.id)
@@ -764,25 +765,20 @@ def _proof_graph_write(
 def _requested_fact_write(
     *,
     run_id: str,
-    fact: Any,
+    fact: RequestedFact,
     question_contract_step_id: str,
-    clarification_lineage_refs: tuple[str, ...],
+    inputs: tuple[InputTerm, ...],
 ) -> RequestedFactWrite:
-    answer_expression = getattr(fact, "answer_expression", None)
-    answer_expression_family = getattr(answer_expression, "family", "")
     return RequestedFactWrite(
         requested_fact_id=lineage_id("requested_fact", run_id, fact.id),
         run_id=run_id,
         produced_by_step_id=question_contract_step_id,
         fact_key=fact.id,
-        description=fact.description,
-        answer_expression_family=str(getattr(answer_expression_family, "value", "")),
-        requested_fact_json=fact.answer_request_model_dict(),
-        answer_requests_json={
-            "answer_outputs": [
-                output.to_model_dict() for output in fact.answer_outputs
-            ],
-            "clarification_lineage_refs": list(clarification_lineage_refs),
+        description=fact.origin.meaning,
+        requested_fact_fingerprint=canonical_contract_fingerprint(fact),
+        requested_fact_json=canonical_contract_payload(fact),
+        inputs_json={
+            "inputs": [canonical_contract_payload(item) for item in inputs],
         },
     )
 
@@ -809,7 +805,7 @@ def _answer_outputs(
             run_id=run_id,
             answer_id=answer_id,
             fact_result_id=fact_result_id_by_fact_key[fulfillment.requested_fact_id],
-            output_key=fulfillment.answer_output_id,
+            output_key=fulfillment.result_output_id,
             value_kind=value_kind,
             value_json=value_json,
             proof_node_refs_json=proof_refs,

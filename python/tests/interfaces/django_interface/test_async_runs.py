@@ -334,7 +334,6 @@ def _answered_lineage_variant(
         produced_by_step=step,
         fact_key="fact_1",
         description=f"answer for {question.original_question}",
-        answer_expression_family="scalar",
         requested_fact_json={
             "id": "fact_1",
             "answer_fact": f"answer for {question.original_question}",
@@ -616,14 +615,14 @@ def _record_lineage_model_usage(
     cost_micros: int,
 ) -> None:
     recorder = DjangoLineageRecorder()
-    step_id = f"{run_id}.fact_planning"
+    step_id = f"{run_id}.plan_selection"
     call_id = f"{run_id}.model_call"
     recorder.record_step(
         RunStepWrite(
             step_id=step_id,
             run_id=run_id,
             sequence=1,
-            step_key=RunStepKey.FACT_PLANNING,
+            step_key=RunStepKey.PLAN_SELECTION,
             kind=RunStepKind.MODEL_TURN,
         )
     )
@@ -794,61 +793,58 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
         ):
             del model_id, system_prompt
             tool_name = tool_specs[0].name if tool_specs else ""
-            if tool_name == "submit_question_contract_outcome":
-                return {
-                    "answer": json.dumps(
-                        {
-                                "tool": "submit_question_contract_outcome",
-                                "arguments": {
-                                    "decision_basis": (
-                                        "The question states one complete factual request."
-                                    ),
-                                    "outcome": {
-                                    "kind": "question_contract",
-                                    "answer_requests_count": 1,
-                                    "question_inputs": [],
-                                    "answer_requests": [
-                                        {
-                                            "answer_fact": "restricted fact",
-                                            "answer_expression": {
-                                                "family": "scalar_value"
-                                            },
-                                            "answer_subject": {
-                                                "subject_text": "restricted fact",
-                                                "instance_interpretation": {
-                                                    "kind": "NORMAL_BUSINESS_INSTANCE"
-                                                },
-                                            },
-                                            "answer_population": {
-                                                "membership_tests": [],
-                                            },
-                                            "answer_outputs": [
-                                                {
-                                                    "description": "restricted fact",
-                                                    "role": "ANSWER_VALUE",
-                                                }
-                                            ],
-                                            "question_input_uses": [],
-                                        }
-                                    ],
-                                    "question_input_inventory_check": {
-                                        "all_input_like_phrases_declared": True,
-                                    },
-                                },
-                            },
-                        }
+            if tool_name == "submit_question_frame":
+                arguments = {
+                    "decision_basis": (
+                        "The question states one complete factual request."
                     ),
-                    "usage": {
-                        "inputTokens": 1,
-                        "outputTokens": 1,
-                        "thinkingTokens": 0,
-                        "costUsd": 0.02,
-                        "inputCostUsd": 0.02,
-                        "outputCostUsd": 0,
-                        "thinkingCostUsd": 0,
+                    "outcome": {
+                        "kind": "question_meaning",
+                        "answer_requests": [
+                            {
+                                "result_kind": "scalar",
+                                "qualifying_row_kind": {
+                                    "meaning": "restricted fact",
+                                    "origin": {"kind": "question"},
+                                },
+                                "grouping_meanings": [],
+                                "return_request_basis": (
+                                    "Return the requested scalar fact."
+                                ),
+                                "returned_result": {"kind": "values"},
+                                "answer_values": [
+                                    {
+                                        "value_ref": "v1",
+                                        "meaning": "restricted fact",
+                                        "origin": {"kind": "question"},
+                                    }
+                                ],
+                                "returned_value_refs": ["v1"],
+                                "ordering_value_refs": [],
+                                "selection": {"kind": "all_results"},
+                                "universal_shape": "none",
+                            }
+                        ],
+                        "supplied_values": [],
                     },
                 }
-            raise AssertionError(f"unexpected tool: {tool_name}")
+            else:
+                raise AssertionError(f"unexpected tool: {tool_name}")
+            return {
+                "provider": "openai",
+                "answer": json.dumps({"tool": tool_name, "arguments": arguments}),
+                "toolRequests": [],
+                "usage": {
+                    "inputTokens": 1,
+                    "outputTokens": 1,
+                    "thinkingTokens": 0,
+                    "costUsd": 0.02,
+                    "inputCostUsd": 0.02,
+                    "outputCostUsd": 0,
+                    "thinkingCostUsd": 0,
+                },
+                "raw": {"sdk": "test-planner"},
+            }
 
     install_test_model_adapter(ImpossiblePlanAdapter())
     conversation = _create_conversation(api_client)
@@ -872,10 +868,12 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
         "run_status": run["status"],
         "run_error": run["error"],
         "failure_error_code": failure.error_kind,
+        "failure_message": failure.message,
     } == {
         "run_status": "FAILED",
         "run_error": "max_budget_exceeded",
         "failure_error_code": "policy_limit_exceeded",
+        "failure_message": "max_budget_exceeded",
     }
 
 
@@ -1039,9 +1037,7 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
         },
     }
 
-    clarification = ClarificationRequest.objects.get(
-        clarification_id="clarification_1"
-    )
+    clarification = ClarificationRequest.objects.get(clarification_id="clarification_1")
     ClarificationResponse.objects.create(
         response_id="clarification_response_1",
         run=run,

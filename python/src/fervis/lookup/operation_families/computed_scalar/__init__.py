@@ -1,1 +1,0 @@
-"""Computed-scalar operation family."""

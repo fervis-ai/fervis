@@ -1,40 +1,26 @@
 id: string_set_filter_is_case_sensitive
+description: Membership filtering over declared strings uses exact case-sensitive equality.
 kind: algorithm
-algorithm: answer_program.invoke
-description: A declared string-set population filter uses exact string equality.
+algorithm: execution.relation_engine
 input:
-  schema_revision: 1
-  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/population_required}
-  catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
-  environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/population_required}
-  invocations:
-    - id: exact_case
-      bindings:
-        - parameter_id: question.store_ids
-          value:
-            kind: identity_set
-            entity_kind: store
-            key_id: primary_key
-            key_component_id: store_id
-            values: [STORE_1]
-          provenance: {kind: question_input}
-        - parameter_id: semantic.store_population
-          value: {kind: string_set, values: [store_1]}
-          provenance: {kind: semantic_choice, refs: [semantic:store_population]}
-      evidence:
-        - request:
-            endpoint_name: list_sale_list
-            args: {sales.query.store_id: STORE_1}
-          response:
-            body:
-              results:
-                - {sale_id: sale_1, store_id: STORE_1}
+  scalar_inputs:
+    - {id: allowed, value: [COMPLETED], value_type: string_collection}
+  relations:
+    - id: records
+      rows:
+        - {id: exact, state: COMPLETED}
+        - {id: different_case, state: completed}
+      grain_keys: [id]
+      field_types: {id: string, state: string}
+  operations:
+    - id: selected
+      output_relation: result
+      spec:
+        kind: filter
+        input_relation: records
+        condition: {left: state, operator: in, right_scalar: allowed}
 expect:
   result_contains:
-    invocations:
-      - id: exact_case
-        status: completed
-        relations:
-          - id: sales_rows__source
-          - id: sales_rows
-            rows: []
+    result:
+      rows:
+        - {id: exact, state: COMPLETED}

@@ -37,7 +37,7 @@ from fervis.lookup.orchestration.host_runtime import (
 )
 
 if TYPE_CHECKING:
-    from fervis.lookup.fact_planning.request import RuntimeValueContext
+    from fervis.lookup.runtime_values import RuntimeValueContext
     from fervis.lookup.answer_program.persistence import PriorProgramInvocationReader
     from fervis.lookup.clarification.model import ClarificationOwnerResponse
 
@@ -210,7 +210,7 @@ class _ConfiguredRelationCatalogProvider:
 def _runtime_values(
     host_api_context: HostApiContext,
 ) -> RuntimeValueContext:
-    from fervis.lookup.fact_planning.request import RuntimeValueContext
+    from fervis.lookup.runtime_values import RuntimeValueContext
 
     host = host_api_context.host_context
     return RuntimeValueContext(

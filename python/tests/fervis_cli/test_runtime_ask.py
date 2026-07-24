@@ -583,7 +583,7 @@ def test_fervis_runtime_ask_uses_one_public_execution_path() -> None:
     assert exit_code == 0
     assert ports.questions.requests[0].execution_mode.value == "queued"
     assert str(ports.questions.requests[0].max_budget_usd) == "0.5"
-    assert ports.questions.requests[0].max_thinking_tokens == 64
+    assert ports.questions.requests[0].max_thinking_tokens == 4096
 
 
 def test_fervis_runtime_ask_rejects_invalid_limits() -> None:

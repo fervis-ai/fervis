@@ -1,0 +1,5 @@
+{
+  "kind": "association_binding",
+  "question": "Which assignment labels belong to projects?",
+  "expected_association_kind": "CO_RESIDENT"
+}

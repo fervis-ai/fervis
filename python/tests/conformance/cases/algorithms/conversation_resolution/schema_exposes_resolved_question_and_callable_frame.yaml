@@ -14,16 +14,17 @@ input:
   context_frames:
     - frame_id: request:1
       source_ids: [prior_question]
-      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_COUNT]}
       parts:
-        - {part_id: location, kind: entity_identity, text: Acacia Mall, source_ref: location}
-        - {part_id: time, kind: time_scope, text: today, source_ref: time}
+        - {part_id: location, kind: input, text: Acacia Mall, source_ref: location, value_type: identity}
+        - {part_id: time, kind: input, text: today, source_ref: time, value_type: time}
       callable:
-        base_run_id: run_1
-        requested_fact_id: sales_count
+        base_invocation_id: pi_1
+        program_id: ap_1
+        requested_fact_ref: sales_count
+        requested_fact_fingerprint: fingerprint_1
         parameters:
-          - {parameter_id: question.location, part_id: location, kind: entity_identity, current_text: Acacia Mall, resolved_text: Acacia Mall}
-          - {parameter_id: question.time, part_id: time, kind: time_scope, current_text: today, resolved_text: today}
+          - {parameter_id: value.location, part_id: location, value_type: identity, input_ref: location, input_use_refs: [sales_count:input_use:location], current_text: Acacia Mall}
+          - {parameter_id: value.time, part_id: time, value_type: time, input_ref: time, input_use_refs: [sales_count:input_use:time], current_text: today}
 expect:
   result_contains:
     top_level_fields: [current_question_text, kind, outcome]

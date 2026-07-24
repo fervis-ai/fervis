@@ -2,45 +2,24 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_planning.schema import build_fact_plan_schema
-from fervis.lookup.plan_selection.schema import build_plan_selection_schema
-from fervis.lookup.read_eligibility.schema import build_read_eligibility_schema
-from fervis.lookup.source_binding.schema import build_source_binding_schema
+from fervis.lookup.query_enrichment.semantic import SemanticQueryEnrichmentRequest
+from fervis.lookup.query_enrichment.semantic_schema import (
+    build_semantic_query_enrichment_schema,
+)
+from fervis.lookup.question_contract.semantic_schema import (
+    build_semantic_question_frame_schema,
+)
 
 
 def test_lookup_provider_schemas_do_not_emit_internal_model_schemas_metadata():
     for schema in (
-        build_read_eligibility_schema(
-            canonical_options_by_requested_fact_id={},
-            candidate_reviews_by_requested_fact_id={},
-        ),
-        build_plan_selection_schema(
-            requested_fact_ids=("fact_1",),
-            source_candidate_ids_by_requested_fact_id={"fact_1": ()},
-        ),
-        build_fact_plan_schema(
-            selected_plan_shapes_by_requested_fact_id={},
-            source_binding_ids_by_requested_fact_id={},
-            answer_output_ids_by_requested_fact_id={},
-            answer_output_ids_by_source_binding_id={},
-            source_binding_ids_by_requirement_by_requested_fact_id={},
-            grouped_aggregate_choices_by_requested_fact_id={},
-            scalar_aggregate_choices_by_requested_fact_id={},
-        ),
-        build_source_binding_schema(
-            target_param_decision_ids_by_param={},
-            target_required_param_decision_ids={},
-            target_finite_choice_values={},
-            target_row_predicate_values={},
-            target_finite_choice_test_ids={},
-            target_finite_choice_normal_instance_test_ids={},
-            target_row_predicate_test_ids={},
-            target_population_roles={},
-            target_requested_fact_ids={},
-            metric_evidence_ids_by_requested_fact={},
-            target_fulfillment_support_set_ids_by_answer_output={},
-            target_required_fulfillment_answer_output_ids={},
-            plan_families=(),
+        build_semantic_question_frame_schema(),
+        build_semantic_query_enrichment_schema(
+            SemanticQueryEnrichmentRequest(
+                recall_buckets=(),
+                reference_tasks=(),
+                resource_names=(),
+            )
         ),
     ):
         assert not _contains_key(schema, "modelSchemas")

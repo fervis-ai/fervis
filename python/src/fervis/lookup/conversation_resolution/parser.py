@@ -8,6 +8,7 @@ from typing import Callable, TypeVar
 from typing_extensions import assert_never
 
 from fervis.memory.conversation_context import (
+    ConversationCallableParameter,
     ConversationContextFrame,
     ConversationContextSource,
     ConversationFramePartKind,
@@ -15,11 +16,13 @@ from fervis.memory.conversation_context import (
 from fervis.lookup.conversation_resolution import provider_contract as output
 from fervis.lookup.conversation_resolution.model import (
     CandidateInterpretation,
+    CarriedFrameArgument,
     ContextAnchorSource,
     ConversationFrameCall,
     ConversationResolution,
     ConversationResolutionResult,
     CurrentSpanSource,
+    FrameArgument,
     FrameParameterRef,
     FramePartSource,
     ResolutionSource,
@@ -37,11 +40,7 @@ from fervis.lookup.provider_contract import ProviderObject
 
 
 _VALUE_PART_KINDS = frozenset(
-    {
-        ConversationFramePartKind.ENTITY_IDENTITY,
-        ConversationFramePartKind.TIME_SCOPE,
-        ConversationFramePartKind.LIMIT,
-    }
+    {ConversationFramePartKind.INPUT}
 )
 _FIXED_SHAPE_PART_KINDS = frozenset(ConversationFramePartKind) - _VALUE_PART_KINDS
 
@@ -356,9 +355,7 @@ def _resolution_source(
             anchor_id=anchor_id,
             source_text=source_text,
             memory_ids=(
-                (anchor_id,)
-                if anchor_id in source_contract.source_memory_ids
-                else ()
+                (anchor_id,) if anchor_id in source_contract.source_memory_ids else ()
             ),
         )
     if kind is ResolutionSourceKind.FRAME_PART:
@@ -406,9 +403,7 @@ def _frame_parameter_ref(
     if frame is None or frame.callable is None:
         raise ValueError("frame parameter does not reference a callable frame")
     parameter_id = _required_text(parameter.parameter_id)
-    available_ids = {
-        item.parameter_id for item in frame.callable.parameters
-    }
+    available_ids = {item.parameter_id for item in frame.callable.parameters}
     if parameter_id not in available_ids:
         raise ValueError("frame parameter is not available")
     return FrameParameterRef(frame_id=frame_id, parameter_id=parameter_id)
@@ -475,13 +470,34 @@ def _complete_frame_call(
         parameter.parameter_id: value for value, parameter in bindings
     }
     arguments = tuple(
-        ResolvedValueFrameArgument(
-            parameter_id=parameter.parameter_id,
-            value_id=values_by_parameter_id[parameter.parameter_id].value_id,
+        _frame_argument(
+            frame,
+            parameter=parameter,
+            value=values_by_parameter_id[parameter.parameter_id],
         )
         for parameter in signature.parameters
     )
     return ConversationFrameCall(frame_id=frame.frame_id, arguments=arguments)
+
+
+def _frame_argument(
+    frame: ConversationContextFrame,
+    *,
+    parameter: ConversationCallableParameter,
+    value: ResolvedConversationValue,
+) -> FrameArgument:
+    carried_source = (
+        FramePartSource(frame.frame_id, parameter.part_id),
+    )
+    if (
+        value.sources == carried_source
+        and value.resolved_text == parameter.current_text
+    ):
+        return CarriedFrameArgument(parameter.parameter_id)
+    return ResolvedValueFrameArgument(
+        parameter_id=parameter.parameter_id,
+        value_id=value.value_id,
+    )
 
 
 def _unresolved_outcome(

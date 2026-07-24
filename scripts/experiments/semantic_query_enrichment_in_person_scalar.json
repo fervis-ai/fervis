@@ -1,0 +1,20 @@
+{
+  "resource_names": ["Sale", "Store", "Location", "Area"],
+  "recall_buckets": [
+    {
+      "bucket_ref": "fact_1:recall:population",
+      "kind": "population",
+      "meaning": "sales",
+      "requirement_refs": ["fact_1:set:s1"],
+      "expected_any_resource_names": ["Sale", "sale", "sales"]
+    },
+    {
+      "bucket_ref": "fact_1:recall:output_1",
+      "kind": "output",
+      "meaning": "the sales channel of each sale",
+      "requirement_refs": ["fact_1:set:s1", "fact_1:fact:f1"],
+      "expected_any_resource_names": ["Sale", "sale", "sales"]
+    }
+  ],
+  "reference_tasks": []
+}

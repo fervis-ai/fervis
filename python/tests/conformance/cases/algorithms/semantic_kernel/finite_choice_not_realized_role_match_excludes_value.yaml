@@ -1,0 +1,15 @@
+id: finite_choice_not_realized_role_match_excludes_value
+description: A draft or planned-only finite-choice state stays outside the ordinary requested population.
+migrates:
+  - python/tests/conformance/cases/algorithms/source_binding/finite_choice_not_realized_role_match_excludes_value.yaml
+kind: algorithm
+algorithm: semantic.source_binding
+input:
+  mode: subject_choice_membership
+  choice_included: true
+  matched_excluded_role: NOT_REALIZED
+  explicit_user_override_applies: false
+expect:
+  result_contains:
+    included: false
+    explicit_user_override_applies: false

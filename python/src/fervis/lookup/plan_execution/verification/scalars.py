@@ -1,14 +1,12 @@
-"""Scalar-input helpers for fact-plan verification."""
+"""Scalar-input helpers for answer-program verification."""
 
 from ._shared import (
+    AggregateSpec,
     ComputeSpec,
     FilterSpec,
     Operation,
     ProjectSpec,
     UniversalConditionSpec,
-)
-from fervis.lookup.answer_program.operations import (
-    Predicate,
 )
 from fervis.lookup.answer_program.expressions import expression_references
 
@@ -42,18 +40,17 @@ def _operation_expression_references(operation: Operation):
     if isinstance(spec, ComputeSpec):
         return (expression_references(spec.expression),)
     if isinstance(spec, FilterSpec):
-        return _predicate_expression_references(spec.predicate)
+        return (expression_references(spec.condition),)
     if isinstance(spec, ProjectSpec):
         return tuple(
             expression_references(output.expression) for output in spec.outputs
         )
     if isinstance(spec, UniversalConditionSpec):
-        return _predicate_expression_references(spec.predicate)
+        return (expression_references(spec.condition),)
+    if isinstance(spec, AggregateSpec):
+        return tuple(
+            expression_references(aggregation.filter)
+            for aggregation in spec.aggregations
+            if aggregation.filter is not None
+        )
     return ()
-
-
-def _predicate_expression_references(predicate: Predicate):
-    references = [expression_references(predicate.left)]
-    if predicate.right is not None:
-        references.append(expression_references(predicate.right))
-    return tuple(references)

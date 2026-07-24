@@ -277,6 +277,7 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
             cardinality=(
                 RowCardinality.MANY
                 if contract.response_cardinality == "many"
+                and contract.pagination is None
                 else RowCardinality.ONE
             ),
         )

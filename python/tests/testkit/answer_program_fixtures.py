@@ -7,11 +7,8 @@ from typing import Any
 
 import yaml
 
-from fervis.lookup.answer_program import (
-    AnswerProgram,
-    BindingSet,
-    decode_answer_program,
-)
+from fervis.lookup.answer_program import AnswerProgram, BindingSet
+from fervis.lookup.contract_codec import decode_answer_program
 from fervis.lookup.relation_catalog import RelationCatalog
 
 from tests.testkit.answer_program_contracts import binding_set_from_payload

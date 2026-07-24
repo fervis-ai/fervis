@@ -6,7 +6,6 @@ import pytest
 
 from fervis.lookup.clarification.model import (
     ConversationResolutionResponse,
-    FactPlanningCatalogInputResponse,
     GroundingIdentityResponse,
     QuestionContractResponse,
     SourceBindingCatalogInputResponse,
@@ -132,19 +131,6 @@ def _target(
             "online",
             SourceBindingCatalogInputResponse,
         ),
-        (
-            "fact_planning",
-            {
-                "kind": "fact_planning_catalog_input",
-                "requestedFactId": "fact_1",
-                "planningRequirementId": "requirement_1",
-                "target": _target("limit", value_type="integer"),
-            },
-            _subject("catalog_input", "orders.limit"),
-            "5",
-            "",
-            FactPlanningCatalogInputResponse,
-        ),
     ),
 )
 def test_response_dispatches_once_to_closed_owner_variant(
@@ -225,11 +211,10 @@ def test_grounding_clarification_preserves_typed_canonical_key_components() -> N
 
 def test_catalog_response_rejects_value_outside_typed_target() -> None:
     clarification = _clarification(
-        "fact_planning",
+        "source_binding",
         {
-            "kind": "fact_planning_catalog_input",
+            "kind": "source_binding_catalog_input",
             "requestedFactId": "fact_1",
-            "planningRequirementId": "requirement_1",
             "target": _target("limit", value_type="integer"),
         },
         _subject("catalog_input", "orders.limit"),
@@ -249,7 +234,7 @@ def _clarification(owner, continuation, subject):
             "id": "clarification_1",
             "need": (
                 "catalog_input"
-                if owner in {"source_binding", "fact_planning"}
+                if owner == "source_binding"
                 else "question_interpretation"
                 if owner == "conversation_resolution"
                 else "answer_metric"
@@ -260,7 +245,7 @@ def _clarification(owner, continuation, subject):
                 "catalog_requires_choice"
                 if continuation.get("target", {}).get("choices")
                 else "missing_required_value"
-                if owner in {"source_binding", "fact_planning"}
+                if owner == "source_binding"
                 else "ambiguous_interpretation"
                 if owner == "conversation_resolution"
                 else "missing_answer_metric"

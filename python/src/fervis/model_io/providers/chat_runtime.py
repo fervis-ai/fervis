@@ -31,6 +31,7 @@ class ChatProviderConfig:
     pricing_version: str = ""
     temperature: float = 0.0
     max_output_tokens_parameter: str = "max_tokens"
+    reasoning_effort: str | None = None
 
     @property
     def api_key(self) -> str | None:

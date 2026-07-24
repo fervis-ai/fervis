@@ -1,0 +1,6 @@
+{
+  "kind": "explicit_choice_override",
+  "question": "How many completed sales happened in March 2026?",
+  "requested_choice": "COMPLETED",
+  "expected_override": false
+}

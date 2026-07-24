@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fervis.lineage.enums import ProgramInvocationKind
 
-from fervis.lookup.answer_program.codec import answer_program_id
+import pytest
+
+from fervis.lookup.contract_codec import answer_program_id
+from fervis.lookup.contract_codec import canonical_contract_fingerprint
 from fervis.lookup.answer_program.contracts import (
     BindingProvenance,
     BindingProvenanceKind,
@@ -35,18 +38,25 @@ from fervis.lookup.conversation_resolution.model import (
     CurrentSpanSource,
     ResolvedValueFrameArgument,
 )
-from fervis.lookup.question_contract import (
-    KnownInputSource,
-    LiteralInputRole,
+from fervis.lookup.question_contract.semantic_model import (
+    AllResults,
+    InputDenotation,
+    InputDenotationKind,
+    InputTerm,
+    InstanceInterpretation,
     RequestedFact,
-    RequestedFactAnswerOutput,
-    RequestedFactLiteralInput,
+    SetTerm,
+    Subject,
+)
+from fervis.lookup.semantic_types import (
+    IdentifierType,
+    SourceOrigin,
+    SourceOriginKind,
 )
 from fervis.memory.conversation_context import (
-    ConversationAnswerShape,
+    ConversationCallableParameter,
     ConversationCallableSignature,
     ConversationContextFrame,
-    ConversationFrameParameter,
     ConversationFramePart,
     ConversationFramePartKind,
     ConversationMemoryCardProjection,
@@ -73,17 +83,10 @@ def test_callable_frame_reuses_shape_and_rebinds_only_changed_argument() -> None
         tenant_id="tenant_1",
     )
 
-    current_input = prepared.question_contract.question_inputs[0]
-    assert current_input == RequestedFactLiteralInput(
-        id="place",
-        source=KnownInputSource.CONVERSATION_RESOLUTION,
-        role=LiteralInputRole.REFERENCE_VALUE,
-        text="Pivot Mall",
-        resolved_value_text="Pivot Mall",
-        field_label_text="mall",
-        value_meaning_hint="mall identity",
-        resolved_input_ref="conversation.place_2",
-    )
+    [current_input] = prepared.changed_inputs
+    assert current_input.id == "place"
+    assert current_input.operand == "Pivot Mall"
+    assert current_input.origin.meaning == "Pivot Mall"
 
     current_value = FactValue.identity(
         id="grounded_place",
@@ -102,14 +105,63 @@ def test_callable_frame_reuses_shape_and_rebinds_only_changed_argument() -> None
         grounded_values=(current_value,),
     )
 
-    rebound_value = rebound.get("question.place").value
+    rebound_value = rebound.get("value.place").value
     assert rebound_value.known_input_id == "place"
     assert rebound_value.payload.canonical_value() == entity_key_value(
         "mall",
         "tenant_mall_key",
         {"tenant_id": "tenant_1", "id": "mall_2"},
     )
-    assert reader.request == ("run_1", "conversation_1", "tenant_1")
+    assert reader.request == (
+        stored.invocation.invocation_id,
+        "conversation_1",
+        "tenant_1",
+    )
+
+
+def test_callable_frame_rejects_fact_scoped_signature_for_multi_fact_program() -> None:
+    program, bindings = _base_program()
+    [fact] = program.fact_template
+    multi_fact_program = replace(
+        program,
+        fact_template=(fact, replace(fact, id="returns_count")),
+    )
+    stored = StoredProgramInvocation(
+        invocation=program_invocation(
+            run_id="run_1",
+            program_id=answer_program_id(multi_fact_program),
+            bindings=bindings,
+            kind=ProgramInvocationKind.COMPILED_QUESTION,
+        ),
+        program=multi_fact_program,
+    )
+    projection = _memory_projection()
+    [frame] = projection.context_frames
+    assert frame.callable is not None
+    projection = replace(
+        projection,
+        context_frames=(
+            replace(
+                frame,
+                callable=replace(
+                    frame.callable,
+                    program_id=stored.invocation.program_id,
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="callable frame must identify the complete saved program",
+    ):
+        load_callable_frame_program(
+            resolution=_resolution(),
+            memory_projection=projection,
+            reader=_Reader(stored),
+            conversation_id="conversation_1",
+            tenant_id="tenant_1",
+        )
 
 
 @dataclass
@@ -127,38 +179,64 @@ class _Reader:
         self.request = (run_id, conversation_id, tenant_id)
         return self.stored
 
+    def load_prior_invocation(
+        self,
+        *,
+        invocation_id: str,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation:
+        self.request = (invocation_id, conversation_id, tenant_id)
+        return self.stored
+
 
 def _base_program() -> tuple[AnswerProgram, BindingSet]:
-    known = RequestedFactLiteralInput(
+    origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "sales at Acacia Mall")
+    input_term = InputTerm(
         id="place",
-        source=KnownInputSource.QUESTION_CONTEXT,
-        role=LiteralInputRole.REFERENCE_VALUE,
-        text="Acacia Mall",
-        resolved_value_text="Acacia Mall",
-        field_label_text="mall",
-        value_meaning_hint="mall identity",
+        origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "Acacia Mall"),
+        operand="Acacia Mall",
+        value_type=IdentifierType("s1"),
     )
-    program = AnswerProgram(
-        fact_template=(
-            RequestedFact(
-                id="sales_count",
-                description="sales count",
-                answer_outputs=(
-                    RequestedFactAnswerOutput(
-                        id="answer",
-                        description="sales count",
-                        role="ROW_COUNT",
-                    ),
-                ),
-                known_inputs=(known,),
-                input_refs=(known.id,),
+    fact = RequestedFact(
+        id="sales_count",
+        origin=origin,
+        sets=(
+            SetTerm(
+                id="s1", origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "malls")
             ),
         ),
+        associations=(),
+        facts=(),
+        expressions=(),
+        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        qualification_ref=None,
+        grouping_refs=(),
+        outputs=(),
+        ordering=(),
+        selection=AllResults(),
+        distinct_by=(),
+    )
+    program = AnswerProgram(
+        inputs=(input_term,),
+        input_denotations=(
+            InputDenotation(
+                id="denotation_1",
+                input_ref="place",
+                operand_meaning="the mall whose sales are counted",
+                denotation_basis="Acacia Mall names a mall",
+                denoted_instance_kind="mall",
+                kind=InputDenotationKind.IDENTITY_REFERENCE,
+            ),
+        ),
+        fact_template=(fact,),
         parameters=(
             ParameterDeclaration(
-                id="question.place",
+                id="value.place",
                 role=ParameterRole.QUESTION_INPUT,
                 value_type=ParameterValueType.IDENTITY,
+                input_ref="place",
+                input_use_refs=("sales_count:input_use:place",),
             ),
         ),
     )
@@ -177,7 +255,7 @@ def _base_program() -> tuple[AnswerProgram, BindingSet]:
     return program, BindingSet.from_bindings(
         (
             ParameterBinding(
-                parameter_id="question.place",
+                parameter_id="value.place",
                 value=base_value,
                 provenance=BindingProvenance(
                     kind=BindingProvenanceKind.QUESTION_INPUT,
@@ -189,35 +267,41 @@ def _base_program() -> tuple[AnswerProgram, BindingSet]:
 
 
 def _memory_projection() -> ConversationMemoryCardProjection:
+    program, bindings = _base_program()
+    invocation = program_invocation(
+        run_id="run_1",
+        program_id=answer_program_id(program),
+        bindings=bindings,
+        kind=ProgramInvocationKind.COMPILED_QUESTION,
+    )
+    fact = program.fact_template[0]
     return ConversationMemoryCardProjection(
         context_frames=(
             ConversationContextFrame(
                 frame_id="request:1",
                 source_ids=("prior_question",),
-                answer_shape=ConversationAnswerShape(
-                    expression_family="scalar_aggregate",
-                    output_roles=("ROW_COUNT",),
-                ),
                 parts=(
                     ConversationFramePart(
-                        part_id="input:entity_identity:1",
-                        kind=ConversationFramePartKind.ENTITY_IDENTITY,
+                        part_id="input:value.place",
+                        kind=ConversationFramePartKind.INPUT,
                         text="Acacia Mall",
                         source_ref="place",
+                        value_type="identity",
                     ),
                 ),
                 callable=ConversationCallableSignature(
-                    base_run_id="run_1",
-                    requested_fact_id="sales_count",
+                    base_invocation_id=invocation.invocation_id,
+                    program_id=invocation.program_id,
+                    requested_fact_ref="sales_count",
+                    requested_fact_fingerprint=canonical_contract_fingerprint(fact),
                     parameters=(
-                        ConversationFrameParameter(
-                            parameter_id="question.place",
-                            part_id="input:entity_identity:1",
-                            kind=ConversationFramePartKind.ENTITY_IDENTITY,
+                        ConversationCallableParameter(
+                            parameter_id="value.place",
+                            part_id="input:value.place",
+                            value_type="identity",
+                            input_ref="place",
+                            input_use_refs=("sales_count:input_use:place",),
                             current_text="Acacia Mall",
-                            resolved_text="Acacia Mall",
-                            field_label_text="mall",
-                            value_meaning_hint="mall identity",
                         ),
                     ),
                 ),
@@ -242,8 +326,7 @@ def _resolution() -> CompiledConversationResolution:
                         resolved_text="Pivot Mall",
                         source_kinds=("entity_identity",),
                         sources=(source,),
-                        field_label_text="mall",
-                        value_meaning_hint="mall identity",
+                        value_type="identity",
                     ),
                 ),
             ),
@@ -253,16 +336,14 @@ def _resolution() -> CompiledConversationResolution:
                 input_ref="conversation.place_2",
                 value_source_text="Pivot Mall",
                 resolved_value_text="Pivot Mall",
-                role=LiteralInputRole.REFERENCE_VALUE,
-                field_label_text="mall",
-                value_meaning_hint="mall identity",
+                value_type="identity",
             ),
         ),
         frame_call=ConversationFrameCall(
             frame_id="request:1",
             arguments=(
                 ResolvedValueFrameArgument(
-                    parameter_id="question.place",
+                    parameter_id="value.place",
                     value_id="place_2",
                 ),
             ),

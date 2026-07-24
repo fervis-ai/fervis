@@ -31,8 +31,6 @@ _MODEL_TURN_STEP_KEYS = {
     ModelTurnPurpose.READ_ELIGIBILITY: RunStepKey.READ_ELIGIBILITY,
     ModelTurnPurpose.PLAN_SELECTION: RunStepKey.PLAN_SELECTION,
     ModelTurnPurpose.SOURCE_BINDING: RunStepKey.SOURCE_BINDING,
-    ModelTurnPurpose.PATTERN_FACT_PLANNING: RunStepKey.FACT_PLANNING,
-    ModelTurnPurpose.FACT_PLAN: RunStepKey.FACT_PLANNING,
     ModelTurnPurpose.ANSWER_SYNTHESIS: RunStepKey.ANSWER_SYNTHESIS,
 }
 

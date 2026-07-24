@@ -1,0 +1,11 @@
+{
+  "question": "Which staff member has identifier 51515151-0000-0000-0002-000000000001?",
+  "operand": "51515151-0000-0000-0002-000000000001",
+  "input_meaning": "staff member identified by the supplied identifier",
+  "operand_meaning": "the staff member identified by the supplied identifier",
+  "denoted_instance_kind": "staff member",
+  "expected_set_meaning": "staff member",
+  "resource_type": "staff",
+  "key_component": "staff_id",
+  "expected_read": "get_staff"
+}

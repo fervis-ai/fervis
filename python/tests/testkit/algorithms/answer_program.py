@@ -11,16 +11,17 @@ from fervis.lookup.answer_program import (
     ProgramCompatibility,
     SourceContractKind,
     SourceContractPin,
+)
+from fervis.lookup.contract_codec import (
     answer_program_id,
+    binding_patch_id,
     canonical_answer_program_payload,
     canonical_binding_patch_json,
     canonical_binding_set_json,
     canonical_contract_fingerprint,
     canonicalize_answer_program,
     decode_answer_program,
-    binding_patch_id,
 )
-from fervis.lookup.answer_program.compilation import compile_answer_program
 from fervis.lookup.answer_program.inputs import apply_binding_patch
 from fervis.lookup.answer_program.instantiation import (
     ExecutionEnvironment,
@@ -34,7 +35,8 @@ from fervis.lookup.answer_program.revisions import (
     decode_capability_application,
 )
 from fervis.lookup.memory.projection import LookupMemory
-from fervis.lookup.plan_execution.errors import VerificationError
+from fervis.lookup.plan_execution.errors import RelationEngineError, VerificationError
+from fervis.lookup.source_reads.response import EndpointResponseError
 from fervis.lookup.answer_program.persistence import program_invocation
 
 from tests.testkit.assertions import exact_mismatches, subset_mismatches
@@ -46,18 +48,69 @@ from tests.testkit.answer_program_contracts import (
     parameter_declarations_from_payload,
     fact_value_from_payload,
 )
-from fervis.lookup.answer_program.values import ConstantRef
-from fervis.lookup.answer_program.values import BindingSet, FactValue, LiteralType
+from fervis.lookup.answer_program.values import (
+    BindingProvenance,
+    BindingProvenanceKind,
+    BindingSet,
+    ConstantRef,
+    FactValue,
+    LiteralType,
+    ParameterBinding,
+    ParameterDeclaration,
+    ParameterRef,
+    ParameterRole,
+    ParameterValueType,
+)
+from fervis.lookup.answer_program.expressions import BinaryExpression, FieldRef
+from fervis.lookup.expression_operators import ExpressionBinaryOperator
 from fervis.lookup.answer_program.operations import (
+    FilterSpec,
     Operation,
     OrderSpec,
     SortDirection,
     SortKey,
     Take,
 )
+from fervis.lookup.answer_program.relations import (
+    FieldBindingRole,
+    Relation,
+    RelationField,
+    RelationSource,
+    SourceKind,
+)
 from tests.testkit.catalog import catalog_from_payload
-from tests.testkit.question_contract import question_contract_from_payload
 from tests.testkit.serialization import portable_value
+
+
+def run_answer_program_relation_case(payload: dict[str, Any]) -> list[str]:
+    relation_payload = payload["input"]["relation"]
+    source_payload = relation_payload["source"]
+    relation = Relation(
+        id=str(relation_payload["id"]),
+        source=RelationSource(
+            kind=SourceKind(str(source_payload["kind"])),
+            read_id=str(source_payload.get("read_id") or ""),
+            row_source_id=str(source_payload.get("row_source_id") or ""),
+        ),
+        fields=tuple(
+            RelationField(
+                field_id=str(item["field_id"]),
+                roles=tuple(FieldBindingRole(str(role)) for role in item["roles"]),
+            )
+            for item in relation_payload.get("fields") or ()
+        ),
+    )
+    return subset_mismatches(
+        actual={
+            "source_read_id": relation.source.read_id,
+            "grain_keys": list(relation.grain_keys),
+            "fields": {
+                field.field_id: {"roles": [role.value for role in field.roles]}
+                for field in relation.fields
+            },
+        },
+        expected_subset=payload["expect"]["result_contains"],
+    )
 
 
 def run_answer_program_canonicalize_case(payload: dict[str, Any]) -> list[str]:
@@ -133,35 +186,6 @@ def run_answer_program_decode_case(payload: dict[str, Any]) -> list[str]:
         actual = {
             "status": "decoded",
             "program_id": answer_program_id(program),
-        }
-    return _mismatches(payload, actual=actual)
-
-
-def run_answer_program_compile_case(payload: dict[str, Any]) -> list[str]:
-    input_payload = payload["input"]
-    try:
-        program, bindings = compile_answer_program(
-            decode_answer_program(input_payload["program"]),
-            question_contract=question_contract_from_payload(
-                input_payload["question_contract"]
-            ),
-            catalog=catalog_from_payload(input_payload["catalog"]),
-            bindings=binding_set_from_payload(input_payload),
-        )
-    except AnswerProgramContractError as exc:
-        actual = {
-            "status": "rejected",
-            "code": exc.code,
-            "reads": 0,
-            "reusable": False,
-        }
-    else:
-        actual = {
-            "status": "compiled",
-            "program_id": answer_program_id(program),
-            "program": canonical_answer_program_payload(program),
-            "bindings": binding_payload(bindings),
-            "compatibility": _compatibility_payload(program.compatibility),
         }
     return _mismatches(payload, actual=actual)
 
@@ -282,7 +306,12 @@ def run_answer_program_invoke_case(payload: dict[str, Any]) -> list[str]:
                     memory=LookupMemory(),
                 ),
             )
-        except (AnswerProgramContractError, VerificationError) as exc:
+        except (
+            AnswerProgramContractError,
+            EndpointResponseError,
+            RelationEngineError,
+            VerificationError,
+        ) as exc:
             result = {
                 "id": str(invocation["id"]),
                 "status": "rejected",
@@ -307,25 +336,6 @@ def run_answer_program_invoke_case(payload: dict[str, Any]) -> list[str]:
                     for relation in execution.relations
                 ],
                 "proof_graph": portable_value(execution.proof_graph),
-                "effective_requested_facts": [
-                    {
-                        "id": fact.id,
-                        "description": fact.description,
-                        "population_constraints": [
-                            {
-                                "id": constraint.id,
-                                "included_values": list(constraint.included_values),
-                                "excluded_values": list(constraint.excluded_values),
-                            }
-                            for constraint in fact.population_constraints
-                        ],
-                    }
-                    for fact in getattr(
-                        execution,
-                        "effective_requested_facts",
-                        (),
-                    )
-                ],
                 "requests": portable_value(access.requests),
             }
         invocations.append(result)
@@ -377,6 +387,67 @@ def run_answer_program_order_take_case(payload: dict[str, Any]) -> list[str]:
     return _mismatches(
         payload,
         actual={"limit": inputs[0].value},
+    )
+
+
+def run_answer_program_projected_operation_inputs_case(
+    payload: dict[str, Any],
+) -> list[str]:
+    input_payload = payload["input"]
+    parameter = ParameterDeclaration(
+        id="period",
+        role=ParameterRole.QUESTION_INPUT,
+        value_type=ParameterValueType.TIME,
+    )
+    condition = BinaryExpression(
+        left=BinaryExpression(
+            left=FieldRef("occurred_at"),
+            operator=ExpressionBinaryOperator.GTE,
+            right=ParameterRef(parameter_id="period", component="start"),
+        ),
+        operator=ExpressionBinaryOperator.AND,
+        right=BinaryExpression(
+            left=FieldRef("occurred_at"),
+            operator=ExpressionBinaryOperator.LTE,
+            right=ParameterRef(parameter_id="period", component="end"),
+        ),
+    )
+    _operations, inputs = _instantiate_operations(
+        AnswerProgram(
+            parameters=(parameter,),
+            operations=(
+                Operation(
+                    id="filter_period",
+                    spec=FilterSpec(input_relation="rows", condition=condition),
+                    output_relation="filtered_rows",
+                ),
+            ),
+        ),
+        bindings=BindingSet.from_bindings(
+            (
+                ParameterBinding(
+                    parameter_id="period",
+                    value=FactValue.time(
+                        id="period",
+                        expression="period",
+                        resolved_start=str(input_payload["start"]),
+                        resolved_end=str(input_payload["end"]),
+                        granularity="month",
+                    ),
+                    provenance=BindingProvenance(
+                        kind=BindingProvenanceKind.QUESTION_INPUT
+                    ),
+                ),
+            )
+        ),
+    )
+    return _mismatches(
+        payload,
+        actual={
+            "inputs": [
+                {"input_id": item.input_id, "value": item.value} for item in inputs
+            ]
+        },
     )
 
 

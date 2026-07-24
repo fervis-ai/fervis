@@ -1,16 +1,14 @@
 id: finite_choice_all_values_included_records_population_choice
-description: Source binding records a finite-choice population decision even when all values are included and the combined population is not narrowed.
+description: An optional finite-choice parameter is omitted when every declared value remains included.
 kind: algorithm
-algorithm: source_binding.finite_choice_parse
+algorithm: semantic.source_binding
 input:
-  choices:
-    OPEN: SATISFIES_TEST
-    CLOSED: SATISFIES_TEST
+  mode: finite_choice_parameter_omission
+  required: false
+  default: null
+  choices: [OPEN, CLOSED]
+  included_values: [OPEN, CLOSED]
 expect:
   result_contains:
-    population_choices:
-      - controller_kind: query_param
-        controller_id: status
-        field_id: status
-        included_values: [OPEN, CLOSED]
-        excluded_values: []
+    parameter_omitted: true
+    included_values: [OPEN, CLOSED]

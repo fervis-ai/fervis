@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from django.urls import URLPattern, URLResolver, get_resolver
+from rest_framework import mixins
 from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import AllowAny
 
@@ -148,6 +149,9 @@ def _walk_patterns(
                 url_name=pattern.name,
                 view_class=view_class,
                 converters=pattern_converters,
+                get_action=(
+                    getattr(pattern.callback, "actions", {}) or {}
+                ).get("get"),
                 source_namespace_path=source_namespace_path,
             )
         )
@@ -159,6 +163,7 @@ def _build_contract(
     url_name: str,
     view_class: type,
     converters: dict[str, object],
+    get_action: str | None = None,
     source_namespace_path: tuple[str, ...] = (),
 ) -> EndpointContract:
     query_serializer_class = getattr(view_class, "query_serializer_class", None)
@@ -276,6 +281,10 @@ def _build_contract(
         query_params=query_params,
         response_fields=response_fields,
         response_schema=response_schema,
+        response_cardinality=_response_cardinality(
+            view_class,
+            get_action=get_action,
+        ),
         capabilities=capabilities,
         capability_sources=_capability_sources(capabilities),
         agent_access=bool(getattr(view_class, "agent_access", False)),
@@ -305,6 +314,23 @@ def _build_contract(
             resource_names=resource_names,
         ),
     )
+
+
+def _response_cardinality(
+    view_class: type,
+    *,
+    get_action: str | None,
+) -> str:
+    declared = getattr(view_class, "fervis_response_cardinality", None)
+    if declared in {"one", "many"}:
+        return str(declared)
+    if get_action == "list":
+        return "many"
+    if get_action == "retrieve":
+        return "one"
+    supports_list = issubclass(view_class, mixins.ListModelMixin)
+    supports_retrieve = issubclass(view_class, mixins.RetrieveModelMixin)
+    return "many" if supports_list and not supports_retrieve else "one"
 
 
 def _get_response_serializer_class(view_class: type) -> type | None:

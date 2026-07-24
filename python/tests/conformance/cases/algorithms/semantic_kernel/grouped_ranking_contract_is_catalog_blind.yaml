@@ -1,0 +1,75 @@
+id: grouped_ranking_contract_is_catalog_blind
+description: Grouped ranking preserves qualifying rows, semantic identity, time qualification, aggregate ordering, and tied results without physical catalog terms.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts: ["For each courier, count deliveries during March 2026; return every courier tied for the highest count."]
+  frame_payload:
+    decision_basis: The result groups qualifying deliveries by associated courier and ranks the group counts.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+        - result_kind: grouped_results
+          qualifying_row_kind: {meaning: delivery occurrences, origin: {kind: question}}
+          grouping_meanings:
+            - {meaning: couriers, origin: {kind: question}}
+          return_request_basis: Return each tied courier and its delivery count.
+          returned_result: {kind: identities_and_values}
+          answer_values:
+            - value_ref: v1
+              meaning: delivery count
+              origin: {kind: question}
+          returned_value_refs: [v1]
+          ordering_value_refs: [v1]
+          selection: {kind: first_rank_with_ties}
+          universal_shape: none
+      supplied_values:
+        - meaning: the reporting period
+          denotation: {basis: March 2026 is a period applied to delivery occurrences., kind: scalar}
+          value: {operands: [March 2026], value_type: {kind: temporal_scope}, origin: {kind: question}}
+  payload:
+    decision_basis: The result groups qualifying deliveries by associated courier and ranks the group counts.
+    outcome:
+      kind: question_contract
+      answer_requests:
+        - requested_fact_ref: fact_1
+          origin: &request_origin {source: question_context, meaning: courier delivery counts in March 2026, resolved_input_ref: null}
+          other_sets: []
+          other_associations: []
+          candidate_set: {instance_interpretation: normal_business_instance}
+          qualification: {kind: within, value: {kind: fact, observed_for_ref: s1, value_type: {kind: date}, origin: {source: question_context, meaning: delivery date, resolved_input_ref: null}}, scope: {kind: input_ref, input_ref: i1}}
+          grouping:
+            - id: g1
+              grouping_basis: Each delivery is grouped by the exact courier instance related to it.
+              kind: related_instance_identity
+              identified_set: {id: s2}
+              association: {id: a1, origin: {source: question_context, meaning: couriers, resolved_input_ref: null}}
+          ordering:
+            - expression: &count_expression {kind: aggregate, function: count, argument: {kind: set_ref, set_ref: s1}, distinct_argument: false}
+              direction: descending
+          selection: {kind: first_rank_with_ties}
+          distinct_by: []
+          outputs:
+            - {expression: {kind: group_ref, ref: g1}}
+            - {expression: *count_expression}
+expect:
+  result_contains:
+    input_refs: [i1]
+    requested_facts:
+      - id: fact_1
+        result_grain: groups
+        grouping_refs: ["fact_1:fact:f2"]
+        input_use_refs: [i1]
+        population_atoms: ["fact_1:expression:e1"]
+        qualification_clauses: [["fact_1:expression:e1"]]
+        output_refs: ["fact_1:output:output_1", "fact_1:output:output_2"]
+        source_support_closures:
+          "fact_1:fact:f1": ["fact_1:fact:f1", "fact_1:set:s1"]
+          "fact_1:fact:f2": ["fact_1:association:a1", "fact_1:fact:f2", "fact_1:set:s2"]
+    semantic_recall_requirements:
+      - {requirement_ref: "fact_1:set:s1", kind: set, owner_refs: [], identity_set_ref: null}
+      - {requirement_ref: "fact_1:set:s2", kind: set, owner_refs: [], identity_set_ref: null}
+      - {requirement_ref: "fact_1:association:a1", kind: association, owner_refs: ["fact_1:set:s1", "fact_1:set:s2"], identity_set_ref: null}
+      - {requirement_ref: "fact_1:fact:f1", kind: fact, owner_refs: ["fact_1:set:s1"], identity_set_ref: null}
+      - {requirement_ref: "fact_1:fact:f2", kind: fact, owner_refs: ["fact_1:association:a1"], identity_set_ref: "fact_1:set:s2"}
+    reference_input_recall_tasks: []

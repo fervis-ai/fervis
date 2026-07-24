@@ -91,8 +91,7 @@ function decodeClarificationOwnerSpec(
     conversation_resolution: "conversation_resolution",
     question_contract: "question_contract",
     grounding: "grounding",
-    source_binding_catalog_input: "source_binding",
-    fact_planning_catalog_input: "fact_planning"
+    source_binding_catalog_input: "source_binding"
   };
   if (expectedOwner[continuation.kind] !== owner) {
     throw new Error("clarification owner and continuation must match");
@@ -151,22 +150,12 @@ function decodeClarificationContinuation(raw: unknown): ClarificationContinuatio
       acceptsFreeText: expectBoolean(object.acceptsFreeText, "clarification.continuation.acceptsFreeText")
     };
   }
-  if (kind === "source_binding_catalog_input" || kind === "fact_planning_catalog_input") {
+  if (kind === "source_binding_catalog_input") {
     const target = decodeCatalogInputTarget(object.target);
-    const common = {
-      requestedFactId: expectString(object.requestedFactId, "clarification.continuation.requestedFactId"),
-      target
-    };
-    if (kind === "source_binding_catalog_input") {
-      return { kind, ...common };
-    }
     return {
       kind,
-      ...common,
-      planningRequirementId: expectString(
-        object.planningRequirementId,
-        "clarification.continuation.planningRequirementId"
-      )
+      requestedFactId: expectString(object.requestedFactId, "clarification.continuation.requestedFactId"),
+      target
     };
   }
   throw new Error(`unsupported clarification continuation: ${kind}`);

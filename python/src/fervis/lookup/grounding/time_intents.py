@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.grounding.time_resolution import validate_time_intent
-from fervis.lookup.grounding.provider_contract import FlatTimeIntentOutput
+from fervis.lookup.grounding.time_resolution.provider_contract import (
+    FlatTimeIntentOutput,
+)
 
 TIME_INTENT_FIELDS = (
     "time_shape",

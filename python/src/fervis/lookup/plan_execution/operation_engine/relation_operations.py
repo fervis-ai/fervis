@@ -29,9 +29,12 @@ from fervis.lookup.answer_program.operations import (
     UniversalConditionSpec,
 )
 from fervis.lookup.answer_program.expressions import FieldRef
-from .expression_evaluator import ExpressionEnvironment, evaluate_expression
-
-from .predicates import _predicate, _predicate_fact
+from .expression_evaluator import (
+    ExpressionEnvironment,
+    evaluate_condition,
+    evaluate_expression,
+    evaluated_condition_fact,
+)
 from .shared import (
     _assign_field,
     _concat_grain,
@@ -64,12 +67,14 @@ def _filter(
     rows = [
         dict(row)
         for row in input_relation.rows
-        if _predicate(
-            row,
-            spec.predicate,
-            scalars,
-            input_relation.field_types or {},
-            scalar_types,
+        if evaluate_condition(
+            spec.condition,
+            environment=ExpressionEnvironment(
+                row=row,
+                field_types=input_relation.field_types or {},
+                scalars=scalars,
+                scalar_types=scalar_types,
+            ),
         )
     ]
     return _operation_relation(
@@ -443,17 +448,19 @@ def _universal_condition(
             declared_key(_field(row, field), observation_types.get(field))
             for field in (*observation_subject_fields, *observation_dimension_fields)
         )
-        predicate_fact = _predicate_fact(
-            row,
-            spec.predicate,
-            scalars,
-            observations.field_types or {},
-            scalar_types,
+        condition_fact = evaluated_condition_fact(
+            spec.condition,
+            environment=ExpressionEnvironment(
+                row=row,
+                field_types=observations.field_types or {},
+                scalars=scalars,
+                scalar_types=scalar_types,
+            ),
         )
         existing = observation_index.get(observation_key)
         if existing is None:
-            observation_index[observation_key] = predicate_fact
-        elif existing != predicate_fact:
+            observation_index[observation_key] = condition_fact
+        elif existing != condition_fact:
             raise RelationEngineError("conflicting universal observation")
 
     output_by_key: OrderedDict[tuple[RuntimeValue, ...], dict[str, RuntimeValue]] = (

@@ -18,6 +18,7 @@ class ProviderSpec:
     supports_parallel_tool_disable: bool = True
     max_output_tokens_parameter: str = "max_tokens"
     temperature: float = 0.0
+    reasoning_effort: str | None = None
 
     @property
     def strict_tool_certified(self) -> bool:
@@ -29,6 +30,7 @@ class ProviderSpec:
 
 
 OPENAI_CHAT_COMPLETIONS = "openai_chat_completions"
+OPENAI_RESPONSES = "openai_responses"
 ANTHROPIC_MESSAGES = "anthropic_messages"
 
 
@@ -65,12 +67,13 @@ _PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
     ),
     ProviderSpec(
         name="openai",
-        transport=OPENAI_CHAT_COMPLETIONS,
+        transport=OPENAI_RESPONSES,
         api_key_env="OPENAI_API_KEY",
         base_url_env="OPENAI_BASE_URL",
         default_base_url="https://api.openai.com/v1",
         default_model="gpt-5.4-mini",
         max_output_tokens_parameter="max_completion_tokens",
+        reasoning_effort="low",
     ),
 )
 

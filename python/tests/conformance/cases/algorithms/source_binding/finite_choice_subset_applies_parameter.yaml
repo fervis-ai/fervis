@@ -1,0 +1,14 @@
+id: finite_choice_subset_applies_parameter
+description: An optional finite-choice parameter remains applied when only a proper subset is included.
+kind: algorithm
+algorithm: semantic.source_binding
+input:
+  mode: finite_choice_parameter_omission
+  required: false
+  default: null
+  choices: [OPEN, CLOSED, CANCELED]
+  included_values: [OPEN, CLOSED]
+expect:
+  result_contains:
+    parameter_omitted: false
+    included_values: [OPEN, CLOSED]
