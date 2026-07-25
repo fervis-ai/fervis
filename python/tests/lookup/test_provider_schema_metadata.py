@@ -6,7 +6,7 @@ from fervis.lookup.query_enrichment.semantic import SemanticQueryEnrichmentReque
 from fervis.lookup.query_enrichment.semantic_schema import (
     build_semantic_query_enrichment_schema,
 )
-from fervis.lookup.question_contract.semantic_schema import (
+from fervis.lookup.question_contract.schema import (
     build_semantic_question_frame_schema,
 )
 

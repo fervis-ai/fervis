@@ -1,4 +1,4 @@
-"""Validate model output and compile the canonical source-binding plan."""
+"""Validate provider output and compile the canonical source-binding plan."""
 
 from __future__ import annotations
 
@@ -9,8 +9,11 @@ from fervis.lookup.answer_program.values import ValueProjectionKind
 from fervis.lookup.source_binding.param_binding_sets import (
     finite_choice_parameter_is_omittable,
 )
-from fervis.lookup.source_binding import semantic_provider_contract as output
-from fervis.lookup.source_binding.semantic import (
+from fervis.lookup.source_binding.subject_obligations import (
+    explicit_override_from_application_owners,
+)
+from fervis.lookup.source_binding import provider_contract as output
+from fervis.lookup.source_binding.model import (
     AssociationRealization,
     AssociationRealizationKind,
     BooleanRequirementRealization,
@@ -98,13 +101,21 @@ def compile_source_binding_plan(
             start=1,
         )
     )
-    subject_binding, subject_applications = _subject_binding(
-        parsed.subject_binding,
+    finite_choice_applications = _finite_choice_applications(
+        parsed.finite_choice_applications,
         request=request,
     )
-    _validate_choice_requirement_ownership(subject_binding)
     invocation_applications = (
         *ordinary_applications,
+        *finite_choice_applications,
+    )
+    subject_binding, subject_applications = _subject_binding(
+        parsed.subject_binding,
+        requirement_applications=finite_choice_applications,
+        request=request,
+    )
+    invocation_applications = (
+        *invocation_applications,
         *subject_applications,
     )
     _applications_by_ref(invocation_applications)
@@ -152,6 +163,7 @@ def compile_source_binding_plan(
 def _subject_binding(
     item: output.SubjectObligationBindingOutput,
     *,
+    requirement_applications: tuple[InvocationValueApplication, ...],
     request: SemanticSourceBindingRequest,
 ) -> tuple[SubjectObligationBinding, tuple[InvocationValueApplication, ...]]:
     expected_subject_ref = request.index.subject_obligation.subject_set_ref.token
@@ -161,6 +173,7 @@ def _subject_binding(
     parsed_realizations = tuple(
         _subject_realization(
             value,
+            requirement_applications=requirement_applications,
             request=request,
         )
         for value in _exact_branch_realizations(
@@ -182,28 +195,10 @@ def _subject_binding(
     )
 
 
-def _validate_choice_requirement_ownership(
-    binding: SubjectObligationBinding,
-) -> None:
-    """Require one finite-choice surface per requirement in each branch."""
-
-    for realization in binding.branch_realizations:
-        surfaces_by_requirement: dict[str, set[str]] = {}
-        for surface in realization.surface_reviews:
-            for review in surface.choice_reviews:
-                if review.requirement_ref is not None:
-                    surfaces_by_requirement.setdefault(
-                        review.requirement_ref, set()
-                    ).add(surface.surface_ref)
-        if any(len(surface_refs) != 1 for surface_refs in surfaces_by_requirement.values()):
-            raise ValueError(
-                "Boolean requirement is mapped by more than one finite-choice surface"
-            )
-
-
 def _subject_realization(
     item: output.SubjectObligationRealizationOutput,
     *,
+    requirement_applications: tuple[InvocationValueApplication, ...],
     request: SemanticSourceBindingRequest,
 ) -> tuple[SubjectObligationRealization, tuple[InvocationValueApplication, ...]]:
     expected_surfaces = _branch_subject_surfaces(item.branch_id, request=request)
@@ -224,6 +219,7 @@ def _subject_realization(
                 review,
                 surface_ref,
                 item.branch_id,
+                requirement_applications=requirement_applications,
                 request=request,
             )
             for surface_ref, review in item.finite_choice_reviews.items()
@@ -246,6 +242,7 @@ def _subject_surface_review(
     surface_ref: str,
     branch_id: str,
     *,
+    requirement_applications: tuple[InvocationValueApplication, ...],
     request: SemanticSourceBindingRequest,
 ) -> tuple[SubjectSurfaceReview, tuple[InvocationValueApplication, ...]]:
     surface = _subject_surface(surface_ref, branch_id, request=request)
@@ -256,40 +253,41 @@ def _subject_surface_review(
         expected=expected_choices,
         label="subject choice review",
     )
-    boolean_requirement_refs = {
+    surface_applications = tuple(
+        application
+        for application in requirement_applications
+        if application.branch_id == branch_id
+        and application.target_applications[0].target_ref == surface_ref
+    )
+    boolean_requirement_refs = frozenset(
         requirement.requirement_ref
         for requirement in request.index.boolean_requirements
+    )
+    explicit_requirement_applications = tuple(
+        application
+        for application in surface_applications
+        if application.owner_ref in boolean_requirement_refs
+    )
+    explicitly_selected_choice_refs = {
+        application.value_ref for application in explicit_requirement_applications
     }
 
     def _review(choice_value, review) -> SubjectChoiceReview:
         choice_ref = choice_refs_by_value[choice_value]
-        compatible_requirement_refs = set(
-            request.choice_value_requirement_refs(
-                request.source_catalog.choice_value(choice_ref),
-                branch_id=branch_id,
-            )
-        )
-        requirement_ref = review.requirement_ref
-        if requirement_ref is not None and (
-            requirement_ref not in compatible_requirement_refs
-        ):
-            raise ValueError(
-                "choice review selects an incompatible Boolean requirement"
-            )
-        if (review.requirement_mapping_basis is None) != (
-            requirement_ref is None
-        ):
-            raise ValueError(
-                "choice requirement mapping basis and ref must be selected together"
-            )
         matched_excluded_role = (
             None
             if review.matched_excluded_role == "NONE"
             else _exclusion_reason(review.matched_excluded_role)
         )
-        explicit_override_applies = bool(
-            matched_excluded_role is not None
-            and requirement_ref in boolean_requirement_refs
+        explicitly_selected = choice_ref in explicitly_selected_choice_refs
+        explicit_override_applies = explicit_override_from_application_owners(
+            application_owner_refs=tuple(
+                application.owner_ref
+                for application in explicit_requirement_applications
+                if application.value_ref == choice_ref
+            ),
+            boolean_requirement_refs=boolean_requirement_refs,
+            matched_excluded_role=matched_excluded_role,
         )
         return SubjectChoiceReview(
             choice_ref=choice_ref,
@@ -297,18 +295,14 @@ def _subject_surface_review(
             role_match_basis=_text(review.role_match_basis),
             matched_excluded_role=matched_excluded_role,
             explicit_user_override_basis=(
-                _text(review.requirement_mapping_basis)
+                "The explicit requirement application selects this excluded choice."
                 if explicit_override_applies
                 else "No explicit requirement application selects this choice."
             ),
             choice_inclusion_basis=_text(review.choice_inclusion_basis),
-            choice_included=review.choice_inclusion == "INCLUDE",
-            requirement_mapping_basis=(
-                _text(review.requirement_mapping_basis)
-                if review.requirement_mapping_basis is not None
-                else None
+            choice_included=(
+                explicitly_selected or review.choice_inclusion == "INCLUDE"
             ),
-            requirement_ref=requirement_ref,
             authored_explicit_user_override_applies=explicit_override_applies,
         )
 
@@ -317,7 +311,15 @@ def _subject_surface_review(
         for choice_value, review in item.choice_reviews.items()
     )
     expected_choice_refs = tuple(choice_refs_by_value.values())
-    retained_reviews = tuple(review for review in choice_reviews if review.included)
+    retained_reviews = (
+        tuple(
+            review
+            for review in choice_reviews
+            if review.choice_ref in explicitly_selected_choice_refs
+        )
+        if explicit_requirement_applications
+        else tuple(review for review in choice_reviews if review.included)
+    )
     retained_values = tuple(review.choice_ref for review in retained_reviews)
     excluded_choices = tuple(
         review.choice_ref for review in choice_reviews if not review.included
@@ -326,18 +328,20 @@ def _subject_surface_review(
     mechanics: tuple[SourceMechanic, ...]
     if excluded_choices and not retained_values:
         raise ValueError("subject surface excludes every shown choice")
-    mapped_reviews = tuple(
-        review for review in choice_reviews if review.requirement_ref is not None
-    )
-    if any(not review.included for review in mapped_reviews):
+    source_required_choice_refs = {
+        application.value_ref
+        for application in surface_applications
+        if application.owner_ref is not None
+        and application.owner_ref.startswith("source_required:")
+    }
+    if not source_required_choice_refs <= set(retained_values):
         raise ValueError(
-            "choice requirement selects a choice excluded by subject review"
+            "source-required choice selects an excluded subject state"
         )
-    selected_reviews = mapped_reviews or retained_reviews
     if surface.kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER:
         selected_values = tuple(
             request.source_catalog.choice_value(review.choice_ref).value
-            for review in selected_reviews
+            for review in retained_reviews
         )
         source = request.source_catalog.source(surface.source_ref)
         param = next(
@@ -349,7 +353,9 @@ def _subject_surface_review(
             choices=param.choices,
             included_values=selected_values,
         )
-        if omittable:
+        if surface_applications:
+            applications = ()
+        elif omittable:
             applications = ()
         else:
             applications = tuple(
@@ -358,27 +364,25 @@ def _subject_surface_review(
                     source_ref=surface.source_ref,
                     target_ref=surface.surface_ref,
                     value_ref=review.choice_ref,
-                    owner_ref=review.requirement_ref,
+                    owner_ref=None,
                     ordinal=ordinal,
                     mapping_basis=(
-                        review.requirement_mapping_basis
-                        or "The reviewed finite-choice parameter retains this "
-                        "subject choice."
+                        "The reviewed finite-choice parameter retains this "
+                        "ordinary subject choice."
                     ),
                     request=request,
                 )
                 for ordinal, review in enumerate(
                     (
-                        selected_reviews
-                        if mapped_reviews
-                        or excluded_choices
+                        retained_reviews
+                        if excluded_choices
                         or request.choice_surface_requires_application(surface)
                         else ()
                     ),
                     start=1,
                 )
             )
-        if excluded_choices or mapped_reviews:
+        if excluded_choices or explicit_requirement_applications:
             mechanics = (
                 SourceMechanic(
                     mapping_basis=(
@@ -388,7 +392,9 @@ def _subject_surface_review(
                     source_ref=surface.source_ref,
                     application_refs=tuple(
                         application.application_ref
-                        for application in applications
+                        for application in (
+                            surface_applications or applications
+                        )
                     ),
                     contract_evidence_refs=(
                         request.source_catalog.contract_snapshot.ref,
@@ -402,7 +408,7 @@ def _subject_surface_review(
             mechanics = ()
     else:
         applications = ()
-        if excluded_choices or mapped_reviews:
+        if excluded_choices:
             mechanics = (
                 SourceMechanic(
                     mapping_basis=(
@@ -431,6 +437,72 @@ def _subject_surface_review(
         ),
         applications,
     )
+
+
+def _finite_choice_applications(
+    values: dict[str, dict[str, output.FiniteChoiceApplicationOutput]],
+    *,
+    request: SemanticSourceBindingRequest,
+) -> tuple[InvocationValueApplication, ...]:
+    branch_ids = tuple(branch.branch_id for branch in request.strategy.branches)
+    _exact_keys(
+        values,
+        expected=branch_ids,
+        label="finite-choice application branch",
+    )
+    applications: list[InvocationValueApplication] = []
+    for branch_id, owners in values.items():
+        expected_options = {
+            owner_ref: options
+            for owner_ref in request.invocation_application_owner_refs
+            if (
+                options := request.finite_choice_options_for_owner(
+                    owner_ref,
+                    branch_id=branch_id,
+                )
+            )
+        }
+        _exact_keys(
+            owners,
+            expected=tuple(expected_options),
+            label="finite-choice application owner",
+        )
+        for owner_ref, item in owners.items():
+            options_by_surface = {
+                surface.surface_ref: (surface, choices)
+                for surface, choices in expected_options[owner_ref]
+            }
+            if item.surface_ref not in options_by_surface:
+                raise ValueError(
+                    "finite-choice application selects an incompatible surface"
+                )
+            surface, choices = options_by_surface[item.surface_ref]
+            choice_refs_by_value = {
+                choice.value: choice.value_ref for choice in choices
+            }
+            selected_values = tuple(item.selected_choice_values)
+            if len(set(selected_values)) != len(selected_values):
+                raise ValueError("finite-choice application repeats a choice")
+            if not selected_values or any(
+                value not in choice_refs_by_value for value in selected_values
+            ):
+                raise ValueError(
+                    "finite-choice application selects an incompatible choice"
+                )
+            applications.extend(
+                _subject_choice_application(
+                    branch_id=branch_id,
+                    source_ref=surface.source_ref,
+                    target_ref=surface.surface_ref,
+                    value_ref=choice_refs_by_value[value],
+                    owner_ref=owner_ref,
+                    ordinal=ordinal,
+                    mapping_basis=_text(item.application_basis),
+                    request=request,
+                )
+                for ordinal, value in enumerate(selected_values, start=1)
+            )
+    return tuple(applications)
 
 
 def _subject_choice_application(
@@ -818,24 +890,11 @@ def _derive_boolean_bindings(
                 if application.branch_id == branch.branch_id
                 and application.owner_ref == requirement.requirement_ref
             )
-            choice_mechanics = tuple(
-                mechanic
-                for realization in subject_binding.branch_realizations
-                if realization.branch_id == branch.branch_id
-                for surface in realization.surface_reviews
-                if any(
-                    review.requirement_ref == requirement.requirement_ref
-                    for review in surface.choice_reviews
-                )
-                for mechanic in surface.mechanics
-            )
             mechanics = (
                 _invocation_mechanics(
                     owned, requirement_ref=requirement.requirement_ref
                 )
                 if owned
-                else choice_mechanics
-                if choice_mechanics
                 else _returned_mechanics(
                     branch.branch_id,
                     fact_refs=fact_refs,

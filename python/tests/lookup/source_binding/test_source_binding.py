@@ -34,7 +34,7 @@ from fervis.lookup.read_eligibility.semantic import (
     SemanticReadEligibilityResult,
 )
 from fervis.lookup.relation_catalog import EntityKeyComponentTarget, RelationCatalog
-from fervis.lookup.source_binding.semantic import (
+from fervis.lookup.source_binding.model import (
     AssociationRealization,
     AssociationRealizationKind,
     CatalogProvidedValue,
@@ -49,20 +49,18 @@ from fervis.lookup.source_binding.semantic import (
     SubjectObligationRealization,
     source_binding_clarification,
 )
-from fervis.lookup.source_binding.binding_plan_compilation import (
-    compile_source_binding_plan,
-)
-from fervis.lookup.source_binding.semantic_schema import (
+from fervis.lookup.source_binding.parser import compile_source_binding_plan
+from fervis.lookup.source_binding.schema import (
     build_semantic_source_binding_schema,
 )
-from fervis.lookup.source_binding.semantic_verification import (
+from fervis.lookup.source_binding.verification import (
     SourceStrategyVerificationFailure,
     SourceStrategyVerificationFailureReason,
     VerifiedSourceStrategy,
     verify_source_strategy,
 )
-from fervis.lookup.question_contract.semantic_analysis import analyze_requested_fact
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.analysis import analyze_requested_fact
+from fervis.lookup.question_contract.model import (
     AllResults,
     AssociationTerm,
     FactTerm,
@@ -603,6 +601,7 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
         },
         "association_bindings": {},
         "resolved_input_applications": {branch_id: []},
+        "finite_choice_applications": {branch_id: {}},
         "subject_binding": {
             "subject_ref": index.subject_obligation.subject_set_ref.token,
             "branch_realizations": [
@@ -723,8 +722,6 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
                         "Verification does not restrict the requested staff rows."
                     ),
                     "choice_inclusion": "INCLUDE",
-                    "requirement_mapping_basis": None,
-                    "requirement_ref": None,
                 }
                 for value in verification_param.choices
             },
@@ -886,8 +883,6 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
                         "Active events belong in the normal subject set."
                     ),
                     "choice_inclusion": "INCLUDE",
-                    "requirement_mapping_basis": None,
-                    "requirement_ref": None,
                 },
                 provisional_choice.value: {
                     "choice_domain_meaning": (
@@ -901,8 +896,6 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
                         "Provisional events belong in the normal subject set."
                     ),
                     "choice_inclusion": "INCLUDE",
-                    "requirement_mapping_basis": None,
-                    "requirement_ref": None,
                 },
                 deleted_choice.value: {
                     "choice_domain_meaning": "Deleted rows are non-current events.",
@@ -912,8 +905,6 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
                         "Deleted events do not belong in the normal subject set."
                     ),
                     "choice_inclusion": "EXCLUDE",
-                    "requirement_mapping_basis": None,
-                    "requirement_ref": None,
                 },
             },
         }
@@ -974,8 +965,6 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
                         "Staff members belong in the normal subject set."
                     ),
                     "choice_inclusion": "INCLUDE",
-                    "requirement_mapping_basis": None,
-                    "requirement_ref": None,
                 },
                 contractor_choice.value: {
                     "choice_domain_meaning": (
@@ -989,8 +978,6 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
                         "Contractors do not belong in the normal staff subject set."
                     ),
                     "choice_inclusion": "EXCLUDE",
-                    "requirement_mapping_basis": None,
-                    "requirement_ref": None,
                 },
             },
         }

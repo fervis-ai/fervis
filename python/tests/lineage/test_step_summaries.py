@@ -254,33 +254,31 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
                     "supplied_values": [
                         {
                             "meaning": "the named store",
-                            "denotation": {
-                                "basis": "ABC Mall names a store.",
-                                "kind": "identity_reference",
+                            "denotation_basis": "ABC Mall names a store.",
+                            "entity_reference": {
                                 "instance_kind": "store",
-                            },
-                            "value": {
-                                "operands": ["ABC Mall"],
-                                "value_type": {"kind": "identity_name_or_code"},
-                                "origin": {
-                                    "kind": "question",
-                                    "resolved_input_ref": None,
+                                "value": {
+                                    "operands": ["ABC Mall"],
+                                    "origin": {
+                                        "kind": "question",
+                                        "resolved_input_ref": None,
+                                    },
                                 },
                             },
                         },
                         {
                             "meaning": "the reporting period",
-                            "denotation": {
-                                "basis": "this month states a time interval.",
-                                "kind": "scalar",
-                                "instance_kind": None,
-                            },
-                            "value": {
-                                "operands": ["this month"],
-                                "value_type": {"kind": "temporal_scope"},
-                                "origin": {
-                                    "kind": "resolved_context",
-                                    "resolved_input_ref": "time_scope",
+                            "denotation_basis": (
+                                "this month states a time interval."
+                            ),
+                            "non_entity_value": {
+                                "value": {
+                                    "operands": ["this month"],
+                                    "value_type": {"kind": "temporal_scope"},
+                                    "origin": {
+                                        "kind": "resolved_context",
+                                        "resolved_input_ref": "time_scope",
+                                    },
                                 },
                             },
                         },

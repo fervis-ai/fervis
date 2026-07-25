@@ -48,8 +48,8 @@ from fervis.lookup.plan_selection.semantic import (
     SourceAlignmentAssessment,
     SourceStrategyBranch,
 )
-from fervis.lookup.question_contract.semantic_analysis import analyze_requested_fact
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.analysis import analyze_requested_fact
+from fervis.lookup.question_contract.model import (
     Aggregate,
     AggregateFunction,
     AllResults,
@@ -105,7 +105,7 @@ from fervis.lookup.plan_execution.relations import (
 from fervis.lookup.plan_execution.errors import VerificationError
 from fervis.lookup.memory.projection import LookupMemory
 from fervis.lookup.outcomes.model import AnswerResult
-from fervis.lookup.source_binding.semantic import (
+from fervis.lookup.source_binding.model import (
     AssociationRealization,
     AssociationRealizationKind,
     SemanticSourceBindingRequest,
@@ -123,7 +123,7 @@ from fervis.lookup.source_binding.semantic import (
     SubjectObligationRealization,
     SubjectSurfaceReview,
 )
-from fervis.lookup.source_binding.semantic_verification import (
+from fervis.lookup.source_binding.verification import (
     VerifiedSourceStrategy,
     verify_source_strategy,
 )
@@ -506,8 +506,6 @@ def test_returned_choice_surface_excludes_nonordinary_rows_before_counting() -> 
                                         else "The choice does not belong in the event result."
                                     ),
                                     choice_included=value.value == "ACTIVE",
-                                    requirement_mapping_basis=None,
-                                    requirement_ref=None,
                                     explicit_user_override_basis=(
                                         "The question requests no excluded state."
                                     ),
@@ -1009,6 +1007,186 @@ def test_co_resident_exists_filters_subject_rows_before_counting() -> None:
     assert execution.fact_result.outcome.projected_rows[0].values == {
         "fact_1.output_1": 2
     }
+
+
+def test_qualifying_identity_set_compiles_as_entity_output() -> None:
+    origin = SourceOrigin(
+        SourceOriginKind.QUESTION_CONTEXT,
+        "Which staff member is named Nadia Wanjiku?",
+    )
+    staff_input = InputTerm(
+        id="i1",
+        origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "Nadia Wanjiku"),
+        operand="Nadia Wanjiku",
+        value_type=IdentifierType("s_staff"),
+    )
+    fact = RequestedFact(
+        id="fact_1",
+        origin=origin,
+        sets=(SetTerm("s_staff", origin),),
+        associations=(),
+        facts=(
+            FactTerm(
+                "f_staff_identity",
+                "s_staff",
+                IdentifierType("s_staff"),
+                origin,
+            ),
+        ),
+        expressions=(
+            Comparison(
+                "e_named_staff",
+                ExpressionBinaryOperator.EQUALS,
+                "f_staff_identity",
+                staff_input.id,
+                origin,
+            ),
+        ),
+        subject=Subject("s_staff", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        qualification_ref="e_named_staff",
+        grouping_refs=(),
+        outputs=(RequestedOutput("output_1", "s_staff", origin),),
+        ordering=(),
+        selection=AllResults(),
+        distinct_by=(),
+    )
+    index = analyze_requested_fact(
+        fact,
+        inputs={staff_input.id: staff_input},
+        input_denotations=_denotation(
+            staff_input,
+            kind=InputDenotationKind.IDENTITY_REFERENCE,
+        ),
+    )
+    read = EndpointRead(
+        id="list_staff",
+        endpoint_name="list_staff",
+        row_paths=(RowPath("data", "data", RowCardinality.MANY),),
+        fields=(
+            CatalogField(
+                ref="staff.staff_id",
+                path="data.staff_id",
+                row_path_id="data",
+                type="uuid",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind="staff",
+                components=(CandidateKeyComponent("staff_id", "staff.staff_id"),),
+                primary=True,
+            ),
+        ),
+    )
+    source = next(
+        item
+        for item in build_row_source_catalog(RelationCatalog(reads=(read,))).sources
+        if item.read_id == read.id and item.row_path == "data"
+    )
+    catalog = AvailableSourceCatalog(
+        contract_snapshot=SourceContractSnapshot.from_content("{}"),
+        sources=(source,),
+        relation_evidence=(),
+    )
+    [clause] = index.qualification.clauses
+    branch = SourceStrategyBranch(
+        "fact_1:source_branch:1",
+        (source.id,),
+        (),
+        (clause.clause_ref,),
+    )
+    strategy = _strategy(fact.id, "Direct staff rows.", branch)
+    canonical = CanonicalInputValue(
+        "nadia",
+        staff_input.id,
+        tuple(item.use_ref for item in index.input_use_sites),
+        FactValue.identity(
+            id="nadia",
+            known_input_id=staff_input.id,
+            key=EntityKeyValue(
+                "staff",
+                "primary_key",
+                (
+                    EntityKeyComponentValue(
+                        "staff_id",
+                        "40404040-0000-0000-0002-000000000001",
+                    ),
+                ),
+            ),
+            display_value="Nadia Wanjiku",
+            proof_refs=("resolver:staff",),
+        ),
+        ("resolver:staff",),
+    )
+    request = SemanticSourceBindingRequest(index, strategy, catalog, (canonical,))
+    identity = catalog.identity_evidence[0]
+    refs = {ref.local_id: ref.token for ref in index.source_requirement_refs}
+    plan = SourceBindingPlan(
+        strategy=strategy,
+        set_bindings={
+            refs["s_staff"]: (
+                SetRealization(
+                    branch.branch_id,
+                    "Staff rows.",
+                    source.id,
+                    identity.identity_ref,
+                    identity.field_refs,
+                    (source.id, identity.identity_ref),
+                ),
+            ),
+        },
+        fact_bindings={
+            refs["f_staff_identity"]: (
+                FactRealization(
+                    branch.branch_id,
+                    "Returned staff identity.",
+                    source.id,
+                    FactRealizationKind.ENTITY_KEY,
+                    identity.identity_ref,
+                    identity.field_refs,
+                    (source.id, identity.identity_ref),
+                ),
+            ),
+        },
+        association_bindings={},
+        invocation_applications=(),
+        boolean_bindings={
+            requirement.requirement_ref: (
+                BooleanRequirementRealization(
+                    branch.branch_id,
+                    (
+                        SourceMechanic(
+                            "Compare the returned staff identity.",
+                            source.id,
+                            (),
+                            (source.id, identity.identity_ref),
+                            SourceMechanicKind.RETURNED_ROW_PREDICATE,
+                        ),
+                    ),
+                ),
+            )
+            for requirement in index.boolean_requirements
+        },
+        subject_binding=SubjectObligationBinding(
+            refs["s_staff"],
+            (SubjectObligationRealization(branch.branch_id, ()),),
+        ),
+    )
+    verified = verify_source_strategy(plan, request=request)
+    assert isinstance(verified, VerifiedSourceStrategy)
+
+    result = compile_verified_source_strategy(verified)
+
+    [output] = result.answer_program.result_projection.relation_outputs
+    assert output.field_id == ""
+    assert output.entity_key is not None
+    assert output.entity_key.entity_kind == "staff"
+    assert output.entity_key.key_id == "primary_key"
+    assert [
+        (component.component_id, component.field_id)
+        for component in output.entity_key.components
+    ] == [("staff_id", "staff_id")]
 
 
 def test_aggregate_filter_proof_is_not_misclassified_as_population_proof() -> None:

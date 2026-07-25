@@ -6,8 +6,8 @@ from collections.abc import Mapping
 
 from fervis.lookup.answer_program.model import RelationGuaranteeDeclaration
 from fervis.lookup.qualification import QualificationGuarantee, SubjectGuarantee
-from fervis.lookup.question_contract.semantic_analysis import analyze_requested_fact
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.analysis import analyze_requested_fact
+from fervis.lookup.question_contract.model import (
     Aggregate,
     AggregateFunction,
     AllResults,

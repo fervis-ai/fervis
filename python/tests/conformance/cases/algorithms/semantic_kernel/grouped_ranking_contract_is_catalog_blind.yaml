@@ -12,7 +12,7 @@ input:
         - result_kind: grouped_results
           qualifying_row_kind: {meaning: delivery occurrences, origin: {kind: question}}
           grouping_meanings:
-            - {meaning: couriers, origin: {kind: question}}
+            - {meaning: couriers, origin: {kind: question}, grouping_kind: related_entity_identity}
           return_request_basis: Return each tied courier and its delivery count.
           returned_result: {kind: identities_and_values}
           answer_values:
@@ -25,8 +25,9 @@ input:
           universal_shape: none
       supplied_values:
         - meaning: the reporting period
-          denotation: {basis: March 2026 is a period applied to delivery occurrences., kind: scalar}
-          value: {operands: [March 2026], value_type: {kind: temporal_scope}, origin: {kind: question}}
+          denotation_basis: March 2026 is a period applied to delivery occurrences.
+          non_entity_value:
+            value: {operands: [March 2026], value_type: {kind: temporal_scope}, origin: {kind: question}}
   payload:
     decision_basis: The result groups qualifying deliveries by associated courier and ranks the group counts.
     outcome:

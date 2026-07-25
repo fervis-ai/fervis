@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fervis.lookup.question_contract.semantic_parser import (
+from fervis.lookup.question_contract.parser import (
     ParsedSemanticQuestionContract,
     ParsedSemanticQuestionMeaning,
     parse_semantic_question_contract,
@@ -66,24 +66,36 @@ def count_contract(
                 "supplied_values": [
                     {
                         "meaning": fact_meaning,
-                        "denotation": {
-                            "basis": (
-                                "The supplied value identifies one instance."
-                                if identity_origin is not None
-                                else "The supplied value is a scalar constraint."
-                            ),
-                            "kind": (
-                                "identity_reference"
-                                if identity_origin is not None
-                                else "scalar"
-                            ),
-                            "instance_kind": identity_set_meaning,
-                        },
-                        "value": {
-                            "operands": operand if collection else [operand],
-                            "value_type": input_value_type,
-                            "origin": {"kind": "question"},
-                        },
+                        "denotation_basis": (
+                            "The supplied value identifies one instance."
+                            if identity_origin is not None
+                            else "The supplied value is a scalar constraint."
+                        ),
+                        **(
+                            {
+                                "entity_reference": {
+                                    "instance_kind": identity_set_meaning,
+                                    "value": {
+                                        "operands": (
+                                            operand if collection else [operand]
+                                        ),
+                                        "origin": {"kind": "question"},
+                                    },
+                                }
+                            }
+                            if identity_origin is not None
+                            else {
+                                "non_entity_value": {
+                                    "value": {
+                                        "operands": (
+                                            operand if collection else [operand]
+                                        ),
+                                        "value_type": input_value_type,
+                                        "origin": {"kind": "question"},
+                                    }
+                                }
+                            }
+                        ),
                     }
                 ],
             },

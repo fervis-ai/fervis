@@ -1,4 +1,4 @@
-"""Strict provider schema for the semantic relational Question Contract."""
+"""Strict provider schema for the relational Question Contract."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import fervis.lookup.question_contract.clarification_provider_contract as clarification_output
-import fervis.lookup.question_contract.semantic_provider_contract as output
-from fervis.lookup.question_contract.semantic_model import InputDenotationKind
+import fervis.lookup.question_contract.provider_contract as output
+from fervis.lookup.question_contract.model import InputDenotationKind
 from fervis.lookup.semantic_types import (
     DECIMAL_OPERAND_PATTERN,
     INTEGER_OPERAND_PATTERN,
@@ -16,7 +16,7 @@ from fervis.lookup.semantic_types import (
 )
 
 if TYPE_CHECKING:
-    from fervis.lookup.question_contract.semantic_parser import (
+    from fervis.lookup.question_contract.parser import (
         ParsedSemanticQuestionMeaning,
     )
 
@@ -55,19 +55,9 @@ def build_semantic_question_frame_schema(
             conversation_input_refs=conversation_input_refs
         ),
         "source_origin": _meaning_origin_definition(),
+        "grouping_origin": _grouping_origin_definition(),
         "supplied_input_value": _supplied_input_value_definition(
             conversation_input_refs=conversation_input_refs
-        ),
-        "identity_input_value": _supplied_input_value_definition(
-            conversation_input_refs=conversation_input_refs,
-            value_shapes=(
-                {
-                    "operand": {"type": "string", "minLength": 1},
-                    "value_type": _closed_object(
-                        {"kind": {"enum": ["identity_name_or_code"]}}
-                    ),
-                },
-            ),
         ),
         "integer_input_value": _supplied_input_value_definition(
             conversation_input_refs=conversation_input_refs,
@@ -85,7 +75,7 @@ def build_semantic_question_frame_schema(
 def build_semantic_question_contract_schema(
     *,
     answer_request_specs: tuple[
-        tuple[str, str, int, int, int, str, str | None, str], ...
+        tuple[str, str, tuple[str, ...], int, int, str, str | None, str], ...
     ],
     input_refs: tuple[str, ...],
     identity_input_refs: tuple[str, ...] = (),
@@ -205,7 +195,7 @@ def build_semantic_question_contract_schema(
                 _answer_request_schema(
                     requested_fact_ref=requested_fact_ref,
                     result_kind=result_kind,
-                    grouping_count=grouping_count,
+                    grouping_kinds=grouping_kinds,
                     ordering_count=ordering_count,
                     output_count=output_count,
                     selection_kind=selection_kind,
@@ -215,7 +205,7 @@ def build_semantic_question_contract_schema(
             for (
                 requested_fact_ref,
                 result_kind,
-                grouping_count,
+                grouping_kinds,
                 ordering_count,
                 output_count,
                 selection_kind,
@@ -250,7 +240,7 @@ def build_semantic_question_contract_schema_for_meaning(
             (
                 item.requested_fact_id,
                 item.result_kind,
-                len(item.grouping_origins),
+                item.grouping_kinds,
                 len(item.ordering_origins),
                 len(item.output_origins),
                 item.selection_kind,
@@ -285,36 +275,46 @@ def _supplied_value_schema(
     allow_identity: bool = True,
 ) -> dict[str, object]:
     branches = [
-        output.SuppliedValueOutput.schema(
+        output.NonEntitySuppliedValueOutput.schema(
             {
                 "meaning": {"type": "string", "minLength": 1},
-                "denotation": output.SuppliedValueDenotationOutput.schema(
+                "denotation_basis": {"type": "string", "minLength": 1},
+                "non_entity_value": output.NonEntityValueOutput.schema(
                     {
-                        "basis": {"type": "string", "minLength": 1},
-                        "kind": {"enum": ["scalar"]},
+                        "value": {"$ref": f"#/$defs/{input_definition}"},
                     }
                 ),
-                "value": {"$ref": f"#/$defs/{input_definition}"},
             }
         )
     ]
     if allow_identity:
         branches.insert(
             0,
-            output.SuppliedValueOutput.schema(
+            output.EntityReferenceSuppliedValueOutput.schema(
                 {
                     "meaning": {"type": "string", "minLength": 1},
-                    "denotation": output.SuppliedValueDenotationOutput.schema(
+                    "denotation_basis": {"type": "string", "minLength": 1},
+                    "entity_reference": output.EntityReferenceOutput.schema(
                         {
-                            "basis": {"type": "string", "minLength": 1},
-                            "kind": {"enum": ["identity_reference"]},
                             "instance_kind": {
                                 "type": "string",
                                 "minLength": 1,
                             },
+                            "value": output.EntityReferenceValueOutput.schema(
+                                {
+                                    "operands": {
+                                        "type": "array",
+                                        "minItems": 1,
+                                        "items": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                        },
+                                    },
+                                    "origin": {"$ref": "#/$defs/frame_origin"},
+                                }
+                            ),
                         }
                     ),
-                    "value": {"$ref": "#/$defs/identity_input_value"},
                 }
             ),
         )
@@ -362,7 +362,7 @@ def _answer_request_frame_schema() -> dict[str, object]:
             answer_values["maxItems"] = 1
         grouping_meanings: dict[str, object] = {
             "type": "array",
-            "items": _source_origin_schema(),
+            "items": {"$ref": "#/$defs/grouping_origin"},
         }
         if result_kind == "grouped_results":
             grouping_meanings["minItems"] = 1
@@ -393,6 +393,12 @@ def _answer_request_frame_schema() -> dict[str, object]:
             selection_kind = kind_values[0]
             if not isinstance(selection_kind, str):
                 raise TypeError("selection kind must be text")
+            selected_answer_values = dict(answer_values)
+            if selection_kind in {
+                "first_rank_with_ties",
+                "take_with_boundary_ties",
+            }:
+                selected_answer_values["minItems"] = 1
             for returned_result, returned_value_refs in _returned_result_variants(
                 scalar=result_kind == "scalar"
             ):
@@ -412,7 +418,7 @@ def _answer_request_frame_schema() -> dict[str, object]:
                             "minLength": 1,
                         },
                         "returned_result": returned_result,
-                        "answer_values": answer_values,
+                        "answer_values": selected_answer_values,
                         "returned_value_refs": returned_value_refs,
                         "ordering_value_refs": {
                             "type": "array",
@@ -441,7 +447,13 @@ def _answer_request_frame_schema() -> dict[str, object]:
                         },
                     }
                 )
-                branches.append(output.AnswerRequestFrameOutput.schema(properties))
+                branch = output.AnswerRequestFrameOutput.schema(properties)
+                if result_kind == "qualifying_instances":
+                    required = branch["required"]
+                    if not isinstance(required, list):
+                        raise TypeError("answer-request required fields are invalid")
+                    required.append("returned_candidate_identity")
+                branches.append(branch)
     return {"oneOf": branches}
 
 
@@ -503,7 +515,7 @@ def _selection_meaning_schema(*, allow_ordered_selection: bool) -> dict[str, obj
 def _complete_contract_schema(
     *,
     answer_request_specs: tuple[
-        tuple[str, str, int, int, int, str, str | None, str], ...
+        tuple[str, str, tuple[str, ...], int, int, str, str | None, str], ...
     ],
 ) -> dict[str, object]:
     return output.CompleteSemanticQuestionContractOutput.schema(
@@ -535,7 +547,7 @@ def _answer_request_schema(
     *,
     requested_fact_ref: str,
     result_kind: str,
-    grouping_count: int,
+    grouping_kinds: tuple[str, ...],
     ordering_count: int,
     output_count: int,
     selection_kind: str,
@@ -543,6 +555,7 @@ def _answer_request_schema(
 ) -> dict[str, object]:
     if result_kind not in {"scalar", "qualifying_instances", "grouped_results"}:
         raise ValueError("unknown result kind")
+    grouping_count = len(grouping_kinds)
     if (result_kind == "grouped_results") != (grouping_count > 0):
         raise ValueError("grouping count must match grouped result kind")
     if output_count < 1:
@@ -554,6 +567,7 @@ def _answer_request_schema(
     )
     request = _semantic_request_schema(
         grouping_count=grouping_count,
+        grouping_kinds=grouping_kinds,
         ordering_count=ordering_count,
         selection_kind=selection_kind,
         selection_limit_input_ref=selection_limit_input_ref,
@@ -585,13 +599,18 @@ def _answer_request_schema(
 def _semantic_request_schema(
     *,
     grouping_count: int,
+    grouping_kinds: tuple[str, ...],
     ordering_count: int,
     selection_kind: str,
     selection_limit_input_ref: str | None,
 ) -> dict[str, object]:
     grouping_schema: dict[str, object] = {
         "type": "array",
-        "items": _grouping_schema(),
+        "items": (
+            _grouping_schema(grouping_kinds=grouping_kinds)
+            if grouping_kinds
+            else {"type": "null"}
+        ),
     }
     if grouping_count < 0:
         raise ValueError("grouping count cannot be negative")
@@ -669,41 +688,48 @@ def _semantic_request_schema(
     )
 
 
-def _grouping_schema() -> dict[str, object]:
+def _grouping_schema(*, grouping_kinds: tuple[str, ...]) -> dict[str, object]:
     common = {
         "id": _local_ref_schema("g"),
         "grouping_basis": {"type": "string", "minLength": 1},
     }
+    branch_by_frame_kind = {
+        "qualifying_row_identity": output.CandidateIdentityGroupingOutput.schema(
+            {
+                **common,
+                "kind": {"enum": ["candidate_instance_identity"]},
+            }
+        ),
+        "related_entity_identity": output.RelatedIdentityGroupingOutput.schema(
+            {
+                **common,
+                "kind": {"enum": ["related_instance_identity"]},
+                "identified_set": output.GroupingSetOutput.schema(
+                    {"id": _additional_set_ref_schema()}
+                ),
+                "association": output.GroupingAssociationOutput.schema(
+                    {
+                        "id": _local_ref_schema("a"),
+                        "origin": _source_origin_schema(),
+                    }
+                ),
+            }
+        ),
+        "non_identity_value": output.ValueGroupingOutput.schema(
+            {
+                **common,
+                "kind": {"enum": ["value"]},
+                "expression": _grouping_value_expression_schema(),
+            }
+        ),
+    }
+    unknown = set(grouping_kinds) - set(branch_by_frame_kind)
+    if unknown:
+        raise ValueError(f"unknown grouping kind: {sorted(unknown)[0]}")
     return {
         "oneOf": [
-            output.CandidateIdentityGroupingOutput.schema(
-                {
-                    **common,
-                    "kind": {"enum": ["candidate_instance_identity"]},
-                }
-            ),
-            output.RelatedIdentityGroupingOutput.schema(
-                {
-                    **common,
-                    "kind": {"enum": ["related_instance_identity"]},
-                    "identified_set": output.GroupingSetOutput.schema(
-                        {"id": _additional_set_ref_schema()}
-                    ),
-                    "association": output.GroupingAssociationOutput.schema(
-                        {
-                            "id": _local_ref_schema("a"),
-                            "origin": _source_origin_schema(),
-                        }
-                    ),
-                }
-            ),
-            output.ValueGroupingOutput.schema(
-                {
-                    **common,
-                    "kind": {"enum": ["value"]},
-                    "expression": _grouping_value_expression_schema(),
-                }
-            ),
+            branch_by_frame_kind[kind]
+            for kind in dict.fromkeys(grouping_kinds)
         ]
     }
 
@@ -745,6 +771,22 @@ def _meaning_origin_definition() -> dict[str, object]:
         {
             "meaning": {"type": "string", "minLength": 1},
             "origin": {"$ref": "#/$defs/frame_origin"},
+        }
+    )
+
+
+def _grouping_origin_definition() -> dict[str, object]:
+    return output.GroupingMeaningOutput.schema(
+        {
+            "meaning": {"type": "string", "minLength": 1},
+            "origin": {"$ref": "#/$defs/frame_origin"},
+            "grouping_kind": {
+                "enum": [
+                    "qualifying_row_identity",
+                    "related_entity_identity",
+                    "non_identity_value",
+                ]
+            },
         }
     )
 

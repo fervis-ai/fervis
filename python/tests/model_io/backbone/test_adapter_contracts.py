@@ -13,7 +13,7 @@ from fervis.model_io.backbone.dto import (
     ProviderRunResult,
 )
 from fervis.model_io.backbone.tool_codec import decode_json_object_argument
-from fervis.lookup.question_contract.semantic_schema import (
+from fervis.lookup.question_contract.schema import (
     build_semantic_question_frame_schema,
 )
 from fervis.model_io.structured_output.errors import RequiredToolOutputError

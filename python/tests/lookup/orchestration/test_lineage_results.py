@@ -50,7 +50,7 @@ from fervis.lookup.answer_program.result_projection import (
     ResultProjection,
 )
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.model import (
     AllResults,
     FactTerm,
     InstanceInterpretation,

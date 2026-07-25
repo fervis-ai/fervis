@@ -1,4 +1,4 @@
-"""Canonical semantic-to-source binding plan."""
+"""Canonical source-binding request, plan, and evidence types."""
 
 from __future__ import annotations
 
@@ -163,8 +163,6 @@ class SubjectChoiceReview:
     explicit_user_override_basis: str
     choice_inclusion_basis: str
     choice_included: bool
-    requirement_mapping_basis: str | None
-    requirement_ref: str | None
     authored_explicit_user_override_applies: bool
 
     @property
@@ -599,15 +597,9 @@ class SemanticSourceBindingRequest:
                 )
             )
             and all(
-                row_source_type_supports_semantic_type(
+                self._choice_surface_supports_fact(
                     source_type,
-                    self.index.inferred_type_by_ref[
-                        next(
-                            ref
-                            for ref in self.index.inferred_type_by_ref
-                            if getattr(ref, "token", None) == fact_ref
-                        )
-                    ],
+                    fact_ref=fact_ref,
                 )
                 for fact_ref in fact_refs
             )
@@ -620,6 +612,54 @@ class SemanticSourceBindingRequest:
                 if required_owner == f"source_required:{surface.surface_ref}"
                 else ()
             ),
+        )
+
+    def finite_choice_options_for_owner(
+        self,
+        owner_ref: str,
+        *,
+        branch_id: str,
+    ) -> tuple[tuple[SourceChoiceSurface, tuple[SourceChoiceValue, ...]], ...]:
+        """Request-parameter choice surfaces that can realize one owner."""
+
+        options: list[
+            tuple[SourceChoiceSurface, tuple[SourceChoiceValue, ...]]
+        ] = []
+        for surface in self.source_catalog.choice_surfaces:
+            if surface.kind is not SourceChoiceSurfaceKind.REQUEST_PARAMETER:
+                continue
+            compatible_choices = tuple(
+                choice
+                for choice in surface.values
+                if owner_ref
+                in self.choice_value_requirement_refs(
+                    choice,
+                    branch_id=branch_id,
+                )
+            )
+            if compatible_choices:
+                options.append((surface, compatible_choices))
+        return tuple(options)
+
+    def _choice_surface_supports_fact(
+        self,
+        source_type: RowSourceValueType,
+        *,
+        fact_ref: str,
+    ) -> bool:
+        semantic_type = self.index.inferred_type_by_ref[
+            next(
+                ref
+                for ref in self.index.inferred_type_by_ref
+                if getattr(ref, "token", None) == fact_ref
+            )
+        ]
+        return row_source_type_supports_semantic_type(
+            source_type,
+            semantic_type,
+        ) or (
+            source_type is RowSourceValueType.CHOICE
+            and isinstance(semantic_type, BooleanType)
         )
 
     def choice_value_requirement_refs(

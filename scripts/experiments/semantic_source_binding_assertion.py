@@ -11,7 +11,7 @@ if str(Path(__file__).parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent))
 
 from build_semantic_source_binding_boundary import build_request
-from fervis.lookup.source_binding.semantic import (
+from fervis.lookup.source_binding.model import (
     AssociationRealizationKind,
     FactRealizationKind,
     SourceMechanicKind,
@@ -126,11 +126,16 @@ def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
                     or review["choice_inclusion"] != "INCLUDE"
                 ):
                     return [f"{surface_suffix}={value} is restricted"]
+            applied_surfaces = {
+                application["surface_ref"]
+                for owners in arguments["finite_choice_applications"].values()
+                for application in owners.values()
+            }
             if any(
-                review["requirement_ref"] is not None
-                for review in surface["choice_reviews"].values()
+                surface_ref.endswith(f".{surface_suffix}")
+                for surface_ref in applied_surfaces
             ):
-                return [f"{surface_suffix} claims a Boolean requirement"]
+                return [f"{surface_suffix} claims a requirement application"]
         if context.get("kind") == "required_choice_binding":
             selected_values = {
                 (

@@ -12,7 +12,7 @@ input:
         - result_kind: grouped_results
           qualifying_row_kind: {meaning: observations, origin: {kind: question}}
           grouping_meanings:
-            - {meaning: member identity, origin: {kind: question}}
+            - {meaning: member identity, origin: {kind: question}, grouping_kind: related_entity_identity}
           return_request_basis: Return each member identity and observation count.
           returned_result: {kind: identities_and_values}
           answer_values:
@@ -23,14 +23,12 @@ input:
           universal_shape: none
       supplied_values:
         - meaning: the alternative members included in the result
-          denotation:
-            basis: Each supplied member name refers to one particular member.
-            kind: identity_reference
+          denotation_basis: Each supplied member name refers to one particular member.
+          entity_reference:
             instance_kind: member
-          value:
-            operands: [member A, member B]
-            value_type: {kind: text}
-            origin: {kind: question}
+            value:
+              operands: [member A, member B]
+              origin: {kind: question}
   payload:
     decision_basis: The result counts qualifying observations once for each supplied member alternative.
     outcome:

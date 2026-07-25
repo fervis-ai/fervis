@@ -47,14 +47,19 @@ class ResolvedInputApplicationOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class FiniteChoiceApplicationOutput(ProviderOutput):
+    application_basis: str
+    surface_ref: str
+    selected_choice_values: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class SubjectChoiceReviewOutput(ProviderOutput):
     choice_domain_meaning: str
     role_match_basis: str
     matched_excluded_role: str
     choice_inclusion_basis: str
     choice_inclusion: str
-    requirement_mapping_basis: str | None
-    requirement_ref: str | None
 
 
 @dataclass(frozen=True)
@@ -81,6 +86,10 @@ class SemanticSourceBindingOutput(ProviderOutput):
     resolved_input_applications: dict[
         str,
         tuple[ResolvedInputApplicationOutput, ...],
+    ]
+    finite_choice_applications: dict[
+        str,
+        dict[str, FiniteChoiceApplicationOutput],
     ]
     fact_bindings: dict[
         str,

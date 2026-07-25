@@ -52,7 +52,7 @@ PROMPT_SURFACE_CONTRACTS = {
         ),
     },
     "semantic_question_contract": {
-        "path": LOOKUP_ROOT / "question_contract" / "semantic_prompt.py",
+        "path": LOOKUP_ROOT / "question_contract" / "prompt.py",
         "instruction_headings": (
             "Outcome",
             "Origins",
@@ -68,10 +68,11 @@ PROMPT_SURFACE_CONTRACTS = {
         ),
     },
     "semantic_source_binding": {
-        "path": LOOKUP_ROOT / "source_binding" / "semantic_prompt.py",
+        "path": LOOKUP_ROOT / "source_binding" / "prompt.py",
         "instruction_headings": (
             "Semantic bindings",
             "Resolved input application",
+            "Finite-choice requirement application",
             "Subject obligation",
             "Output",
         ),

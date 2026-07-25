@@ -75,6 +75,7 @@ def _request_errors(
 
     expected_kinds = context.get("expected_result_kinds") or ()
     expected_grouping_counts = context.get("expected_grouping_counts") or ()
+    expected_grouping_kinds = context.get("expected_grouping_kinds") or ()
     expected_output_counts = context.get("expected_output_counts") or ()
     expected_output_terms = context.get("expected_output_contains_any") or ()
     expected_selections = context.get("expected_selections") or ()
@@ -99,6 +100,17 @@ def _request_errors(
                 f"answer request {index + 1} grouping count is {grouping_count}; "
                 f"expected {expected_grouping_counts[index]}"
             )
+        if index < len(expected_grouping_kinds) and isinstance(grouping, list):
+            actual_kinds = [
+                item.get("grouping_kind")
+                for item in grouping
+                if isinstance(item, dict)
+            ]
+            if actual_kinds != expected_grouping_kinds[index]:
+                errors.append(
+                    f"answer request {index + 1} grouping kinds are "
+                    f"{actual_kinds!r}; expected {expected_grouping_kinds[index]!r}"
+                )
 
         outputs = _returned_meanings(raw_request)
         if (
@@ -165,30 +177,49 @@ def _supplied_values(values: list[object]) -> tuple[SuppliedValue, ...]:
     for raw_value in values:
         if not isinstance(raw_value, dict):
             continue
-        denotation = raw_value.get("denotation")
-        value = raw_value.get("value")
+        entity_reference = raw_value.get("entity_reference")
+        non_entity_value = raw_value.get("non_entity_value")
+        selected = (
+            entity_reference
+            if isinstance(entity_reference, dict)
+            else non_entity_value
+        )
+        value = selected.get("value") if isinstance(selected, dict) else None
         value_type = value.get("value_type") if isinstance(value, dict) else None
         operands = value.get("operands") if isinstance(value, dict) else None
         if (
             isinstance(raw_value.get("meaning"), str)
-            and isinstance(denotation, dict)
-            and isinstance(denotation.get("kind"), str)
-            and isinstance(value_type, dict)
-            and isinstance(value_type.get("kind"), str)
             and isinstance(operands, list)
             and all(isinstance(item, str) for item in operands)
+            and (
+                isinstance(entity_reference, dict)
+                or (
+                    isinstance(non_entity_value, dict)
+                    and isinstance(value_type, dict)
+                    and isinstance(value_type.get("kind"), str)
+                )
+            )
         ):
             supplied.append(
                 SuppliedValue(
                     meaning=raw_value["meaning"],
                     operands=tuple(operands),
-                    denotation=denotation["kind"],
+                    denotation=(
+                        "identity_reference"
+                        if isinstance(entity_reference, dict)
+                        else "scalar"
+                    ),
                     instance_kind=(
-                        str(denotation["instance_kind"])
-                        if denotation.get("instance_kind") is not None
+                        str(entity_reference["instance_kind"])
+                        if isinstance(entity_reference, dict)
+                        and entity_reference.get("instance_kind") is not None
                         else None
                     ),
-                    value_type=value_type["kind"],
+                    value_type=(
+                        "identity_name_or_code"
+                        if isinstance(entity_reference, dict)
+                        else value_type["kind"]
+                    ),
                 )
             )
     return tuple(supplied)

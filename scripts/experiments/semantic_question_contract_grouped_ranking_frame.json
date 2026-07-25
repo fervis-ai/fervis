@@ -12,7 +12,8 @@
         "grouping_meanings": [
           {
             "meaning": "courier identity",
-            "origin": {"kind": "question"}
+            "origin": {"kind": "question"},
+            "grouping_kind": "related_entity_identity"
           }
         ],
         "return_request_basis": "Return the winning courier identity.",
@@ -33,14 +34,13 @@
     "supplied_values": [
       {
         "meaning": "the requested delivery period",
-        "denotation": {
-          "basis": "March 2026 supplies the period in which deliveries qualify.",
-          "kind": "scalar"
-        },
-        "value": {
-          "operands": ["March 2026"],
-          "value_type": {"kind": "temporal_scope"},
-          "origin": {"kind": "question"}
+        "denotation_basis": "March 2026 supplies the period in which deliveries qualify.",
+        "non_entity_value": {
+          "value": {
+            "operands": ["March 2026"],
+            "value_type": {"kind": "temporal_scope"},
+            "origin": {"kind": "question"}
+          }
         }
       }
     ]

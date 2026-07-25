@@ -55,7 +55,7 @@ from fervis.lookup.answer_program import (
 from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.relation_catalog.row_sources import api_row_source_id
-from fervis.lookup.question_contract.semantic_model import RequestedFact
+from fervis.lookup.question_contract.model import RequestedFact
 
 from tests.testkit.assertions import subset_mismatches
 from tests.testkit.semantic_question_contracts import (

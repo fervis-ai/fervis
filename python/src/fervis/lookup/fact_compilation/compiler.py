@@ -112,6 +112,7 @@ from fervis.lookup.source_binding.param_values import fact_value_parameter_proje
 from fervis.lookup.source_binding import (
     AssociationRealizationKind,
     FactRealization,
+    SetRealization,
     SourceBindingPlan,
     SourceMechanicKind,
     SubjectSurfaceReview,
@@ -1583,14 +1584,20 @@ def _result_entity_key(
     builder: _ProgramBuilder,
     ref,
 ) -> EntityKeyProjection | None:
-    if not isinstance(ref, FactLocalRef) or ref.kind is not FactLocalKind.FACT:
+    if not isinstance(ref, FactLocalRef):
         return None
-    term = builder.verified.request.index.term_by_ref[ref]
-    if not isinstance(term, FactTerm) or not isinstance(
-        term.value_type, IdentifierType
-    ):
+    realizations: tuple[SetRealization | FactRealization, ...]
+    if ref.kind is FactLocalKind.SET:
+        realizations = builder.verified.binding_plan.set_bindings.get(ref.token, ())
+    elif ref.kind is FactLocalKind.FACT:
+        term = builder.verified.request.index.term_by_ref[ref]
+        if not isinstance(term, FactTerm) or not isinstance(
+            term.value_type, IdentifierType
+        ):
+            return None
+        realizations = builder.verified.binding_plan.fact_bindings.get(ref.token, ())
+    else:
         return None
-    realizations = builder.verified.binding_plan.fact_bindings.get(ref.token, ())
     identity_refs = {item.identity_ref for item in realizations}
     if None in identity_refs or len(identity_refs) != 1:
         raise ValueError("identifier output requires one declared identity authority")
@@ -1598,7 +1605,12 @@ def _result_entity_key(
     assert identity_ref is not None
     evidence = builder.verified.request.source_catalog.identity(identity_ref)
     projections = {
-        _identity_projection_components(builder, item) for item in realizations
+        _identity_projection_components(
+            builder,
+            source_ref=item.source_ref,
+            identity_ref=item.identity_ref,
+        )
+        for item in realizations
     }
     if len(projections) != 1:
         raise ValueError("strategy branches expose incompatible identity components")
@@ -1611,14 +1623,14 @@ def _result_entity_key(
 
 def _identity_projection_components(
     builder: _ProgramBuilder,
-    realization: FactRealization,
+    *,
+    source_ref: str,
+    identity_ref: str | None,
 ) -> tuple[EntityKeyProjectionComponent, ...]:
-    if realization.identity_ref is None:
+    if identity_ref is None:
         raise ValueError("identifier realization lacks identity authority")
-    source = builder.verified.request.source_catalog.source(realization.source_ref)
-    evidence = builder.verified.request.source_catalog.identity(
-        realization.identity_ref
-    )
+    source = builder.verified.request.source_catalog.source(source_ref)
+    evidence = builder.verified.request.source_catalog.identity(identity_ref)
     candidate_key = next(
         (
             key

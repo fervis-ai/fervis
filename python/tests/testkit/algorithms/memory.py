@@ -82,7 +82,7 @@ def run_memory_prior_answer_request_case(
         StoredProgramInvocation,
         program_invocation,
     )
-    from fervis.lookup.question_contract.semantic_model import (
+    from fervis.lookup.question_contract.model import (
         Aggregate,
         AggregateFunction,
         AllResults,

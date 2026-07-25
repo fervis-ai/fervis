@@ -16,7 +16,7 @@ PYTHON_SRC = REPO_ROOT / "python" / "src"
 if str(PYTHON_SRC) not in sys.path:
     sys.path.insert(0, str(PYTHON_SRC))
 
-from fervis.lookup.question_contract.semantic_model import FactLocalRef  # noqa: E402
+from fervis.lookup.question_contract.model import FactLocalRef  # noqa: E402
 from fervis.lookup.query_enrichment.semantic import (  # noqa: E402
     ReferenceInputRecallTask,
     SemanticQueryEnrichmentRequest,

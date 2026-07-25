@@ -26,6 +26,7 @@
     "expected_request_count": 1,
     "expected_result_kinds": ["grouped_results"],
     "expected_grouping_counts": [1],
+    "expected_grouping_kinds": [["related_entity_identity"]],
     "expected_output_counts": [1],
     "expected_output_contains_any": [["salesperson", "seller"]],
     "expected_selections": ["first_rank_with_ties"],

@@ -22,8 +22,9 @@ input:
           universal_shape: every_required_member_has_observation
       supplied_values:
         - meaning: the observation period
-          denotation: {basis: March 2026 is a period applied to task observations., kind: scalar}
-          value: {operands: [March 2026], value_type: {kind: temporal_scope}, origin: {kind: question}}
+          denotation_basis: March 2026 is a period applied to task observations.
+          non_entity_value:
+            value: {operands: [March 2026], value_type: {kind: temporal_scope}, origin: {kind: question}}
   payload:
     decision_basis: The result is the workers whose March task observations cover every required category.
     outcome:

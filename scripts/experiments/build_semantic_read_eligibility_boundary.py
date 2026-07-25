@@ -30,7 +30,7 @@ from fervis.lookup.grounding import (  # noqa: E402
     identity_resolution_tasks,
     reference_grounding_tasks,
 )
-from fervis.lookup.question_contract.semantic_parser import (  # noqa: E402
+from fervis.lookup.question_contract.parser import (  # noqa: E402
     ParsedSemanticQuestionContract,
     ParsedSemanticQuestionMeaning,
     parse_semantic_question_contract,
@@ -234,6 +234,7 @@ def _returned_identity_contract(question: str) -> ParsedSemanticQuestionContract
                             {
                                 "meaning": "member",
                                 "origin": {"kind": "question"},
+                                "grouping_kind": "related_entity_identity",
                             }
                         ],
                         "return_request_basis": (

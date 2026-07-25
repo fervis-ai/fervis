@@ -48,14 +48,14 @@ from fervis.lookup.plan_selection.semantic import (  # noqa: E402
     SourceAlignmentAssessment,
     SourceStrategyBranch,
 )
-from fervis.lookup.question_contract.semantic_parser import (  # noqa: E402
+from fervis.lookup.question_contract.parser import (  # noqa: E402
     ParsedSemanticQuestionContract,
 )
-from fervis.lookup.question_contract.semantic_analysis import (  # noqa: E402
+from fervis.lookup.question_contract.analysis import (  # noqa: E402
     RequestedFactSemanticIndex,
     analyze_requested_fact,
 )
-from fervis.lookup.question_contract.semantic_model import (  # noqa: E402
+from fervis.lookup.question_contract.model import (  # noqa: E402
     Aggregate,
     AggregateFunction,
     AllResults,

@@ -1,4 +1,4 @@
-"""Strict provider schema for semantic Source Binding."""
+"""Strict provider schema for Source Binding."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from fervis.lookup.question_contract import (
     SetTerm,
 )
 from fervis.lookup.question_contract import RawDataRecord
-from fervis.lookup.source_binding import semantic_provider_contract as output
-from fervis.lookup.source_binding.semantic import (
+from fervis.lookup.source_binding import provider_contract as output
+from fervis.lookup.source_binding.model import (
     InvocationProjectionOption,
     SemanticSourceBindingRequest,
 )
@@ -65,6 +65,9 @@ def build_semantic_source_binding_schema(
             ),
             "resolved_input_applications": (
                 _resolved_input_applications_schema(request)
+            ),
+            "finite_choice_applications": _finite_choice_applications_schema(
+                request
             ),
             "fact_bindings": _closed_object(
                 {
@@ -200,6 +203,58 @@ def _projection_component(option: InvocationProjectionOption) -> str:
     return option.component_ref or option.projection.value
 
 
+def _finite_choice_applications_schema(
+    request: SemanticSourceBindingRequest,
+) -> dict[str, object]:
+    return _closed_object(
+        {
+            branch.branch_id: _branch_finite_choice_applications_schema(
+                request,
+                branch_id=branch.branch_id,
+            )
+            for branch in request.strategy.branches
+        }
+    )
+
+
+def _branch_finite_choice_applications_schema(
+    request: SemanticSourceBindingRequest,
+    *,
+    branch_id: str,
+) -> dict[str, object]:
+    return _closed_object(
+        {
+            owner_ref: _finite_choice_owner_application_schema(options)
+            for owner_ref in request.invocation_application_owner_refs
+            if (
+                options := request.finite_choice_options_for_owner(
+                    owner_ref,
+                    branch_id=branch_id,
+                )
+            )
+        }
+    )
+
+
+def _finite_choice_owner_application_schema(options) -> dict[str, object]:
+    variants = [
+        output.FiniteChoiceApplicationOutput.schema(
+            {
+                "application_basis": _text(),
+                "surface_ref": {"enum": [surface.surface_ref]},
+                "selected_choice_values": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": len(choices),
+                    "items": {"enum": [choice.value for choice in choices]},
+                },
+            }
+        )
+        for surface, choices in options
+    ]
+    return variants[0] if len(variants) == 1 else {"oneOf": variants}
+
+
 def _subject_binding_schema(
     request: SemanticSourceBindingRequest,
     *,
@@ -287,10 +342,6 @@ def _subject_surface_review_schema(
                 {
                     choice.value: _subject_choice_review_schema(
                         common=common,
-                        requirement_refs=request.choice_value_requirement_refs(
-                            choice,
-                            branch_id=branch_id,
-                        ),
                     )
                     for choice in surface.values
                 }
@@ -302,29 +353,8 @@ def _subject_surface_review_schema(
 def _subject_choice_review_schema(
     *,
     common: dict[str, object],
-    requirement_refs: tuple[str, ...],
 ) -> dict[str, object]:
-    review_without_requirement = output.SubjectChoiceReviewOutput.schema(
-        {
-            **common,
-            "requirement_mapping_basis": {"type": "null"},
-            "requirement_ref": {"type": "null"},
-        }
-    )
-    if not requirement_refs:
-        return review_without_requirement
-    return {
-        "oneOf": [
-            review_without_requirement,
-            output.SubjectChoiceReviewOutput.schema(
-                {
-                    **common,
-                    "requirement_mapping_basis": _text(),
-                    "requirement_ref": {"enum": list(requirement_refs)},
-                }
-            ),
-        ]
-    }
+    return output.SubjectChoiceReviewOutput.schema(common)
 
 
 def _exact_realizations(

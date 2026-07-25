@@ -22,8 +22,9 @@ input:
           universal_shape: none
       supplied_values:
         - meaning: the reporting period
-          denotation: {basis: April 2026 is a period applied to observations., kind: scalar}
-          value: {operands: [April 2026], value_type: {kind: temporal_scope}, origin: {kind: question}}
+          denotation_basis: April 2026 is a period applied to observations.
+          non_entity_value:
+            value: {operands: [April 2026], value_type: {kind: temporal_scope}, origin: {kind: question}}
   payload:
     decision_basis: The request is one ratio over one time-qualified population.
     outcome:

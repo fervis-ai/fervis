@@ -1,16 +1,17 @@
 from jsonschema import Draft7Validator
 
-from fervis.lookup.question_contract.semantic_schema import (
+from fervis.lookup.question_contract.schema import (
+    build_semantic_question_contract_schema_for_meaning,
     build_semantic_question_contract_schema,
     build_semantic_question_frame_schema,
 )
-from fervis.lookup.question_contract.semantic_parser import (
+from fervis.lookup.question_contract.parser import (
     AnswerRequestMeaning,
     ParsedSemanticQuestionContract,
     ParsedSemanticQuestionMeaning,
     parse_semantic_question_contract,
 )
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.model import (
     InputDenotation,
     InputDenotationKind,
     InputTerm,
@@ -25,7 +26,7 @@ from fervis.lookup.semantic_types import (
 def test_semantic_question_contract_schema_is_valid_json_schema():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", 0, 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
         ),
         input_refs=("i1",),
         temporal_scope_input_refs=("i1",),
@@ -52,12 +53,13 @@ def test_semantic_question_contract_schema_is_valid_json_schema():
     )
     assert answer_request["properties"]["ordering"]["maxItems"] == 0
     assert answer_request["properties"]["distinct_by"]["maxItems"] == 0
+    assert answer_request["properties"]["grouping"]["items"] == {"type": "null"}
 
 
 def test_semantic_contract_exposes_only_operations_with_declared_input_operands():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", 0, 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
         ),
         input_refs=("i1",),
         temporal_scope_input_refs=("i1",),
@@ -76,7 +78,7 @@ def test_semantic_contract_exposes_input_operations_when_their_operands_exist():
             (
                 "fact_1",
                 "qualifying_instances",
-                0,
+                (),
                 1,
                 1,
                 "take_with_boundary_ties",
@@ -103,7 +105,7 @@ def test_semantic_contract_exposes_coverage_only_for_declared_coverage_shape():
             (
                 "fact_1",
                 "qualifying_instances",
-                0,
+                (),
                 0,
                 1,
                 "all_results",
@@ -120,7 +122,7 @@ def test_semantic_contract_exposes_coverage_only_for_declared_coverage_shape():
 def test_collection_and_temporal_inputs_are_absent_from_generic_value_leaves():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", 0, 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
         ),
         input_refs=("i1", "i2"),
         collection_input_refs=("i1",),
@@ -136,7 +138,7 @@ def test_collection_and_temporal_inputs_are_absent_from_generic_value_leaves():
 def test_semantic_contract_without_inputs_has_no_input_expression_branch():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", 0, 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
         ),
         input_refs=(),
     )
@@ -151,7 +153,7 @@ def test_semantic_contract_without_inputs_has_no_input_expression_branch():
 def test_identity_input_is_consumed_by_an_identifier_comparison():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", 0, 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
         ),
         input_refs=("i1",),
         identity_input_refs=("i1",),
@@ -166,7 +168,7 @@ def test_identity_input_is_consumed_by_an_identifier_comparison():
 def test_candidate_set_ref_cannot_be_redeclared_as_an_additional_set():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", 0, 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
         ),
         input_refs=("i1",),
         identity_input_refs=("i1",),
@@ -197,6 +199,7 @@ def test_equal_origins_do_not_collapse_distinct_authored_sets() -> None:
                 result_kind="scalar",
                 candidate_set_origin=origin,
                 grouping_origins=(),
+                grouping_kinds=(),
                 row_identity_origin=None,
                 ordering_origins=(),
                 output_origins=(origin,),
@@ -259,22 +262,63 @@ def test_semantic_question_frame_schema_is_valid_and_basis_first():
         "all_results"
     ]
     supplied = complete["properties"]["supplied_values"]["items"]
-    denotation_by_kind = {
-        branch["properties"]["denotation"]["properties"]["kind"]["enum"][0]: branch
+    branches_by_choice = {
+        next(
+            name
+            for name in ("entity_reference", "non_entity_value")
+            if name in branch["properties"]
+        ): branch
         for branch in supplied["oneOf"]
     }
-    for branch in denotation_by_kind.values():
-        assert tuple(branch["properties"]) == ("meaning", "denotation", "value")
-    assert (
-        denotation_by_kind["identity_reference"]["properties"]["denotation"][
-            "properties"
-        ]["instance_kind"]["type"]
-        == "string"
+    assert set(branches_by_choice) == {"entity_reference", "non_entity_value"}
+    assert all(
+        tuple(branch["properties"])[:2] == ("meaning", "denotation_basis")
+        for branch in branches_by_choice.values()
     )
-    assert (
-        "instance_kind"
-        not in (denotation_by_kind["scalar"]["properties"]["denotation"]["properties"])
+    assert all(
+        choice in branches_by_choice[choice]["required"]
+        for choice in branches_by_choice
     )
+    identity = branches_by_choice["entity_reference"]["properties"][
+        "entity_reference"
+    ]
+    assert tuple(identity["properties"]) == ("instance_kind", "value")
+    assert "value_type" not in identity["properties"]["value"]["properties"]
+
+
+def test_grouping_schema_does_not_infer_identity_relation_from_origin_text():
+    candidate = SourceOrigin(
+        SourceOriginKind.QUESTION_CONTEXT,
+        "invoice occurrences",
+    )
+    grouping = SourceOrigin(
+        SourceOriginKind.QUESTION_CONTEXT,
+        "each invoice identity",
+    )
+    meaning = ParsedSemanticQuestionMeaning(
+        decision_basis="Return one result for each candidate invoice.",
+        answer_requests=(
+            AnswerRequestMeaning(
+                requested_fact_id="fact_1",
+                result_kind="grouped_results",
+                candidate_set_origin=candidate,
+                grouping_origins=(grouping,),
+                grouping_kinds=("qualifying_row_identity",),
+                row_identity_origin=None,
+                ordering_origins=(),
+                output_origins=(grouping,),
+                selection_kind="all_results",
+                selection_limit_input_ref=None,
+                universal_shape="none",
+            ),
+        ),
+        inputs=(),
+        input_denotations=(),
+    )
+
+    schema = build_semantic_question_contract_schema_for_meaning(meaning)
+
+    assert _grouping_kinds(schema) == {"candidate_instance_identity"}
 
 
 def test_grouped_result_frame_owns_the_exact_grouping_shape():
@@ -324,7 +368,16 @@ def test_grouped_result_frame_owns_the_exact_grouping_shape():
 
     contract_schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "grouped_results", 2, 0, 2, "all_results", None, "none"),
+            (
+                "fact_1",
+                "grouped_results",
+                ("qualifying_row_identity", "non_identity_value"),
+                0,
+                2,
+                "all_results",
+                None,
+                "none",
+            ),
         ),
         input_refs=(),
     )
@@ -335,13 +388,49 @@ def test_grouped_result_frame_owns_the_exact_grouping_shape():
     assert distinct_by["maxItems"] == 0
 
 
+def test_qualifying_instance_frame_requires_its_returned_identity():
+    schema = build_semantic_question_frame_schema()
+    complete = schema["properties"]["outcome"]["oneOf"][0]
+    branches = complete["properties"]["answer_requests"]["items"]["oneOf"]
+    qualifying_branches = [
+        branch
+        for branch in branches
+        if branch["properties"]["result_kind"]["enum"]
+        == ["qualifying_instances"]
+    ]
+
+    assert qualifying_branches
+    assert all(
+        "returned_candidate_identity" in branch["required"]
+        for branch in qualifying_branches
+    )
+
+
+def test_ordered_question_frame_requires_a_declared_ordering_value():
+    schema = build_semantic_question_frame_schema()
+    complete = schema["properties"]["outcome"]["oneOf"][0]
+    branches = complete["properties"]["answer_requests"]["items"]["oneOf"]
+    ordered_branches = [
+        branch
+        for branch in branches
+        if branch["properties"]["selection"]["properties"]["kind"]["enum"][0]
+        in {"first_rank_with_ties", "take_with_boundary_ties"}
+    ]
+
+    assert ordered_branches
+    assert all(
+        branch["properties"]["answer_values"]["minItems"] >= 1
+        for branch in ordered_branches
+    )
+
+
 def test_grouped_result_schema_rejects_row_grain_ordering_values():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
             (
                 "fact_1",
                 "grouped_results",
-                1,
+                ("related_entity_identity",),
                 1,
                 1,
                 "first_rank_with_ties",
@@ -368,7 +457,6 @@ def test_semantic_question_frame_exposes_semantic_string_value_kinds():
     schema = build_semantic_question_frame_schema()
     identity = _question_frame_payload(
         operand="Nairobi",
-        kind="identity_name_or_code",
         denotation_kind="identity_reference",
         instance_kind="area",
     )
@@ -435,12 +523,26 @@ def _question_frame_payload(
     denotation_kind: str = "scalar",
     instance_kind: str | None = None,
 ) -> dict[str, object]:
-    denotation = {
-        "basis": "This states how the supplied value is used.",
-        "kind": denotation_kind,
+    supplied_value: dict[str, object] = {
+        "meaning": "the supplied value",
+        "denotation_basis": "This states what the supplied value denotes.",
     }
-    if instance_kind is not None:
-        denotation["instance_kind"] = instance_kind
+    if denotation_kind == "identity_reference":
+        supplied_value["entity_reference"] = {
+            "instance_kind": instance_kind,
+            "value": {
+                "operands": [operand],
+                "origin": {"kind": "question"},
+            },
+        }
+    else:
+        supplied_value["non_entity_value"] = {
+            "value": {
+                "operands": [operand],
+                "value_type": value_type or {"kind": kind},
+                "origin": {"kind": "question"},
+            }
+        }
     return {
         "decision_basis": "The question asks for one count.",
         "outcome": {
@@ -468,17 +570,7 @@ def _question_frame_payload(
                     "universal_shape": "none",
                 }
             ],
-            "supplied_values": [
-                {
-                    "meaning": "the supplied value",
-                    "denotation": denotation,
-                    "value": {
-                        "operands": [operand],
-                        "value_type": value_type or {"kind": kind},
-                        "origin": {"kind": "question"},
-                    },
-                },
-            ],
+            "supplied_values": [supplied_value],
         },
     }
 
@@ -640,3 +732,10 @@ def _selection_kinds(schema: dict[str, object]) -> set[str]:
     if selection.get("type") != "object":
         return set()
     return {selection["properties"]["kind"]["enum"][0]}
+
+
+def _grouping_kinds(schema: dict[str, object]) -> set[str]:
+    grouping = _answer_request_schema(schema)["properties"]["grouping"]["items"]
+    return {
+        branch["properties"]["kind"]["enum"][0] for branch in grouping["oneOf"]
+    }

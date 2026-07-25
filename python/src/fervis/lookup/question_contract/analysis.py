@@ -16,7 +16,7 @@ from fervis.lookup.qualification import (
     normalize_qualification,
     relative_dnf,
 )
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.model import (
     Aggregate,
     Arithmetic,
     AssociationTerm,

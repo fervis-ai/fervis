@@ -8,18 +8,18 @@ from fervis.lookup.grounding.semantic import (
     deterministic_scalar_values,
     grounding_partitions,
 )
-from fervis.lookup.question_contract.semantic_analysis import (
+from fervis.lookup.question_contract.analysis import (
     Groups,
     Singleton,
     SubjectRows,
 )
-from fervis.lookup.question_contract.semantic_parser import (
+from fervis.lookup.question_contract.parser import (
     ParsedSemanticQuestionContract,
     ParsedSemanticQuestionMeaning,
     parse_semantic_question_contract,
     parse_semantic_question_frame,
 )
-from fervis.lookup.question_contract.semantic_schema import (
+from fervis.lookup.question_contract.schema import (
     build_semantic_question_contract_schema_for_meaning,
 )
 from fervis.lookup.query_enrichment.semantic import (

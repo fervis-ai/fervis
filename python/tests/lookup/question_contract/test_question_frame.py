@@ -1,16 +1,13 @@
-from jsonschema import Draft7Validator
+import pytest
 
 from fervis.lookup.question_contract.clarification import (
     IncompleteFactualRequestKind,
     QuestionContractNeedsClarification,
 )
-from fervis.lookup.question_contract.semantic_model import InputDenotationKind
-from fervis.lookup.question_contract.semantic_parser import (
+from fervis.lookup.question_contract.model import InputDenotationKind
+from fervis.lookup.question_contract.parser import (
     ParsedSemanticQuestionMeaning,
     parse_semantic_question_frame,
-)
-from fervis.lookup.question_contract.semantic_schema import (
-    build_semantic_question_frame_schema,
 )
 from fervis.lookup.semantic_types import CollectionType, TemporalScopeType, TextType
 
@@ -21,15 +18,13 @@ def test_question_frame_parses_requested_meaning_and_identity_once() -> None:
             supplied_values=[
                 {
                     "meaning": "the area named by the question",
-                    "denotation": {
-                        "basis": "Nairobi refers to one particular area.",
-                        "kind": "identity_reference",
+                    "denotation_basis": "Nairobi refers to one particular area.",
+                    "entity_reference": {
                         "instance_kind": "area",
-                    },
-                    "value": {
-                        "operands": ["Nairobi"],
-                        "value_type": {"kind": "identity_name_or_code"},
-                        "origin": {"kind": "question"},
+                        "value": {
+                            "operands": ["Nairobi"],
+                            "origin": {"kind": "question"},
+                        },
                     },
                 }
             ]
@@ -44,6 +39,56 @@ def test_question_frame_parses_requested_meaning_and_identity_once() -> None:
     assert parsed.input_denotations[0].input_ref == "i1"
     assert parsed.input_denotations[0].kind is InputDenotationKind.IDENTITY_REFERENCE
     assert parsed.input_denotations[0].denoted_instance_kind == "area"
+
+
+def test_question_frame_parses_entity_reference_without_repeated_identity_type() -> None:
+    parsed = parse_semantic_question_frame(
+        _frame_payload(
+            supplied_values=[
+                {
+                    "meaning": "the supplied staff identity",
+                    "denotation_basis": "The UUID identifies one staff entity.",
+                    "entity_reference": {
+                        "instance_kind": "staff",
+                        "value": {
+                            "operands": [
+                                "51515151-0000-0000-0002-000000000001"
+                            ],
+                            "origin": {"kind": "question"},
+                        },
+                    },
+                }
+            ]
+        ),
+        question_context_texts=(
+            "How many sales did staff 51515151-0000-0000-0002-000000000001 make?",
+        ),
+    )
+
+    assert isinstance(parsed, ParsedSemanticQuestionMeaning)
+    assert (
+        parsed.input_denotations[0].kind
+        is InputDenotationKind.IDENTITY_REFERENCE
+    )
+    assert parsed.input_denotations[0].denoted_instance_kind == "staff"
+
+
+def test_question_frame_rejects_a_missing_supplied_value_branch() -> None:
+    payload = _frame_payload(
+        supplied_values=[
+            {
+                "meaning": "the named staff member",
+                "denotation_basis": "Nadia Wanjiku names one staff member.",
+                "entity_reference": None,
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError):
+        parse_semantic_question_frame(
+            payload,
+            question_context_texts=("Which staff member is named Nadia Wanjiku?",),
+        )
 
 
 def test_question_frame_lowers_alternatives_to_one_collection_input() -> None:
@@ -62,15 +107,15 @@ def test_question_frame_lowers_alternatives_to_one_collection_input() -> None:
             supplied_values=[
                 {
                     "meaning": "the specified staff members",
-                    "denotation": {
-                        "basis": "Each supplied value refers to one staff member.",
-                        "kind": "identity_reference",
+                    "denotation_basis": (
+                        "Each supplied value refers to one staff member."
+                    ),
+                    "entity_reference": {
                         "instance_kind": "staff member",
-                    },
-                    "value": {
-                        "operands": ["member A", "member B"],
-                        "value_type": {"kind": "identity_name_or_code"},
-                        "origin": {"kind": "question"},
+                        "value": {
+                            "operands": ["member A", "member B"],
+                            "origin": {"kind": "question"},
+                        },
                     },
                 }
             ],
@@ -84,44 +129,19 @@ def test_question_frame_lowers_alternatives_to_one_collection_input() -> None:
     assert isinstance(parsed.inputs[0].value_type.element_type, TextType)
 
 
-def test_question_frame_schema_makes_temporal_identity_impossible() -> None:
-    schema = build_semantic_question_frame_schema()
-    Draft7Validator.check_schema(schema)
-    payload = _frame_payload(
-        supplied_values=[
-            {
-                "meaning": "the requested period",
-                "denotation": {
-                    "basis": "Today supplies a time period.",
-                    "kind": "identity_reference",
-                    "instance_kind": "time period",
-                },
-                "value": {
-                    "operands": ["today"],
-                    "value_type": {"kind": "temporal_scope"},
-                    "origin": {"kind": "question"},
-                },
-            }
-        ]
-    )
-
-    assert tuple(Draft7Validator(schema).iter_errors(payload))
-
-
 def test_question_frame_parses_temporal_scope_without_second_classification() -> None:
     parsed = parse_semantic_question_frame(
         _frame_payload(
             supplied_values=[
                 {
                     "meaning": "the requested period",
-                    "denotation": {
-                        "basis": "Today supplies a time period.",
-                        "kind": "scalar",
-                    },
-                    "value": {
-                        "operands": ["today"],
-                        "value_type": {"kind": "temporal_scope"},
-                        "origin": {"kind": "question"},
+                    "denotation_basis": "Today supplies a time period.",
+                    "non_entity_value": {
+                        "value": {
+                            "operands": ["today"],
+                            "value_type": {"kind": "temporal_scope"},
+                            "origin": {"kind": "question"},
+                        }
                     },
                 }
             ]
@@ -157,14 +177,13 @@ def test_question_frame_owns_bounded_selection_limit_once() -> None:
         "kind": "take_with_boundary_ties",
         "limit": {
             "meaning": "requested number of results",
-            "denotation": {
-                "basis": "Five supplies the result limit.",
-                "kind": "scalar",
-            },
-            "value": {
-                "operands": ["5"],
-                "value_type": {"kind": "integer"},
-                "origin": {"kind": "question"},
+            "denotation_basis": "Five supplies the result limit.",
+            "non_entity_value": {
+                "value": {
+                    "operands": ["5"],
+                    "value_type": {"kind": "integer"},
+                    "origin": {"kind": "question"},
+                }
             },
         },
     }
@@ -259,6 +278,7 @@ def _frame_payload(
             {
                 "meaning": meaning,
                 "origin": {"kind": "question"},
+                "grouping_kind": "related_entity_identity",
             }
             for meaning in grouping_meanings or []
         ],

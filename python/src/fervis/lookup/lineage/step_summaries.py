@@ -198,18 +198,20 @@ def _question_contract_semantic_items(
                 )
             )
     for supplied in _dicts(outcome.get("supplied_values")):
-        raw_value = _dict_or_empty(supplied.get("value"))
+        entity_reference = _dict_or_empty(supplied.get("entity_reference"))
+        non_entity_value = _dict_or_empty(supplied.get("non_entity_value"))
+        selected = entity_reference or non_entity_value
+        raw_value = _dict_or_empty(selected.get("value"))
         text = _operand_text(raw_value.get("operands"))
         origin = _dict_or_empty(raw_value.get("origin"))
-        denotation = _dict_or_empty(supplied.get("denotation"))
         input_id = _text(origin.get("resolved_input_ref")) or text
         if not input_id or not text:
             continue
-        denotation_kind = _text(denotation.get("kind"))
-        input_kind = {
-            "identity_reference": "IDENTITY_REFERENCE",
-            "scalar": "NON_IDENTITY_SCALAR",
-        }.get(denotation_kind, denotation_kind.upper())
+        input_kind = (
+            "IDENTITY_REFERENCE"
+            if entity_reference
+            else "NON_IDENTITY_SCALAR"
+        )
         items.append(
             StepSemanticItem(
                 kind="known_input",

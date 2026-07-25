@@ -16,7 +16,7 @@ from fervis.lookup.question_contract import (
     SetTerm,
     analyze_requested_fact,
 )
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.model import (
     Aggregate,
     AggregateFunction,
     AllResults,

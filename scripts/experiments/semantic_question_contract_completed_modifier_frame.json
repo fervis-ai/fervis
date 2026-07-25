@@ -38,19 +38,18 @@
     "supplied_values": [
       {
         "meaning": "November 1, 2025",
-        "denotation": {
-          "basis": "date used to limit qualifying sales",
-          "kind": "scalar"
-        },
-        "value": {
-          "operands": [
-            "November 1, 2025"
-          ],
-          "value_type": {
-            "kind": "temporal_scope"
-          },
-          "origin": {
-            "kind": "question"
+        "denotation_basis": "date used to limit qualifying sales",
+        "non_entity_value": {
+          "value": {
+            "operands": [
+              "November 1, 2025"
+            ],
+            "value_type": {
+              "kind": "temporal_scope"
+            },
+            "origin": {
+              "kind": "question"
+            }
           }
         }
       }

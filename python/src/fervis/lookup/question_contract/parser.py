@@ -1,4 +1,4 @@
-"""Parse the provider-authored semantic relational Question Contract."""
+"""Parse the provider-authored relational Question Contract."""
 
 from __future__ import annotations
 
@@ -17,14 +17,14 @@ from fervis.lookup.question_contract.clarification import (
     IncompleteFactualRequestKind,
     QuestionContractNeedsClarification,
 )
-import fervis.lookup.question_contract.semantic_provider_contract as output
-from fervis.lookup.question_contract.semantic_analysis import (
+import fervis.lookup.question_contract.provider_contract as output
+from fervis.lookup.question_contract.analysis import (
     Groups,
     RequestedFactSemanticIndex,
     Singleton,
     analyze_requested_fact,
 )
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.model import (
     Aggregate,
     AggregateFunction,
     AllResults,
@@ -100,6 +100,7 @@ class AnswerRequestMeaning:
     result_kind: str
     candidate_set_origin: SourceOrigin
     grouping_origins: tuple[SourceOrigin, ...]
+    grouping_kinds: tuple[str, ...]
     row_identity_origin: SourceOrigin | None
     ordering_origins: tuple[SourceOrigin, ...]
     output_origins: tuple[SourceOrigin, ...]
@@ -153,6 +154,7 @@ def parse_semantic_question_frame(
             )
             for item in result.grouping_meanings
         )
+        grouping_kinds = tuple(item.grouping_kind for item in result.grouping_meanings)
         row_identity_origin = (
             _frame_source_origin(
                 result.returned_candidate_identity,
@@ -221,7 +223,7 @@ def parse_semantic_question_frame(
         if selection.kind == "take_with_boundary_ties":
             limit = _required(selection.limit, field="selection.limit")
             selection_limit_input_ref = _append_supplied_value(
-                limit.parse_as(output.SuppliedValueOutput),
+                limit,
                 input_interner=input_interner,
                 denotations=denotations,
             )
@@ -245,6 +247,7 @@ def parse_semantic_question_frame(
                 result_kind=result.result_kind,
                 candidate_set_origin=candidate_set_origin,
                 grouping_origins=grouping_origins,
+                grouping_kinds=grouping_kinds,
                 row_identity_origin=row_identity_origin,
                 ordering_origins=ordering_origins,
                 output_origins=output_origins,
@@ -308,42 +311,54 @@ def _referenced_frame_values(
 
 
 def _append_supplied_value(
-    item: output.SuppliedValueOutput,
+    item: ProviderObject,
     *,
     input_interner: _InputInterner,
     denotations: list[InputDenotation],
 ) -> str:
-    input_ref = input_interner.supplied_value_reference(item)
+    has_identity = item.has_field("entity_reference")
+    has_non_entity = item.has_field("non_entity_value")
+    if has_identity == has_non_entity:
+        raise ValueError("supplied value must choose exactly one denotation")
+    if has_identity:
+        identity_value = item.parse_as(output.EntityReferenceSuppliedValueOutput)
+        identity_reference = identity_value.entity_reference
+        operands = identity_reference.value.operands
+        origin = identity_reference.value.origin
+        meaning = identity_value.meaning
+        denotation_basis = identity_value.denotation_basis
+        value_type: ScalarType = TextType()
+        kind = InputDenotationKind.IDENTITY_REFERENCE
+        instance_kind = identity_reference.instance_kind.strip()
+        if not instance_kind:
+            raise ValueError("entity reference requires an instance kind")
+    else:
+        scalar_value = item.parse_as(output.NonEntitySuppliedValueOutput)
+        non_entity_value = scalar_value.non_entity_value
+        operands = non_entity_value.value.operands
+        origin = non_entity_value.value.origin
+        meaning = scalar_value.meaning
+        denotation_basis = scalar_value.denotation_basis
+        value_type = input_interner.scalar_value_type(
+            non_entity_value.value.value_type
+        )
+        kind = InputDenotationKind.NON_IDENTITY_SCALAR
+        instance_kind = None
+    input_ref = input_interner.supplied_value_reference(
+        meaning=meaning,
+        operands=operands,
+        value_type=value_type,
+        origin=origin,
+    )
     if any(value.input_ref == input_ref for value in denotations):
         raise ValueError("one supplied input has multiple denotations")
-    denotation = item.denotation
-    kind = (
-        InputDenotationKind.IDENTITY_REFERENCE
-        if denotation.kind == "identity_reference"
-        else InputDenotationKind.NON_IDENTITY_SCALAR
-        if denotation.kind == "scalar"
-        else None
-    )
-    if kind is None:
-        raise ValueError("unknown supplied-value denotation")
-    if kind is InputDenotationKind.IDENTITY_REFERENCE and not denotation.instance_kind:
-        raise ValueError("identity reference requires an instance kind")
-    if (
-        kind is InputDenotationKind.NON_IDENTITY_SCALAR
-        and denotation.instance_kind is not None
-    ):
-        raise ValueError("scalar denotation cannot declare an instance kind")
     denotations.append(
         InputDenotation(
             id=f"input_denotation_{len(denotations) + 1}",
             input_ref=input_ref,
-            operand_meaning=item.meaning.strip(),
-            denotation_basis=denotation.basis.strip(),
-            denoted_instance_kind=(
-                denotation.instance_kind.strip()
-                if denotation.instance_kind is not None
-                else None
-            ),
+            operand_meaning=meaning.strip(),
+            denotation_basis=denotation_basis.strip(),
+            denoted_instance_kind=instance_kind,
             kind=kind,
         )
     )
@@ -542,12 +557,14 @@ def _requested_fact(
         _register_grouping(
             grouping,
             grouping_origin=grouping_origin,
+            expected_grouping_kind=grouping_kind,
             expression_parser=expression_parser,
             candidate_set_ref=candidate_set_ref,
         )
-        for grouping, grouping_origin in zip(
+        for grouping, grouping_origin, grouping_kind in zip(
             grouping_outputs,
             request_meaning.grouping_origins,
+            request_meaning.grouping_kinds,
             strict=True,
         )
     )
@@ -614,10 +631,20 @@ def _register_grouping(
     grouping: ProviderObject,
     *,
     grouping_origin: SourceOrigin,
+    expected_grouping_kind: str,
     expression_parser: _NestedExpressionParser,
     candidate_set_ref: str,
 ) -> str:
     kind = grouping.discriminator("kind")
+    expected_provider_kind = {
+        "qualifying_row_identity": "candidate_instance_identity",
+        "related_entity_identity": "related_instance_identity",
+        "non_identity_value": "value",
+    }.get(expected_grouping_kind)
+    if expected_provider_kind is None:
+        raise ValueError("unknown frame grouping kind")
+    if kind != expected_provider_kind:
+        raise ValueError("grouping kind conflicts with the question frame")
     if kind == "candidate_instance_identity":
         candidate_grouping = grouping.parse_as(output.CandidateIdentityGroupingOutput)
         return expression_parser.register_identity_group(
@@ -1097,6 +1124,7 @@ def _source_origin(
 def _frame_source_origin(
     item: (
         output.MeaningOriginOutput
+        | output.GroupingMeaningOutput
         | output.NonKeyFrameValueOutput
     ),
     *,
@@ -1156,7 +1184,7 @@ def _scalar_type(
         return BooleanType()
     if kind == "integer":
         return IntegerType()
-    if kind in {"text", "identity_name_or_code", "property_value"}:
+    if kind in {"text", "property_value"}:
         return TextType()
     if kind == "date":
         return DateType()
@@ -1235,11 +1263,9 @@ class _InputInterner:
     def input_by_id(self) -> dict[str, InputTerm]:
         return {item.id: item for item in self._inputs}
 
-    def supplied_value_reference(self, parsed: output.SuppliedValueOutput) -> str:
-        value = parsed.value
-        operands = _input_operand(value.operands)
-        scalar_type = _value_type(
-            value.value_type,
+    def scalar_value_type(self, value_type: ProviderObject) -> ScalarType:
+        parsed = _value_type(
+            value_type,
             allow_collection=False,
             origin_for=lambda value: _source_origin(
                 value,
@@ -1247,19 +1273,34 @@ class _InputInterner:
                 conversation_text_by_ref=self._conversation_text_by_ref,
             ),
         )
-        if isinstance(scalar_type, CollectionType):
+        if isinstance(parsed, CollectionType):
             raise TypeError("input-role value type must be scalar")
-        operand = operands[0] if len(operands) == 1 else operands
-        value_type = (
-            scalar_type if isinstance(operand, str) else CollectionType(scalar_type)
+        return parsed
+
+    def supplied_value_reference(
+        self,
+        *,
+        meaning: str,
+        operands: tuple[str, ...],
+        value_type: ScalarType,
+        origin: output.FrameOriginOutput,
+    ) -> str:
+        parsed_operands = _input_operand(operands)
+        operand = (
+            parsed_operands[0]
+            if len(parsed_operands) == 1
+            else parsed_operands
         )
-        source, resolved_input_ref = _frame_origin(value.origin)
+        input_value_type = (
+            value_type if isinstance(operand, str) else CollectionType(value_type)
+        )
+        source, resolved_input_ref = _frame_origin(origin)
         return self._reference(
             source=source,
-            meaning=parsed.meaning.strip(),
+            meaning=meaning.strip(),
             resolved_input_ref=resolved_input_ref,
             operand=operand,
-            value_type=value_type,
+            value_type=input_value_type,
         )
 
     def _reference(

@@ -26,8 +26,8 @@ from fervis.lookup.grounding.identity import reference_binding_options
 from fervis.lookup.grounding.semantic_parser import parse_semantic_grounding
 from fervis.lookup.grounding.semantic_prompt import SemanticGroundingTurnPrompt
 from fervis.lookup.grounding.semantic_schema import build_semantic_grounding_schema
-from fervis.lookup.question_contract.semantic_model import FactLocalKind, FactLocalRef
-from fervis.lookup.question_contract.semantic_model import InputTerm
+from fervis.lookup.question_contract.model import FactLocalKind, FactLocalRef
+from fervis.lookup.question_contract.model import InputTerm
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.semantic_types import (
     CollectionType,

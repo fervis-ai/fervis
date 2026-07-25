@@ -6,7 +6,7 @@ from .clarification import (
     QuestionContractNeedsClarification,
 )
 from .request import QuestionContractRequest
-from .semantic_analysis import (
+from .analysis import (
     InputUseSite,
     RawDataRecord,
     RequestedFactSemanticIndex,
@@ -14,7 +14,7 @@ from .semantic_analysis import (
     SubjectRows,
     analyze_requested_fact,
 )
-from .semantic_model import (
+from .model import (
     Aggregate,
     Arithmetic,
     AssociationTerm,
@@ -37,13 +37,13 @@ from .semantic_model import (
     SetTerm,
     TemporalBucket,
 )
-from .semantic_parser import (
+from .parser import (
     ParsedSemanticQuestionContract,
     ParsedSemanticQuestionMeaning,
     parse_semantic_question_contract,
     parse_semantic_question_frame,
 )
-from .semantic_prompt import (
+from .prompt import (
     SemanticQuestionContractTurnPrompt,
     SemanticQuestionFrameTurnPrompt,
 )

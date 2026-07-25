@@ -29,7 +29,7 @@ from fervis.lookup.grounding import (  # noqa: E402
 from fervis.lookup.grounding.semantic_prompt import (  # noqa: E402
     SemanticGroundingTurnPrompt,
 )
-from fervis.lookup.question_contract.semantic_model import (  # noqa: E402
+from fervis.lookup.question_contract.model import (  # noqa: E402
     FactLocalKind,
     FactLocalRef,
     InputTerm,

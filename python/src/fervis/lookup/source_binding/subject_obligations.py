@@ -53,6 +53,20 @@ def derive_subject_choice_membership(
     )
 
 
+def explicit_override_from_application_owners(
+    *,
+    application_owner_refs: tuple[str | None, ...],
+    boolean_requirement_refs: frozenset[str],
+    matched_excluded_role: str | None,
+) -> bool:
+    """Whether an exact Boolean requirement selects an excluded choice."""
+
+    return matched_excluded_role is not None and any(
+        owner_ref in boolean_requirement_refs
+        for owner_ref in application_owner_refs
+    )
+
+
 NORMAL_INSTANCE_EXCLUDED_STATE_ROLES: tuple[
     NormalInstanceExcludedStateRoleDefinition, ...
 ] = (
@@ -111,4 +125,5 @@ __all__ = [
     "NormalInstanceProfileId",
     "SubjectChoiceMembership",
     "derive_subject_choice_membership",
+    "explicit_override_from_application_owners",
 ]

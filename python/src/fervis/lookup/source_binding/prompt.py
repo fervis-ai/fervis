@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from fervis.lookup.source_binding.semantic import SemanticSourceBindingRequest
-from fervis.lookup.source_binding.semantic_schema import (
+from fervis.lookup.source_binding.model import SemanticSourceBindingRequest
+from fervis.lookup.source_binding.schema import (
     build_semantic_source_binding_schema,
 )
 from fervis.lookup.source_binding.subject_obligations import (
@@ -84,33 +84,44 @@ class SemanticSourceBindingTurnPrompt(TurnPromptBase):
                 ),
             ),
             builder.instruction_block(
+                "Finite-choice requirement application",
+                (
+                    "finite_choice_applications is keyed first by branch and then by each shown requirement owner.",
+                    "For each owner, write application_basis before surface_ref and selected_choice_values.",
+                    "application_basis states why the selected request surface and choices realize that requirement.",
+                    "surface_ref is the one request parameter whose declared meaning expresses the requirement.",
+                    "selected_choice_values contains every choice on that surface that satisfies the requirement.",
+                    "Required-source owners select the choices required to invoke that source.",
+                    "Normal-instance reviews do not own requirement application.",
+                ),
+            ),
+            builder.instruction_block(
                 "Subject obligation",
                 (
                     "For a normal business instance, review every shown finite-choice subject surface in each branch.",
                     "finite_choice_reviews is keyed by each shown surface ref. Within each surface, write surface_mapping_basis, then review every shown choice value.",
                     "surface_mapping_basis states what population property the surface controls for the requested subject.",
-                    "For each choice, write choice_domain_meaning, role_match_basis, matched_excluded_role, choice_inclusion_basis, choice_inclusion, requirement_mapping_basis, then requirement_ref.",
+                    "For each choice, write choice_domain_meaning, role_match_basis, matched_excluded_role, choice_inclusion_basis, then choice_inclusion.",
                     "choice_domain_meaning states what the source returns when this choice value is applied, read against the source description and the requested subject.",
                     "role_match_basis compares the choice domain meaning with every shown excluded subject-state role.",
+                    "matched_excluded_role classifies the source choice independently of whether the question requests that choice.",
                     "A subject-state axis classifies the state or kind of each answer-subject instance. Review each choice on such an axis against the excluded subject-state roles.",
                     "A request parameter that filters rows by a subject-state axis remains a subject-state axis; corresponding request-parameter and returned-field choices have the same classification.",
                     "A presentation, ordering, or response-shape axis does not classify subject instances; every choice on that axis has matched_excluded_role=NONE.",
                     "On a subject-state axis, matched_excluded_role is one shown excluded role when the choice matches that role and NONE only after considering every shown role and finding none applies.",
-                    "choice_inclusion_basis explains whether rows with this choice belong to the ordinary requested subject population before any explicit Boolean requirement is applied.",
+                    "A choice selected for a shown Boolean requirement is explicitly requested. Selecting such a choice with a matched excluded role is the explicit user override for that choice.",
+                    "A required-source owner supplies invocation configuration. choice_inclusion remains the authority for whether that choice belongs to the requested subject.",
+                    "choice_inclusion_basis explains whether rows with this choice belong in the ordinary subject population before applying explicit requirement selections.",
                     "choice_inclusion records that baseline membership. Assess each choice independently. Multiple ordinary values may be INCLUDE.",
-                    "When a shown Boolean requirement is satisfied by this exact choice, requirement_mapping_basis states that relationship and requirement_ref copies that requirement.",
-                    "When a shown required-source owner needs this exact choice, requirement_mapping_basis states why the choice supplies that target and requirement_ref copies that owner.",
-                    "Otherwise requirement_mapping_basis and requirement_ref are both null.",
-                    "More than one choice may copy the same requirement_ref when every such choice independently satisfies it. One requirement is mapped on at most one finite-choice surface in a branch.",
+                    "Boolean-requirement applications determine effective membership for their selected choices; choice_inclusion determines effective membership for every other choice.",
                     "Do not narrow the requested population for an unstated preference for cleaner, safer, validated, finalized, or higher-quality evidence.",
-                    "A requirement_ref on an excluded ordinary-instance choice is the explicit user override for that choice.",
                     "For a raw data record, every branch has an empty finite_choice_reviews object.",
                 ),
             ),
             builder.instruction_block(
                 "Output",
                 (
-                    "Return set_bindings, resolved_input_applications, fact_bindings, association_bindings, then subject_binding with every shown key exactly once.",
+                    "Return set_bindings, resolved_input_applications, finite_choice_applications, fact_bindings, association_bindings, then subject_binding with every shown key exactly once.",
                     "Return exactly one submit_source_binding tool call.",
                 ),
             ),

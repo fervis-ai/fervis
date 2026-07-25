@@ -4,8 +4,8 @@ from typing import Any
 
 from jsonschema import Draft7Validator
 
-from fervis.lookup.question_contract.semantic_analysis import analyze_requested_fact
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.analysis import analyze_requested_fact
+from fervis.lookup.question_contract.model import (
     AllResults,
     FactLocalRef,
     FactTerm,

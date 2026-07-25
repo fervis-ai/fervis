@@ -13,7 +13,7 @@ from fervis.lookup.grounding.semantic import (
     identity_resolution_tasks,
     reference_grounding_tasks,
 )
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.model import (
     FactLocalKind,
     FactLocalRef,
     InputTerm,

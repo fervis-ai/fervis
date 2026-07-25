@@ -24,7 +24,7 @@ from fervis.lookup.relation_catalog.row_sources import (
     row_source_type_supports_semantic_type,
 )
 from fervis.lookup.semantic_types import IdentifierType
-from fervis.lookup.source_binding.semantic import (
+from fervis.lookup.source_binding.model import (
     AssociationRealizationKind,
     SemanticSourceBindingRequest,
     SourceBindingPlan,

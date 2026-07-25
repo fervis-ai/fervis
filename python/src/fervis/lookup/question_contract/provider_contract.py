@@ -39,17 +39,34 @@ class SuppliedInputValueOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class SuppliedValueDenotationOutput(ProviderOutput):
-    basis: str
-    kind: str
-    instance_kind: str | None = None
+class EntityReferenceValueOutput(ProviderOutput):
+    operands: tuple[str, ...]
+    origin: FrameOriginOutput
 
 
 @dataclass(frozen=True)
-class SuppliedValueOutput(ProviderOutput):
-    meaning: str
-    denotation: SuppliedValueDenotationOutput
+class EntityReferenceOutput(ProviderOutput):
+    instance_kind: str
+    value: EntityReferenceValueOutput
+
+
+@dataclass(frozen=True)
+class NonEntityValueOutput(ProviderOutput):
     value: SuppliedInputValueOutput
+
+
+@dataclass(frozen=True)
+class EntityReferenceSuppliedValueOutput(ProviderOutput):
+    meaning: str
+    denotation_basis: str
+    entity_reference: EntityReferenceOutput
+
+
+@dataclass(frozen=True)
+class NonEntitySuppliedValueOutput(ProviderOutput):
+    meaning: str
+    denotation_basis: str
+    non_entity_value: NonEntityValueOutput
 
 
 @dataclass(frozen=True)
@@ -82,10 +99,17 @@ class FactTermOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class GroupingMeaningOutput(ProviderOutput):
+    meaning: str
+    origin: FrameOriginOutput
+    grouping_kind: str
+
+
+@dataclass(frozen=True)
 class AnswerRequestFrameOutput(ProviderOutput):
     result_kind: str
     qualifying_row_kind: MeaningOriginOutput
-    grouping_meanings: tuple[MeaningOriginOutput, ...]
+    grouping_meanings: tuple[GroupingMeaningOutput, ...]
     return_request_basis: str
     returned_result: ProviderObject
     answer_values: tuple[ProviderObject, ...]
@@ -112,7 +136,7 @@ class ReturnedResultOutput(ProviderOutput):
 class CompleteSemanticQuestionFrameOutput(ProviderOutput):
     kind: str
     answer_requests: tuple[AnswerRequestFrameOutput, ...]
-    supplied_values: tuple[SuppliedValueOutput, ...]
+    supplied_values: tuple[ProviderObject, ...]
 
 
 @dataclass(frozen=True)

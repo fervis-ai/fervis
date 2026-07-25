@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from fervis.lookup.question_contract.request import QuestionContractRequest
-from fervis.lookup.question_contract.semantic_schema import (
+from fervis.lookup.question_contract.schema import (
     build_semantic_question_contract_schema_for_meaning,
     build_semantic_question_frame_schema,
 )
-from fervis.lookup.question_contract.semantic_parser import (
+from fervis.lookup.question_contract.parser import (
     ParsedSemanticQuestionMeaning,
 )
 from fervis.lookup.semantic_types import (
@@ -138,12 +138,12 @@ the supplied Percentage directly as the arithmetic operand.
 
 Each grouping entry writes grouping_basis before kind. grouping_basis states
 what value one qualifying row contributes to the group. Use
-candidate_instance_identity for the qualifying instance's exact identity,
-related_instance_identity for the exact identity of another instance related
-to it, and value for any other row-level grouping value. A value grouping writes
-its expression. Grouped outputs and ordering use group_ref for grouping values;
-aggregate expressions compute values over each group. A supplied collection may
-restrict qualifying rows; the per-row value remains the grouping value.
+candidate_instance_identity for shown qualifying_row_identity,
+related_instance_identity for shown related_entity_identity, and value for
+shown non_identity_value. A value grouping writes its expression. Grouped
+outputs and ordering use group_ref for grouping values; aggregate expressions
+compute values over each group. A supplied collection may restrict qualifying
+rows; the per-row value remains the grouping value.
 
 Each output names the fact, set, group, input, or expression that the user asks
 to receive. Ordering names the value that determines order. Selection states
@@ -182,8 +182,9 @@ Write decision_basis first. For a complete question, write every answer_request,
 then supplied_values.
 
 decision_basis inventories the independent requested results and the concrete
-supplied operands that constrain or compute them. Candidate-population phrases
-belong to requested meaning rather than the supplied-operand inventory.
+supplied operands that constrain or compute them. Candidate-population nouns
+belong to requested meaning. Concrete names, codes, identifiers, times, and
+property values that restrict those candidates belong to supplied_values.
 
 Answer requests
 
@@ -242,8 +243,12 @@ Relationships used to qualify candidates retain qualifying_instances.
 
 grouping_meanings is empty for scalar and qualifying_instances. For
 grouped_results, each item names one value that varies across the requested
-result rows and defines one grouping dimension. A shared qualification or time
-scope is not a grouping dimension.
+result rows and defines one grouping dimension. Each grouping_meaning writes
+meaning, origin, then grouping_kind. grouping_kind is qualifying_row_identity
+when the grouping value identifies the same instance described by
+qualifying_row_kind, related_entity_identity when it identifies another entity
+related to each qualifying row, and non_identity_value when it identifies no
+entity. A shared qualification or time scope is not a grouping dimension.
 
 selection is all_results when every qualifying result is requested,
 first_rank_with_ties for a singular first, last, highest, or lowest request,
@@ -286,24 +291,20 @@ One supplied value item owns one independent operand role. Alternatives filling
 the same role share one item. A value shared by several answer requests appears
 once.
 
-For each supplied value, write meaning, denotation, then value.
+For each supplied value, write meaning and denotation_basis before choosing
+exactly one of entity_reference or non_entity_value.
 
-denotation.basis explains what the supplied value itself denotes.
-identity_reference means the value is a name, code, or identifier selecting
-exactly one instance of a person, organization, place, product, or other named
-entity kind. It remains an identity reference when many candidate rows relate
-to that instance. A noun phrase naming the candidate kind or population
-belongs to qualifying_row_kind. scalar means the value is a property, category,
-status, time, quantity, or other value that is not the name, code, or
-identifier of one entity instance.
+entity_reference is a supplied name, code, or identifier intended to identify
+a person, organization, place, product, or other entity. It remains an entity
+reference when its wording could match several instances; resolution handles
+that ambiguity. Write instance_kind, then value. The value contains the copied
+operand and its origin.
 
-value.operands copies the exact visible wording or exact shown resolved value.
-meaning describes the value's role. value_type describes its intrinsic type.
-identity_name_or_code is a name, code, or key for the instance denoted by an
-identity_reference. property_value is a non-identity textual property,
-category, status, or search value. temporal_scope is a date, time, interval, or
-relative period that bounds observations.
-origin identifies the question or resolved conversation input that supplied it.
+non_entity_value is a supplied property, category, status, time, quantity, or
+other value that does not name or identify an entity. Its value contains the
+copied operand, its intrinsic value_type, and its origin. property_value is a
+non-entity textual property, category, or status. temporal_scope is a date,
+time, interval, or relative period that bounds observations.
 """
 
 
@@ -480,7 +481,15 @@ def _question_meaning_payload(
                 "result_kind": item.result_kind,
                 "qualifying_row_kind": _origin_payload(item.candidate_set_origin),
                 "grouping_meanings": [
-                    _origin_payload(origin) for origin in item.grouping_origins
+                    {
+                        **_origin_payload(origin),
+                        "grouping_kind": grouping_kind,
+                    }
+                    for origin, grouping_kind in zip(
+                        item.grouping_origins,
+                        item.grouping_kinds,
+                        strict=True,
+                    )
                 ],
                 "row_identity_meaning": (
                     _origin_payload(item.row_identity_origin)

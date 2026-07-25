@@ -1,11 +1,12 @@
 """Semantic source-binding boundary."""
 
-from .semantic import (
+from .model import (
     AssociationRealizationKind,
     CatalogProvidedValue,
     FactRealization,
     MissingCatalogValue,
     SemanticSourceBindingRequest,
+    SetRealization,
     SourceBindingClarification,
     SourceBindingPlan,
     SourceMechanicKind,
@@ -14,9 +15,9 @@ from .semantic import (
     source_binding_clarification,
     source_required_inputs_are_satisfiable,
 )
-from .binding_plan_compilation import compile_source_binding_plan
-from .semantic_prompt import SemanticSourceBindingTurnPrompt
-from .semantic_verification import (
+from .parser import compile_source_binding_plan
+from .prompt import SemanticSourceBindingTurnPrompt
+from .verification import (
     SourceStrategyVerificationFailure,
     VerifiedSourceStrategy,
     verify_source_strategy,
@@ -25,6 +26,7 @@ from .semantic_verification import (
 __all__ = [
     "AssociationRealizationKind",
     "SemanticSourceBindingRequest",
+    "SetRealization",
     "SemanticSourceBindingTurnPrompt",
     "SourceStrategyVerificationFailure",
     "FactRealization",

@@ -22,11 +22,10 @@ input:
           universal_shape: none
       supplied_values:
         - meaning: the district containing the qualifying facilities
-          denotation:
-            basis: River District is a descriptive identifier for one district.
-            kind: identity_reference
+          denotation_basis: River District is a descriptive identifier for one district.
+          entity_reference:
             instance_kind: district
-          value: {operands: [River District], value_type: {kind: text}, origin: {kind: question}}
+            value: {operands: [River District], origin: {kind: question}}
   payload:
     decision_basis: Count facilities whose observed district identity equals the supplied district.
     outcome:

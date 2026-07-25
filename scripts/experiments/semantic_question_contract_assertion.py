@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.question_contract.semantic_parser import (
+from fervis.lookup.question_contract.parser import (
     ParsedSemanticQuestionContract,
     ParsedSemanticQuestionMeaning,
     parse_semantic_question_contract,
     parse_semantic_question_frame,
 )
-from fervis.lookup.question_contract.semantic_analysis import (
+from fervis.lookup.question_contract.analysis import (
     Groups,
     Singleton,
     SubjectRows,
 )
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.model import (
     Aggregate,
     AllResults,
     Arithmetic,

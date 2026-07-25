@@ -38,7 +38,7 @@ from fervis.lookup.conversation_resolution.model import (
     CurrentSpanSource,
     ResolvedValueFrameArgument,
 )
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.model import (
     AllResults,
     InputDenotation,
     InputDenotationKind,

@@ -15,12 +15,12 @@ from fervis.lookup.grounding.semantic import (
     identity_resolution_tasks,
     reference_grounding_tasks,
 )
-from fervis.lookup.question_contract.semantic_model import (
+from fervis.lookup.question_contract.model import (
     FactLocalKind,
     FactLocalRef,
     InputTerm,
 )
-from fervis.lookup.question_contract.semantic_parser import (
+from fervis.lookup.question_contract.parser import (
     ParsedSemanticQuestionContract,
     ParsedSemanticQuestionMeaning,
     parse_semantic_question_contract,
@@ -494,15 +494,15 @@ def _semantic_contract() -> ParsedSemanticQuestionContract:
                 "supplied_values": [
                     {
                         "meaning": "the staff member being listed",
-                        "denotation": {
-                            "basis": "Ada names one particular staff member.",
-                            "kind": "identity_reference",
+                        "denotation_basis": (
+                            "Ada names one particular staff member."
+                        ),
+                        "entity_reference": {
                             "instance_kind": "staff member",
-                        },
-                        "value": {
-                            "operands": ["Ada"],
-                            "value_type": {"kind": "text"},
-                            "origin": {"kind": "question"},
+                            "value": {
+                                "operands": ["Ada"],
+                                "origin": {"kind": "question"},
+                            },
                         },
                     },
                 ],
