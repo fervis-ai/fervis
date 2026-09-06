@@ -89,3 +89,33 @@ Fervis validates the declaration and uses its completeness evidence when
 traversing pages. Endpoint and parameter descriptions are also passed to
 identity grounding and read selection; describe distinct business resources
 and categories precisely.
+
+A plain `Serializer` can declare `Meta.model` when its projected fields come from
+that model. Use nested serializers for nested objects and lists so their field
+and identity contracts remain inspectable.
+
+For computed projections without an ORM relationship, a view can declare
+`fervis_relation_metadata` using the same `candidateKeys` and `entityReferences`
+format as OpenAPI's `x-fervis` extension:
+
+```python
+class ObservationListView(ListAPIView):
+    serializer_class = ObservationSerializer
+    fervis_relation_metadata = {
+        "entityReferences": [{
+            "referenceId": "category_reference",
+            "targetEntityKind": "category",
+            "targetKeyId": "unique_code",
+            "components": [{
+                "targetComponentId": "code",
+                "localFieldPath": "category.code",
+            }],
+            "contextFieldPaths": ["category.name"],
+        }],
+    }
+```
+
+These declarations supplement inferred ORM metadata. They must describe actual
+stable keys and references; they do not create database constraints or fields.
+Paths address the serializer's response fields before pagination wrapping.
+Unknown field paths and malformed declarations fail catalog construction.

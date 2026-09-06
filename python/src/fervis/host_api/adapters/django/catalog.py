@@ -16,6 +16,7 @@ from rest_framework import mixins
 from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import AllowAny
 
+from fervis.host_api.contracts.endpoint import relation_metadata_from_public_value
 from fervis.host_api.contracts import (
     CatalogEndpointContract,
     CandidateKeyContract,
@@ -192,7 +193,11 @@ def _build_contract(
     )
     response_model = response_model or response_inspection.relation_model
     response_fields = response_inspection.response_fields
-    candidate_keys = response_inspection.candidate_keys
+    declared_keys, declared_references = relation_metadata_from_public_value(
+        getattr(view_class, "fervis_relation_metadata", {})
+    )
+    candidate_keys = tuple(dict.fromkeys((*response_inspection.candidate_keys, *declared_keys)))
+    entity_references = tuple(dict.fromkeys((*response_inspection.entity_references, *declared_references)))
     optional_projection_params = optional_full_response_projection_param_names(
         response_serializer_class,
         query_params=query_params,
@@ -308,7 +313,7 @@ def _build_contract(
         resource_names=resource_names,
         candidate_keys=candidate_keys,
         candidate_key_authorities=candidate_key_authorities,
-        entity_references=response_inspection.entity_references,
+        entity_references=entity_references,
         catalog_endpoint=_catalog_endpoint_contract(
             url_name=url_name,
             view_class=view_class,
