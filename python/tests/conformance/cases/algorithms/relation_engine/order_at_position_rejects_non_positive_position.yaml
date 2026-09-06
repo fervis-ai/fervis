@@ -1,0 +1,21 @@
+id: order_at_position_rejects_non_positive_position
+description: Order/take fails closed when limit is not positive.
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: limit, value: 0, value_type: integer}]
+  relations:
+    - id: rows
+      rows: [{id: a}]
+      grain_keys: []
+  operations:
+    - id: ordered
+      output_relation: result
+      spec:
+        kind: order
+        input_relation: rows
+        order_by: [{field: id, direction: asc}]
+        selection: {kind: at_position, limit_input_id: limit}
+expect:
+  result_contains:
+    status: rejected

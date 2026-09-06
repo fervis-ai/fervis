@@ -1,0 +1,14 @@
+{
+  "requested_fact_ref": "fact_1",
+  "expected_read_decisions": {
+    "rs_calendar_days": "DROP",
+    "list_store_list": "RETAIN",
+    "list_location_list": "RETAIN",
+    "list_area_list": "DROP",
+    "get_area_detail": "DROP",
+    "list_holistic_merch_balance": "DROP"
+  },
+  "identity_task_ref": "fact_1:input_use:e1:1:reference_grounding",
+  "expected_canonical_option_id": "fact_1:input_use:e1:1:reference_grounding:canonical_option:1",
+  "expected_resolver_route_id": "bind_i1_rs_7de03e00183c6709_area_primary_key"
+}

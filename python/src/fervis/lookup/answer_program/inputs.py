@@ -29,6 +29,7 @@ from fervis.lookup.answer_program.values import (
     NodeOutputRef,
     ParameterRef,
     TimeComponent,
+    TimeValuePayload,
     ValueComponent,
     ValueProjectionKind,
     project_fact_value,
@@ -47,6 +48,7 @@ from fervis.lookup.answer_program.operations import (
     ProjectToKeySpec,
     OrderSpec,
     Take,
+    AtPosition,
     RoleExpandSpec,
     UnionSpec,
     UniversalConditionSpec,
@@ -167,11 +169,11 @@ def _operation_value_expressions(
     operation: Operation,
 ) -> tuple[NamedValueExpression, ...]:
     spec = operation.spec
-    if isinstance(spec, OrderSpec) and isinstance(spec.selection, Take):
+    if isinstance(spec, OrderSpec) and isinstance(spec.selection, (Take, AtPosition)):
         return (
             NamedValueExpression(
                 sink=f"operation.{operation.id}.order.limit",
-                expression=spec.selection.limit,
+                expression=(spec.selection.limit if isinstance(spec.selection, Take) else spec.selection.position),
             ),
         )
     if isinstance(spec, ComputeSpec):
@@ -344,8 +346,19 @@ def resolved_value_expression_type(
 ) -> str:
     """Return the declared comparison type of one resolved expression component."""
 
+    return value_expression_type(expression, resolved.fact_value)
+
+
+def value_expression_type(expression: ParameterRef | ConstantRef, value: FactValue) -> str:
+    """The declared type of a value projection, without evaluating row data."""
     if expression.component != ValueComponent.VALUE.value:
+        if isinstance(value.payload, TimeValuePayload) and expression.component in {TimeComponent.START.value, TimeComponent.END.value}:
+            return "datetime" if value.payload.granularity == "hour" else "date"
         return ""
+    return parameter_runtime_type(parameter_value_type(value))
+
+
+def parameter_runtime_type(value_type: ParameterValueType) -> str:
     return {
         ParameterValueType.IDENTITY: "",
         ParameterValueType.IDENTITY_SET: "list",
@@ -355,7 +368,7 @@ def resolved_value_expression_type(
         ParameterValueType.STRING: "string",
         ParameterValueType.BOOLEAN: "boolean",
         ParameterValueType.STRING_SET: "list",
-    }[parameter_value_type(resolved.fact_value)]
+    }[value_type]
 
 
 def _fact_value_component(value: Any, component: str) -> Any:
@@ -461,6 +474,11 @@ def _validate_binding(
             "binding_type_mismatch",
             f"binding for {parameter.id} has the wrong type",
         )
+    if parameter.fixed_value_fingerprint:
+        from fervis.lookup.contract_codec import canonical_contract_fingerprint
+        if canonical_contract_fingerprint(binding.value.payload) != parameter.fixed_value_fingerprint:
+            raise AnswerProgramContractError("fixed_parameter_value_changed",
+                f"binding for {parameter.id} has fixed meaning and requires recompilation")
     if not parameter.allowed_values:
         return
     value = canonical_fact_value(binding.value)

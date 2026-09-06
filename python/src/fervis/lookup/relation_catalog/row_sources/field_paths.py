@@ -118,11 +118,6 @@ def _param_ids(params: tuple[CatalogParam, ...]) -> dict[str, str]:
     return output
 
 
-def _read_description(read: EndpointRead) -> str:
-    metadata = read.source_metadata if isinstance(read.source_metadata, dict) else {}
-    return str(metadata.get("description") or "")
-
-
 def _field_label(field: CatalogField, *, row_path: str, field_id: str) -> str:
     if field.path:
         return _relative_field_path(field.path, row_path) or field.path

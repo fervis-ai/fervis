@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Collection
+from dataclasses import dataclass, replace, field
 from typing import TypeVar
 
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
+from fervis.lookup.answer_program.graph import prune_unused_program_nodes
+from .occurrences import RelationalValue
+from fervis.lookup.question_contract.domains import value_set_dependencies, relational_free_sets
+from fervis.lookup.source_binding.occurrences import OccurrenceScope, occurrence_scope
+from fervis.lookup.question_contract.analysis import (
+    RowDomain,
+    AssociationExpandedDomain,
+)
 from fervis.lookup.answer_program.expressions import (
     BinaryExpression,
     Expression,
@@ -28,6 +36,7 @@ from fervis.lookup.answer_program.operations import (
     KeepAll,
     JoinKey,
     JoinSpec,
+    JoinMode,
     Operation,
     OrderSpec,
     ProjectSpec,
@@ -36,8 +45,11 @@ from fervis.lookup.answer_program.operations import (
     SortDirection,
     SortKey,
     Take,
+    AtPosition,
     UnionSpec,
     ComputeSpec,
+    CrossJoinSpec,
+    FilterSpec,
 )
 from fervis.lookup.answer_program.relations import (
     EndpointParamBinding,
@@ -59,6 +71,7 @@ from fervis.lookup.answer_program.values import (
     ConstantRef,
     EnvironmentRef,
     FactValue,
+    TimeValuePayload,
     LiteralType,
     ParameterRef,
     NodeOutputRef,
@@ -69,7 +82,13 @@ from fervis.lookup.expression_operators import (
     ExpressionBinaryOperator,
     ExpressionUnaryOperator,
 )
-from fervis.lookup.qualification import QualificationGuarantee, qualification_dnf
+from fervis.lookup.qualification import (
+    QualificationGuarantee,
+    qualification_dnf,
+    BooleanAtomRef,
+    BooleanPolarity,
+    BooleanRequirementUseSite,
+)
 from fervis.lookup.available_sources import SourceChoiceSurfaceKind
 from fervis.lookup.relation_catalog.row_sources import (
     RowSource,
@@ -80,21 +99,26 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactSemanticIndex,
     Singleton,
+    SubjectRows,
 )
 from fervis.lookup.question_contract import (
     Aggregate,
+    AssociationTerm,
     Arithmetic,
     BooleanComposition,
     BooleanCompositionOperator,
     Comparison,
+    Coverage,
     ExpressionNode,
     FactTerm,
     FactLocalKind,
     FactLocalRef,
     FirstRankWithTies,
+    PositionWithTies,
     NullCheck,
     Quantifier,
     Quantify,
+    RelatedRow,
     TemporalBucket,
 )
 from fervis.lookup.semantic_types import IdentifierType
@@ -110,16 +134,16 @@ from fervis.lookup.source_binding.param_binding_sets import (
 )
 from fervis.lookup.source_binding.param_values import fact_value_parameter_projection
 from fervis.lookup.source_binding import (
-    AssociationRealizationKind,
     FactRealization,
     SetRealization,
     SourceBindingPlan,
     SourceMechanicKind,
     SubjectSurfaceReview,
+    SubjectChoiceReview,
     VerifiedSourceStrategy,
 )
 
-from .inputs import semantic_compiler_inputs
+from .inputs import semantic_compiler_inputs, source_choice_literal
 from .model import FactCompilationResult
 
 
@@ -140,6 +164,15 @@ class _ProgramBuilder:
     scalar_aggregate_outputs: dict[FactLocalRef, NodeOutputRef]
     relation_guarantees: list[RelationGuaranteeDeclaration]
     projected_fields: dict[FactLocalRef, str]
+    occurrence_scopes: dict[str, OccurrenceScope] = field(default_factory=dict)
+    occurrence_relations: dict[tuple[str, str], str] = field(default_factory=dict)
+    relational_values: dict[tuple[str, FactLocalRef], RelationalValue] = field(
+        default_factory=dict
+    )
+    attached_values: dict[tuple[str, str], str] = field(default_factory=dict)
+    qualified_branches: dict[str, str] = field(default_factory=dict)
+    normalized_relations: dict[str, str] = field(default_factory=dict)
+    global_relational_values: dict[FactLocalRef, RelationalValue] = field(default_factory=dict)
 
 
 def compile_verified_source_strategy(
@@ -162,6 +195,10 @@ def compile_verified_source_strategy(
         [],
         {},
     )
+    builder.occurrence_scopes = {
+        branch.branch_id: occurrence_scope(verified.request, verified.binding_plan, branch.branch_id)
+        for branch in verified.request.strategy.branches
+    }
     _compile_requested_fact(builder)
     program = AnswerProgram(
         inputs=tuple(verified.request.index.input_by_ref.values()),
@@ -179,6 +216,7 @@ def compile_verified_source_strategy(
             scalar_outputs=tuple(builder.scalar_outputs),
         ),
     )
+    program = prune_unused_program_nodes(program)
     program = replace(
         program,
         compatibility=build_program_compatibility(
@@ -333,6 +371,15 @@ def _unique_equal(
     return tuple(output.values())
 
 
+def _needs_qualified_row_union(index: RequestedFactSemanticIndex) -> bool:
+    # Global quantifiers consume each qualifying branch through idempotent
+    # Boolean folds. They do not require a row-identity union first.
+    return not isinstance(index.result_grain, Singleton) or any(
+        isinstance(node, Aggregate) and not isinstance(index.evaluation_domain_by_ref[ref], RowDomain)
+        for ref, node in index.expression_by_ref.items()
+    )
+
+
 def _compile_requested_fact(builder: _ProgramBuilder) -> None:
     index = builder.verified.request.index
     plan = builder.verified.binding_plan
@@ -342,7 +389,7 @@ def _compile_requested_fact(builder: _ProgramBuilder) -> None:
     )
     input_relation = (
         branch_outputs[0]
-        if len(branch_outputs) == 1
+        if len(branch_outputs) == 1 or not _needs_qualified_row_union(index)
         else _union_relations(
             builder,
             relation_ids=branch_outputs,
@@ -364,22 +411,34 @@ def _compile_branch(
         for item in builder.verified.request.strategy.branches
         if item.branch_id == branch_id
     )
-    source_relations = {
-        source_ref: _compile_source_relation(
-            builder,
-            plan=plan,
-            branch_id=branch_id,
-            source_ref=source_ref,
-            source_position=position,
+    scope = builder.occurrence_scopes[branch_id]
+    for position, occurrence in enumerate(scope.occurrences, start=1):
+        builder.occurrence_relations[branch_id, occurrence.id] = (
+            _compile_source_relation(
+                builder,
+                plan=plan,
+                branch_id=branch_id,
+                source_ref=occurrence.source_ref,
+                source_position=position,
+                occurrence_ref=occurrence.id,
+            )
         )
-        for position, source_ref in enumerate(branch.source_refs, start=1)
-    }
-    current = _join_branch_sources(
-        builder,
-        plan=plan,
-        branch_id=branch_id,
-        source_relations=source_relations,
+    root_refs = (
+        tuple(requirement.value_ref for requirement in index.output_requirements)
+        + index.grouping_refs
+        + index.ordering_refs
     )
+    if index.requested_fact.qualification_ref is not None:
+        root_refs += (_semantic_ref(index, index.requested_fact.qualification_ref),)
+    root_sets = {index.subject_obligation.subject_set_ref.token}
+    for ref in root_refs:
+        root_sets.update(value_set_dependencies(builder.verified.request.index, ref))
+    root_occurrences = _connected_occurrences(builder, branch_id, root_sets)
+    current = _compile_relational_scope(
+        builder, branch_id=branch_id, occurrence_refs=root_occurrences
+    )
+    for ref in root_refs:
+        current = _attach_relational_values(builder, current, ref, branch_id=branch_id)
     returned_atoms = _returned_atom_refs(plan, branch_id=branch_id)
     clause_refs = set(branch.qualification_clause_refs)
     clauses = tuple(
@@ -450,7 +509,165 @@ def _compile_branch(
             subject=builder.verified.subject_guarantee,
         )
     )
+    builder.qualified_branches[branch_id] = current
+    if len(builder.verified.request.strategy.branches) > 1 and _needs_qualified_row_union(index):
+        current = _normalize_branch_fields(
+            builder, branch_id=branch_id, input_relation=current
+        )
     return current
+
+
+def _normalize_branch_fields(
+    builder: _ProgramBuilder,
+    *,
+    branch_id: str,
+    input_relation: str,
+) -> str:
+    """Project equivalent semantic obligations to the representative branch."""
+    if input_relation in builder.normalized_relations:
+        return builder.normalized_relations[input_relation]
+    plan = builder.verified.binding_plan
+    representative = _representative_branch(builder)
+    projections: dict[str, str] = {}
+    fields = {
+        field.field_id: field for field in builder.fields_by_relation[input_relation]
+    }
+    observed = {ref.token for ref in builder.verified.request.index.observed_fact_refs}
+    binding_groups = list(plan.set_bindings.items()) + [
+        (ref, values) for ref, values in plan.fact_bindings.items() if ref in observed
+    ]
+    for logical_ref, values in binding_groups:
+        current = next(
+            (value for value in values if value.branch_id == branch_id), None
+        )
+        target = next(
+            (value for value in values if value.branch_id == representative), None
+        )
+        if current is None or target is None:
+            raise ValueError(
+                "union branches must realize the same semantic obligations"
+            )
+        for input_field, output_field in _equivalent_realization_fields(
+            builder, current, target, logical_ref=logical_ref
+        ):
+            if input_field not in fields:
+                continue
+            if output_field in projections and projections[output_field] != input_field:
+                raise ValueError(
+                    "union branch has conflicting realizations for one semantic field"
+                )
+            projections[output_field] = input_field
+    for (value_branch, ref), value in builder.relational_values.items():
+        if value_branch != branch_id or value.value_field not in fields:
+            continue
+        target_value = builder.relational_values.get((representative, ref))
+        if target_value is None:
+            raise ValueError("union branches disagree on exposed relational values")
+        projections[target_value.value_field] = value.value_field
+    grain = builder.grain_by_relation[input_relation]
+    if not grain or not set(grain) <= set(projections.values()):
+        raise ValueError(
+            "union normalization requires the complete realized row identity"
+        )
+    outputs = tuple(sorted(projections))
+    normalized_grain = tuple(
+        sorted(target for target, source in projections.items() if source in grain)
+    )
+    if outputs == tuple(fields) and all(
+        target == source for target, source in projections.items()
+    ):
+        return input_relation
+    relation_id = f"{input_relation}.semantic"
+    builder.operations.append(
+        Operation(
+            id=f"{relation_id}.operation",
+            output_relation=relation_id,
+            spec=ProjectSpec(
+                input_relation=input_relation,
+                outputs=tuple(
+                    NamedExpression(target, FieldRef(projections[target]))
+                    for target in outputs
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[relation_id] = tuple(
+        replace(fields[projections[target]], field_id=target) for target in outputs
+    )
+    builder.grain_by_relation[relation_id] = normalized_grain
+    builder.normalized_relations[input_relation] = relation_id
+    return relation_id
+
+
+def _equivalent_realization_fields(
+    builder: _ProgramBuilder, current, target, *, logical_ref
+) -> tuple[tuple[str, str], ...]:
+    if current.identity_ref is not None or target.identity_ref is not None:
+        catalog = builder.verified.request.source_catalog
+        if current.identity_ref is None or target.identity_ref is None:
+            raise ValueError("union branches disagree on identity authority")
+        left, right = (
+            catalog.identity(current.identity_ref),
+            catalog.identity(target.identity_ref),
+        )
+        if (left.entity_kind, left.key_id) != (right.entity_kind, right.key_id):
+            raise ValueError("union branches disagree on identity authority")
+        source_components = {
+            item.component_id: item.field_id
+            for item in _identity_projection_components(
+                builder,
+                source_ref=current.source_ref,
+                identity_ref=current.identity_ref,
+                logical_ref=logical_ref,
+                branch_id=current.branch_id,
+            )
+        }
+        target_components = {
+            item.component_id: item.field_id
+            for item in _identity_projection_components(
+                builder,
+                source_ref=target.source_ref,
+                identity_ref=target.identity_ref,
+                logical_ref=logical_ref,
+                branch_id=target.branch_id,
+            )
+        }
+        if source_components.keys() != target_components.keys():
+            raise ValueError("union branches disagree on identity components")
+        return tuple(
+            (source_components[key], target_components[key])
+            for key in sorted(source_components)
+        )
+    current_refs = (
+        current.identity_field_refs
+        if isinstance(current, SetRealization)
+        else current.field_refs
+    )
+    target_refs = (
+        target.identity_field_refs
+        if isinstance(target, SetRealization)
+        else target.field_refs
+    )
+    if len(current_refs) != len(target_refs):
+        raise ValueError("union branches disagree on semantic field arity")
+
+    def physical(realization, field_ref):
+        source = builder.verified.request.source_catalog.source(realization.source_ref)
+        field_id = next(
+            field.id for field in source.fields if field.field_ref == field_ref
+        )
+        return _execution_field_id(
+            builder,
+            source.id,
+            field_id,
+            logical_ref=logical_ref,
+            branch_id=realization.branch_id,
+        )
+
+    return tuple(
+        (physical(current, left), physical(target, right))
+        for left, right in zip(current_refs, target_refs, strict=True)
+    )
 
 
 def _compile_source_relation(
@@ -460,6 +677,7 @@ def _compile_source_relation(
     branch_id: str,
     source_ref: str,
     source_position: int,
+    occurrence_ref: str,
 ) -> str:
     source = builder.verified.request.source_catalog.source(source_ref)
     fields = _relation_fields(builder, plan, branch_id=branch_id, source_ref=source_ref)
@@ -471,6 +689,7 @@ def _compile_source_relation(
         builder,
         branch_id=branch_id,
         source_ref=source_ref,
+        occurrence_ref=occurrence_ref,
     )
     relation_ids: list[str] = []
     for alternative_index, draft_bindings in enumerate(binding_sets, start=1):
@@ -523,77 +742,180 @@ def _compile_source_relation(
             output_relation=f"{relation_base}.alternatives",
         )
     )
+    scoped_relation = f"{relation_base}.scoped"
+    scoped_fields = tuple(
+        replace(
+            item,
+            field_id=_execution_field_id(
+                builder, source_ref, item.field_id, occurrence_ref=occurrence_ref
+            ),
+        )
+        for item in fields
+    )
+    row_key = _occurrence_row_key(occurrence_ref)
+    builder.operations.append(
+        Operation(
+            id=f"{scoped_relation}.operation",
+            output_relation=scoped_relation,
+            spec=ProjectSpec(
+                current,
+                (
+                    *tuple(
+                        NamedExpression(scoped.field_id, FieldRef(physical.field_id))
+                        for physical, scoped in zip(fields, scoped_fields, strict=True)
+                    ),
+                    NamedExpression(
+                        row_key, FunctionExpression(ExpressionFunction.ROW_NUMBER, ())
+                    ),
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[scoped_relation] = (
+        *scoped_fields,
+        RelationField(row_key, (FieldBindingRole.IDENTITY, FieldBindingRole.PREDICATE)),
+    )
+    builder.grain_by_relation[scoped_relation] = tuple(
+        _execution_field_id(builder, source_ref, key, occurrence_ref=occurrence_ref)
+        for key in builder.grain_by_relation[current]
+    ) or (row_key,)
+    current = scoped_relation
     return _compile_returned_subject_filters(
         builder,
         branch_id=branch_id,
         source_ref=source_ref,
         input_relation=current,
+        occurrence_ref=occurrence_ref,
     )
 
 
-def _join_branch_sources(
+def _source_join_mode(
+    builder: _ProgramBuilder, *, branch_id: str, source_ref: str, occurrence_ref: str
+) -> JoinMode:
+    # A predicate pushed into a related read requires a matching related row.
+    # Otherwise joining observations must preserve candidate rows with no match.
+    population_refs = {
+        requirement.requirement_ref
+        for requirement in builder.verified.request.index.boolean_requirements
+        if requirement.use_site.value == "population"
+    }
+    required_match = any(
+        mechanic.source_ref == source_ref
+        and mechanic.kind is SourceMechanicKind.INVOCATION_PREDICATE
+        and _owner_applies_to_occurrence(
+            builder,
+            ref,
+            branch_id=branch_id,
+            source_ref=source_ref,
+            occurrence_ref=occurrence_ref,
+        )
+        for ref, realizations in builder.verified.binding_plan.boolean_bindings.items()
+        if ref in population_refs
+        for realization in realizations
+        if realization.branch_id == branch_id
+        for mechanic in realization.mechanics
+    )
+    return JoinMode.INNER if required_match else JoinMode.LEFT
+
+
+def _compile_relational_scope(
     builder: _ProgramBuilder,
     *,
-    plan: SourceBindingPlan,
     branch_id: str,
-    source_relations: dict[str, str],
+    occurrence_refs: tuple[str, ...],
+    association_refs: tuple[str, ...] | None = None,
+    label: str = "join",
+    initial_relation: str | None = None,
+    initial_occurrences: tuple[str, ...] = (),
 ) -> str:
-    [first, *remaining] = tuple(source_relations)
-    current_source_refs = {first}
-    current = source_relations[first]
-    for position, source_ref in enumerate(remaining, start=1):
-        realization = next(
+    scope = builder.occurrence_scopes[branch_id]
+    by_id = {item.id: item for item in scope.occurrences}
+    first = occurrence_refs[0]
+    joined = set(initial_occurrences) if initial_relation is not None else {first}
+    pending = [item for item in occurrence_refs if item not in joined]
+    current = initial_relation or builder.occurrence_relations[branch_id, first]
+    allowed = None if association_refs is None else set(association_refs)
+    links = tuple(
+        link
+        for link in scope.links
+        if allowed is None or link.association_ref in allowed
+    )
+    position = 0
+    while pending:
+        next_ref = next(
             (
-                item
-                for values in plan.association_bindings.values()
-                for item in values
-                if item.branch_id == branch_id
-                and source_ref in item.source_refs
-                and current_source_refs.intersection(item.source_refs)
-                and item.relation_evidence_ref is not None
+                ref
+                for ref in pending
+                if any(
+                    (link.left_occurrence == ref and link.right_occurrence in joined)
+                    or (link.right_occurrence == ref and link.left_occurrence in joined)
+                    for link in links
+                )
             ),
             None,
         )
-        if realization is None:
-            raise ValueError("multi-source branch lacks declared relation evidence")
-        evidence = next(
-            item
-            for item in builder.verified.request.source_catalog.relation_evidence
-            if item.evidence_ref == realization.relation_evidence_ref
-        )
-        if evidence.left_source_ref in current_source_refs:
-            left_fields, right_fields = (
-                evidence.left_field_refs,
-                evidence.right_field_refs,
+        if next_ref is None:
+            raise ValueError(
+                "relational scope lacks a declared connection between occurrences"
             )
-        else:
-            left_fields, right_fields = (
-                evidence.right_field_refs,
-                evidence.left_field_refs,
-            )
-        output_relation = (
-            f"{builder.verified.request.index.requested_fact_id}."
-            f"{branch_id.rsplit(':', 1)[-1]}.join_{position}"
+        connecting = tuple(
+            link
+            for link in links
+            if (link.left_occurrence == next_ref and link.right_occurrence in joined)
+            or (link.right_occurrence == next_ref and link.left_occurrence in joined)
         )
+        keys: list[JoinKey] = []
+        for link in connecting:
+            if link.left_occurrence in joined:
+                left, right, left_fields, right_fields = (
+                    link.left_occurrence,
+                    link.right_occurrence,
+                    link.left_fields,
+                    link.right_fields,
+                )
+            else:
+                left, right, left_fields, right_fields = (
+                    link.right_occurrence,
+                    link.left_occurrence,
+                    link.right_fields,
+                    link.left_fields,
+                )
+            keys.extend(
+                JoinKey(
+                    _execution_field_id(
+                        builder, by_id[left].source_ref, lfield, occurrence_ref=left
+                    ),
+                    _execution_field_id(
+                        builder, by_id[right].source_ref, rfield, occurrence_ref=right
+                    ),
+                )
+                for lfield, rfield in zip(left_fields, right_fields, strict=True)
+            )
+        position += 1
+        output_relation = f"{builder.verified.request.index.requested_fact_id}.{branch_id.rsplit(':', 1)[-1]}.{label}_{position}"
+        right_relation = builder.occurrence_relations[branch_id, next_ref]
         builder.operations.append(
             Operation(
                 id=f"{output_relation}.operation",
+                output_relation=output_relation,
                 spec=JoinSpec(
-                    left=current,
-                    right=source_relations[source_ref],
-                    join_keys=tuple(
-                        JoinKey(left=left, right=right)
-                        for left, right in zip(left_fields, right_fields, strict=True)
+                    current,
+                    right_relation,
+                    tuple(dict.fromkeys(keys)),
+                    mode=_source_join_mode(
+                        builder,
+                        branch_id=branch_id,
+                        source_ref=by_id[next_ref].source_ref,
+                        occurrence_ref=next_ref,
                     ),
                 ),
-                output_relation=output_relation,
             )
         )
         builder.fields_by_relation[output_relation] = tuple(
             dict.fromkeys(
                 (
                     *builder.fields_by_relation[current],
-                    *builder.fields_by_relation[source_relations[source_ref]],
+                    *builder.fields_by_relation[right_relation],
                 )
             )
         )
@@ -601,12 +923,13 @@ def _join_branch_sources(
             dict.fromkeys(
                 (
                     *builder.grain_by_relation[current],
-                    *builder.grain_by_relation[source_relations[source_ref]],
+                    *builder.grain_by_relation[right_relation],
                 )
             )
         )
         current = output_relation
-        current_source_refs.add(source_ref)
+        joined.add(next_ref)
+        pending.remove(next_ref)
     return current
 
 
@@ -654,6 +977,7 @@ def _compile_returned_subject_filters(
     branch_id: str,
     source_ref: str,
     input_relation: str,
+    occurrence_ref: str,
 ) -> str:
     reviews = tuple(
         review
@@ -664,13 +988,32 @@ def _compile_returned_subject_filters(
             builder.verified.request.source_catalog.choice_surface(review.surface_ref),
         )
         if surface.source_ref == source_ref
+        and (review.owner_set_ref is None or builder.occurrence_scopes[branch_id].for_set(review.owner_set_ref).id == occurrence_ref)
         and surface.kind is SourceChoiceSurfaceKind.RETURNED_FIELD
         and review.mechanics
     )
     if not reviews:
         return input_relation
     conditions = tuple(
-        _returned_choice_condition(builder, review=review) for review in reviews
+        _returned_choice_condition(
+            builder,
+            review=replace(
+                review,
+                included_choice_refs=tuple(
+                    choice.choice_ref
+                    for choice in review.choice_reviews
+                    if _choice_included_for_occurrence(
+                        builder,
+                        choice,
+                        source_ref=source_ref,
+                        branch_id=branch_id,
+                        occurrence_ref=occurrence_ref,
+                    )
+                ),
+            ),
+            occurrence_ref=occurrence_ref,
+        )
+        for review in reviews
     )
     condition = _combine_boolean_expressions(
         conditions,
@@ -703,36 +1046,44 @@ def _returned_choice_condition(
     builder: _ProgramBuilder,
     *,
     review: SubjectSurfaceReview,
+    occurrence_ref=None,
+    logical_ref=None,
+    branch_id=None,
 ) -> Expression:
     surface = builder.verified.request.source_catalog.choice_surface(review.surface_ref)
     source = builder.verified.request.source_catalog.source(surface.source_ref)
     field_id = next(
-        field.id for field in source.fields if field.field_ref == surface.surface_ref
+        field.id for field in source.fields if field.field_ref == surface.target_ref
     )
     comparisons = tuple(
         BinaryExpression(
             operator=ExpressionBinaryOperator.EQUALS,
-            left=FieldRef(field_id),
+            left=FieldRef(
+                _execution_field_id(
+                    builder,
+                    source.id,
+                    field_id,
+                    occurrence_ref=occurrence_ref,
+                    logical_ref=logical_ref,
+                    branch_id=branch_id,
+                )
+            ),
             right=ConstantRef(
                 constant_id=value.value_ref,
                 version_ref=builder.verified.request.source_catalog.contract_snapshot.ref,
-                value=FactValue.literal(
-                    id=value.value_ref,
-                    literal_type=LiteralType.STRING,
-                    value=str(value.value),
-                    label=value.label,
-                    proof_refs=(
-                        builder.verified.request.source_catalog.contract_snapshot.ref,
-                        surface.surface_ref,
-                        value.value_ref,
-                    ),
-                    source_refs=(surface.source_ref,),
+                value=source_choice_literal(
+                    value,
+                    snapshot_ref=builder.verified.request.source_catalog.contract_snapshot.ref,
                 ),
             ),
         )
         for choice_ref in review.included_choice_refs
         for value in (builder.verified.request.source_catalog.choice_value(choice_ref),)
     )
+    if not comparisons:
+        constant_id = f"membership.empty:{review.surface_ref}"
+        return ConstantRef(constant_id, builder.verified.request.source_catalog.contract_snapshot.ref,
+            FactValue.literal(id=constant_id, literal_type=LiteralType.BOOLEAN, value="false"))
     return _combine_boolean_expressions(
         comparisons,
         operator=ExpressionBinaryOperator.OR,
@@ -814,7 +1165,7 @@ def _relation_fields(
                 and surface.kind is SourceChoiceSurfaceKind.RETURNED_FIELD
                 and review.mechanics
             ):
-                roles.setdefault(surface.surface_ref, set()).add(
+                roles.setdefault(surface.target_ref, set()).add(
                     FieldBindingRole.PREDICATE
                 )
     return tuple(
@@ -835,7 +1186,9 @@ def _source_grain_field_refs(source: RowSource) -> tuple[str, ...]:
         key = stable_keys[0]
     if key is None:
         return ()
-    return tuple(source.field(component.field_id).field_ref for component in key.components)
+    return tuple(
+        source.field(component.field_id).field_ref for component in key.components
+    )
 
 
 def _source_grain_field_ids(source: RowSource) -> tuple[str, ...]:
@@ -851,16 +1204,81 @@ def _source_kind(kind: RowSourceKind) -> SourceKind:
     }[kind]
 
 
+def _owner_applies_to_occurrence(
+    builder: _ProgramBuilder,
+    owner_ref: str | None,
+    *,
+    branch_id: str,
+    source_ref: str,
+    occurrence_ref: str,
+) -> bool:
+    return builder.occurrence_scopes[branch_id].owner_applies(
+        builder.verified.request, owner_ref, source_ref=source_ref, occurrence_ref=occurrence_ref,
+    )
+
+
+def _choice_included_for_occurrence(
+    builder: _ProgramBuilder,
+    choice: SubjectChoiceReview,
+    *,
+    source_ref: str,
+    branch_id: str,
+    occurrence_ref: str,
+) -> bool:
+    return choice.baseline_included or (
+        choice.explicit_user_override_applies
+        and any(
+            _owner_applies_to_occurrence(
+                builder,
+                owner,
+                branch_id=branch_id,
+                source_ref=source_ref,
+                occurrence_ref=occurrence_ref,
+            )
+            for owner in choice.selection_requirement_refs
+        )
+    )
+
+
 def _source_parameter_binding_sets(
     builder: _ProgramBuilder,
     *,
     branch_id: str,
     source_ref: str,
+    occurrence_ref: str,
 ) -> ParamBindingSetAlternatives:
     source = builder.verified.request.source_catalog.source(source_ref)
     groups_by_target: dict[str, list[tuple[str, ParamBindingSetAlternatives]]] = {}
     for application in builder.verified.binding_plan.invocation_applications:
         if application.branch_id != branch_id or application.source_ref != source_ref:
+            continue
+        if not _owner_applies_to_occurrence(
+            builder,
+            application.owner_ref,
+            branch_id=branch_id,
+            source_ref=source_ref,
+            occurrence_ref=occurrence_ref,
+        ):
+            continue
+        membership_choices = tuple(
+            choice
+            for branch in builder.verified.binding_plan.subject_binding.branch_realizations
+            if branch.branch_id == branch_id
+            for review in branch.surface_reviews
+            if review.owner_set_ref is None or builder.occurrence_scopes[branch_id].for_set(review.owner_set_ref).id == occurrence_ref
+            for choice in review.choice_reviews
+            if choice.choice_ref == application.value_ref
+        )
+        if membership_choices and not all(
+            _choice_included_for_occurrence(
+                builder,
+                choice,
+                source_ref=source_ref,
+                branch_id=branch_id,
+                occurrence_ref=occurrence_ref,
+            )
+            for choice in membership_choices
+        ):
             continue
         for target in application.target_applications:
             param = next(
@@ -1043,7 +1461,11 @@ def _returned_atom_refs(plan: SourceBindingPlan, *, branch_id: str) -> frozenset
         for realization in realizations
         if realization.branch_id == branch_id
         and any(
-            mechanic.kind is SourceMechanicKind.RETURNED_ROW_PREDICATE
+            mechanic.kind
+            in {
+                SourceMechanicKind.RETURNED_ROW_PREDICATE,
+                SourceMechanicKind.RETURNED_CHOICE_PREDICATE,
+            }
             for mechanic in realization.mechanics
         )
     )
@@ -1055,6 +1477,8 @@ def _compile_clause(
     *,
     returned_atoms: frozenset[str],
     branch_id: str,
+    owner_expression_ref: str | None = None,
+    use_site: BooleanRequirementUseSite = BooleanRequirementUseSite.POPULATION,
 ) -> Expression | None:
     expressions: list[Expression] = []
     requirements = {
@@ -1063,12 +1487,56 @@ def _compile_clause(
     }
     for atom in sorted(atom_refs):
         requirement = next(
-            (item for item in requirements.values() if item.atom_ref == atom),
+            (
+                item
+                for item in requirements.values()
+                if item.atom_ref == atom
+                and item.owner_expression_ref == owner_expression_ref
+                and item.use_site is use_site
+            ),
             None,
         )
         if requirement is None:
             raise ValueError("qualification atom lacks a scoped requirement")
         if requirement.requirement_ref not in returned_atoms:
+            continue
+        choice_conditions = tuple(
+            _returned_choice_condition(
+                builder,
+                review=replace(
+                    surface,
+                    included_choice_refs=tuple(
+                        choice.choice_ref
+                        for choice in surface.choice_reviews
+                        if requirement.requirement_ref
+                        in choice.selection_requirement_refs
+                    ),
+                ),
+                branch_id=branch_id,
+                logical_ref=FactLocalRef.from_token(
+                    builder.verified.request.requirement_fact_refs(
+                        requirement.requirement_ref
+                    )[0]
+                ),
+            )
+            for branch in builder.verified.binding_plan.subject_binding.branch_realizations
+            if branch.branch_id == branch_id
+            for surface in branch.surface_reviews
+            if any(
+                mechanic.kind is SourceMechanicKind.RETURNED_CHOICE_PREDICATE
+                for mechanic in surface.mechanics
+            )
+            and any(
+                requirement.requirement_ref in choice.selection_requirement_refs
+                for choice in surface.choice_reviews
+            )
+        )
+        if choice_conditions:
+            expressions.append(
+                _combine_boolean_expressions(
+                    choice_conditions, operator=ExpressionBinaryOperator.AND
+                )
+            )
             continue
         expression = _compile_semantic_ref(
             builder,
@@ -1084,6 +1552,312 @@ def _compile_clause(
     for expression in expressions[1:]:
         current = BinaryExpression(ExpressionBinaryOperator.AND, current, expression)
     return current
+
+
+def _compile_scoped_condition(
+    builder: _ProgramBuilder,
+    ref: FactLocalRef,
+    *,
+    branch_id: str,
+    owner_expression_ref: str,
+    use_site: BooleanRequirementUseSite,
+    negated: bool = False,
+) -> Expression:
+    index = builder.verified.request.index
+    node = index.expression_by_ref.get(ref)
+    if isinstance(node, BooleanComposition):
+        if node.operator is BooleanCompositionOperator.NOT:
+            return _compile_scoped_condition(
+                builder,
+                _semantic_ref(index, node.argument_refs[0]),
+                branch_id=branch_id,
+                owner_expression_ref=owner_expression_ref,
+                use_site=use_site,
+                negated=not negated,
+            )
+        operator = ExpressionBinaryOperator(node.operator.value)
+        if negated:
+            operator = (
+                ExpressionBinaryOperator.OR
+                if operator is ExpressionBinaryOperator.AND
+                else ExpressionBinaryOperator.AND
+            )
+        return _combine_boolean_expressions(
+            tuple(
+                _compile_scoped_condition(
+                    builder,
+                    _semantic_ref(index, child),
+                    branch_id=branch_id,
+                    owner_expression_ref=owner_expression_ref,
+                    use_site=use_site,
+                    negated=negated,
+                )
+                for child in node.argument_refs
+            ),
+            operator=operator,
+        )
+    condition = _compile_clause(
+        builder,
+        (
+            BooleanAtomRef(
+                ref.token,
+                BooleanPolarity.NEGATIVE if negated else BooleanPolarity.POSITIVE,
+            ),
+        ),
+        returned_atoms=_returned_atom_refs(
+            builder.verified.binding_plan, branch_id=branch_id
+        ),
+        branch_id=branch_id,
+        owner_expression_ref=owner_expression_ref,
+        use_site=use_site,
+    )
+    if condition is not None:
+        return condition
+    constant_id = f"condition.satisfied:{ref.token}"
+    return ConstantRef(
+        constant_id,
+        "semantic-question-contract@1",
+        FactValue.literal(
+            id=constant_id, literal_type=LiteralType.BOOLEAN, value="true"
+        ),
+    )
+
+
+def _compile_aggregate_filter(
+    builder: _ProgramBuilder,
+    *,
+    index: RequestedFactSemanticIndex,
+    aggregate_ref: FactLocalRef,
+    filter_ref: str,
+    branch_id: str | None = None,
+    qualification_applied: bool = True,
+) -> Expression | None:
+    if qualification_applied and index.requested_fact.qualification_ref == filter_ref:
+        return None
+    requirements = tuple(
+        requirement
+        for requirement in index.boolean_requirements
+        if requirement.owner_expression_ref == aggregate_ref.token
+    )
+    if requirements and all(
+        _requirement_is_invocation_realized(
+            builder,
+            requirement_ref=requirement.requirement_ref,
+        )
+        for requirement in requirements
+    ):
+        return None
+    return _compile_scoped_condition(
+        builder,
+        _semantic_ref(index, filter_ref),
+        branch_id=branch_id or _representative_branch(builder),
+        owner_expression_ref=aggregate_ref.token,
+        use_site=BooleanRequirementUseSite.AGGREGATE_FILTER,
+    )
+
+
+def _requirement_is_invocation_realized(
+    builder: _ProgramBuilder,
+    *,
+    requirement_ref: str,
+) -> bool:
+    realizations = builder.verified.binding_plan.boolean_bindings.get(
+        requirement_ref,
+        (),
+    )
+    return all(
+        any(
+            mechanic.kind is SourceMechanicKind.INVOCATION_PREDICATE
+            for realization in realizations
+            if realization.branch_id == branch.branch_id
+            for mechanic in realization.mechanics
+        )
+        for branch in builder.verified.request.strategy.branches
+    )
+
+
+def _aggregate_grain_fields(
+    builder: _ProgramBuilder, argument: FactLocalRef, *, branch_id: str | None = None
+) -> tuple[str, ...]:
+    index = builder.verified.request.index
+    if argument.kind is FactLocalKind.SET:
+        sets = [argument]
+    else:
+        domain = index.evaluation_domain_by_ref[argument]
+        if isinstance(domain, RowDomain):
+            sets = [domain.owner_ref]
+        elif isinstance(domain, AssociationExpandedDomain):
+            sets = [
+                index.fact_local_ref_by_local_id[set_id]
+                for association_ref in domain.path_refs
+                for association in (index.term_by_ref[association_ref],)
+                if isinstance(association, AssociationTerm)
+                for set_id in (association.from_set_ref, association.to_set_ref)
+            ]
+        else:
+            sets = []
+    fields: list[str] = []
+    for set_ref in dict.fromkeys(sets):
+        fields.extend(
+            _set_scope_keys(
+                builder, set_ref.token, branch_id or _representative_branch(builder)
+            )
+        )
+    return tuple(dict.fromkeys(fields))
+
+
+def _filter_missing_entity_groups(
+    builder: _ProgramBuilder,
+    *,
+    input_relation: str,
+    index: RequestedFactSemanticIndex,
+) -> str:
+    from fervis.lookup.answer_program.operations import FilterSpec
+
+    keys = tuple(
+        component.field_id
+        for ref in index.grouping_refs
+        if (identity := _result_entity_key(builder, ref)) is not None
+        for component in identity.components
+    )
+    if not keys:
+        return input_relation
+    relation_id = f"{index.requested_fact_id}.entity_groups"
+    builder.operations.append(
+        Operation(
+            id=f"{relation_id}.operation",
+            output_relation=relation_id,
+            spec=FilterSpec(
+                input_relation=input_relation,
+                condition=_combine_boolean_expressions(
+                    tuple(
+                        UnaryExpression(ExpressionUnaryOperator.NOT_NULL, FieldRef(key))
+                        for key in dict.fromkeys(keys)
+                    ),
+                    operator=ExpressionBinaryOperator.AND,
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[relation_id] = builder.fields_by_relation[input_relation]
+    builder.grain_by_relation[relation_id] = builder.grain_by_relation[input_relation]
+    return relation_id
+
+
+def _filter_aggregate_input(
+    builder: _ProgramBuilder, aggregate: Aggregate, relation: str, *, branch_id: str
+) -> str:
+    if aggregate.filter_ref is None:
+        return relation
+    condition = _compile_aggregate_filter(
+        builder,
+        index=builder.verified.request.index,
+        aggregate_ref=_semantic_ref(builder.verified.request.index, aggregate.id),
+        filter_ref=aggregate.filter_ref,
+        branch_id=branch_id,
+    )
+    if condition is None:
+        return relation
+    output = f"{relation}.{aggregate.id}.filtered"
+    builder.operations.append(
+        Operation(
+            id=f"{output}.operation",
+            output_relation=output,
+            spec=FilterSpec(relation, condition),
+        )
+    )
+    builder.fields_by_relation[output] = builder.fields_by_relation[relation]
+    builder.grain_by_relation[output] = builder.grain_by_relation[relation]
+    return output
+
+
+def _declare_independent_population_guarantee(builder: _ProgramBuilder, relation_id: str) -> None:
+    """Certify membership without claiming an unrelated subject's qualification."""
+    if any(item.relation_id == relation_id for item in builder.relation_guarantees):
+        return
+    index = builder.verified.request.index
+    builder.relation_guarantees.append(RelationGuaranteeDeclaration(
+        relation_id=relation_id,
+        qualification=QualificationGuarantee(
+            requested_fact_id=index.requested_fact_id,
+            formula=qualification_dnf(index.requested_fact_id, (frozenset(),)),
+            atom_proofs=(),
+        ),
+        subject=builder.verified.subject_guarantee,
+    ))
+
+
+def _aggregate_input_relation(
+    builder: _ProgramBuilder,
+    aggregate: Aggregate,
+    *,
+    input_relation: str,
+    index: RequestedFactSemanticIndex,
+) -> str:
+    refs = (_semantic_ref(index, aggregate.argument_ref),) + (
+        ()
+        if aggregate.filter_ref is None
+        else (_semantic_ref(index, aggregate.filter_ref),)
+    )
+    sets = set().union(*(value_set_dependencies(builder.verified.request.index, ref) for ref in refs))
+    fields = {item.field_id for item in builder.fields_by_relation[input_relation]}
+    representative = _representative_branch(builder)
+    required_keys = {
+        key for ref in sets for key in _set_scope_keys(builder, ref, representative)
+    }
+    if required_keys <= fields and len(builder.verified.request.strategy.branches) == 1:
+        relation = input_relation
+        for ref in refs:
+            relation = _attach_relational_values(
+                builder, relation, ref, branch_id=representative
+            )
+        return _filter_aggregate_input(
+            builder, aggregate, relation, branch_id=representative
+        )
+    inputs = []
+    for branch in builder.verified.request.strategy.branches:
+        occurrences = _connected_occurrences(builder, branch.branch_id, sets)
+        root = builder.qualified_branches[branch.branch_id]
+        root_fields = {item.field_id for item in builder.fields_by_relation[root]}
+        scope = builder.occurrence_scopes[branch.branch_id]
+        initial = tuple(
+            item.id
+            for item in scope.occurrences
+            if item.id in occurrences
+            and all(
+                set(_set_scope_keys(builder, ref, branch.branch_id)) <= root_fields
+                for ref in item.set_refs
+            )
+        )
+        relation = _compile_relational_scope(
+            builder,
+            branch_id=branch.branch_id,
+            occurrence_refs=occurrences,
+            label=f"aggregate_scope_{aggregate.id}",
+            initial_relation=root if initial else None,
+            initial_occurrences=initial,
+        )
+        if not initial:
+            _declare_independent_population_guarantee(builder, relation)
+        for ref in refs:
+            relation = _attach_relational_values(
+                builder, relation, ref, branch_id=branch.branch_id
+            )
+        relation = _filter_aggregate_input(
+            builder, aggregate, relation, branch_id=branch.branch_id
+        )
+        if len(builder.verified.request.strategy.branches) > 1:
+            relation = _normalize_branch_fields(
+                builder, branch_id=branch.branch_id, input_relation=relation
+            )
+        inputs.append(relation)
+    if len(inputs) == 1:
+        return inputs[0]
+    return _union_relations(
+        builder,
+        relation_ids=tuple(inputs),
+        output_relation=f"{index.requested_fact_id}.aggregate_input_{aggregate.id}",
+    )
 
 
 def _compile_result(
@@ -1102,7 +1876,9 @@ def _compile_result(
     aggregates = tuple(
         (ref, node)
         for ref, node in index.expression_by_ref.items()
-        if isinstance(node, Aggregate) and ref in required_expression_refs
+        if isinstance(node, Aggregate)
+        and ref in required_expression_refs
+        and not isinstance(index.evaluation_domain_by_ref[ref], RowDomain)
     )
     current = input_relation
     current = _project_semantic_values(
@@ -1112,71 +1888,99 @@ def _compile_result(
         aggregate_fields={},
         label="group_values",
     )
-    group_fields = tuple(
-        _result_field(builder, ref, aggregate_fields={}) for ref in index.grouping_refs
+    current = _filter_missing_entity_groups(
+        builder, input_relation=current, index=index
     )
-    aggregate_fields: dict[FactLocalRef, str] = {}
+    group_fields = (
+        _subject_grain_fields(builder, index=index)
+        if isinstance(index.result_grain, SubjectRows)
+        else tuple(
+            field
+            for ref in index.grouping_refs
+            for field in _result_key_fields(builder, ref, aggregate_fields={})
+        )
+    )
+    aggregate_fields: dict[FactLocalRef, str] = {
+        ref: value.value_field
+        for (branch, ref), value in builder.relational_values.items()
+        if branch == _representative_branch(builder)
+        and isinstance(index.expression_by_ref[ref], Aggregate)
+    }
     if aggregates:
-        specs: list[AggregationSpec] = []
+        input_groups: dict[str, list[tuple[FactLocalRef, Aggregate]]] = {}
         for position, (ref, aggregate) in enumerate(aggregates, start=1):
-            output_field = f"aggregate_{position}"
-            aggregate_fields[ref] = output_field
+            aggregate_fields[ref] = f"aggregate_{position}"
             argument = _semantic_ref(index, aggregate.argument_ref)
-            specs.append(
+            aggregate_input = (
+                _aggregate_input_relation(
+                    builder, aggregate, input_relation=current, index=index
+                )
+                if not group_fields
+                else current
+            )
+            input_groups.setdefault(aggregate_input, []).append((ref, aggregate))
+        aggregate_relations = []
+        for group_position, (aggregate_input, scoped_aggregates) in enumerate(
+            input_groups.items(), start=1
+        ):
+            aggregate_input = _project_semantic_values(
+                builder,
+                input_relation=aggregate_input,
+                refs=tuple(
+                    _semantic_ref(index, aggregate.argument_ref)
+                    for _, aggregate in scoped_aggregates
+                ),
+                aggregate_fields={},
+                label=f"aggregate_arguments_{group_position}",
+            )
+            specs = tuple(
                 AggregationSpec(
-                    function={
-                        "sum": AggregationFunction.SUM,
-                        "count": AggregationFunction.COUNT,
-                        "minimum": AggregationFunction.MIN,
-                        "maximum": AggregationFunction.MAX,
-                        "average": AggregationFunction.AVG,
-                    }[aggregate.function.value],
-                    output_field=output_field,
-                    input_field=(
-                        ""
-                        if argument.kind is FactLocalKind.SET
-                        else _compiled_field_all_branches(builder, argument)
-                    ),
-                    filter=(
-                        None
-                        if aggregate.filter_ref is None
-                        else _compile_semantic_ref(
-                            builder,
-                            _semantic_ref(index, aggregate.filter_ref),
-                            branch_id=_representative_branch(builder),
-                        )
+                    function=_aggregation_function(aggregate),
+                    output_field=aggregate_fields[ref],
+                    input_field=""
+                    if (argument := _semantic_ref(index, aggregate.argument_ref)).kind
+                    is FactLocalKind.SET
+                    else _result_field(builder, argument, aggregate_fields={}),
+                    filter=None
+                    if aggregate.filter_ref is None or not group_fields
+                    else _compile_aggregate_filter(
+                        builder,
+                        index=index,
+                        aggregate_ref=ref,
+                        filter_ref=aggregate.filter_ref,
                     ),
                     distinct_argument=aggregate.distinct_argument,
+                    grain_fields=_aggregate_grain_fields(builder, argument),
+                )
+                for ref, aggregate in scoped_aggregates
+            )
+            suffix = "" if len(input_groups) == 1 else f"_{group_position}"
+            output_relation = f"{index.requested_fact_id}.aggregate{suffix}"
+            operation_id = f"{index.requested_fact_id}.aggregate_operation{suffix}"
+            builder.operations.append(
+                Operation(
+                    id=operation_id,
+                    output_relation=output_relation,
+                    spec=AggregateSpec(aggregate_input, group_fields, specs),
                 )
             )
-        output_relation = f"{index.requested_fact_id}.aggregate"
-        aggregate_operation_id = f"{index.requested_fact_id}.aggregate_operation"
-        builder.operations.append(
-            Operation(
-                id=aggregate_operation_id,
-                spec=AggregateSpec(
-                    input_relation=current,
-                    group_by=group_fields,
-                    aggregations=tuple(specs),
-                ),
-                output_relation=output_relation,
+            builder.fields_by_relation[output_relation] = tuple(
+                RelationField(field_id, (FieldBindingRole.OUTPUT,))
+                for field_id in (
+                    *group_fields,
+                    *(aggregate_fields[ref] for ref, _ in scoped_aggregates),
+                )
             )
-        )
-        builder.fields_by_relation[output_relation] = tuple(
-            RelationField(
-                field_id=field_id,
-                roles=(FieldBindingRole.OUTPUT,),
-            )
-            for field_id in (*group_fields, *aggregate_fields.values())
-        )
-        if not group_fields:
-            builder.scalar_aggregate_outputs.update(
-                {
-                    ref: NodeOutputRef(aggregate_operation_id, output_field)
-                    for ref, output_field in aggregate_fields.items()
-                }
-            )
-        current = output_relation
+            builder.grain_by_relation[output_relation] = group_fields
+            if not group_fields:
+                builder.scalar_aggregate_outputs.update(
+                    {
+                        ref: NodeOutputRef(operation_id, aggregate_fields[ref])
+                        for ref, _ in scoped_aggregates
+                    }
+                )
+            aggregate_relations.append(output_relation)
+        current = aggregate_relations[0]
     result_value_refs = tuple(
         dict.fromkeys(
             (
@@ -1202,15 +2006,46 @@ def _compile_result(
         aggregate_fields=aggregate_fields,
         label="result_values",
     )
+    if isinstance(index.result_grain, SubjectRows):
+        keys = _subject_grain_fields(builder, index=index)
+        retained = tuple(
+            dict.fromkeys(
+                field
+                for ref in result_value_refs
+                for field in _result_key_fields(
+                    builder, ref, aggregate_fields=aggregate_fields
+                )
+            )
+        )
+        output_relation = f"{index.requested_fact_id}.subject_rows"
+        builder.operations.append(
+            Operation(
+                id=f"{output_relation}.operation",
+                output_relation=output_relation,
+                spec=ProjectToKeySpec(
+                    current,
+                    keys,
+                    tuple(field for field in retained if field not in keys),
+                ),
+            )
+        )
+        builder.fields_by_relation[output_relation] = tuple(
+            item
+            for item in builder.fields_by_relation[current]
+            if item.field_id in {*keys, *retained}
+        )
+        builder.grain_by_relation[output_relation] = keys
+        current = output_relation
     if requested_fact.distinct_by:
         output_relation = f"{index.requested_fact_id}.distinct"
         key_fields = tuple(
-            _result_field(
+            field
+            for local_id in requested_fact.distinct_by
+            for field in _result_key_fields(
                 builder,
                 _semantic_ref(index, local_id),
                 aggregate_fields=aggregate_fields,
             )
-            for local_id in requested_fact.distinct_by
         )
         builder.operations.append(
             Operation(
@@ -1328,6 +2163,9 @@ def _compile_scalar_result_expression(
     aggregate = builder.scalar_aggregate_outputs.get(ref)
     if aggregate is not None:
         return aggregate
+    relational = builder.relational_values.get((_representative_branch(builder), ref))
+    if relational is not None and relational.key_set_ref is None:
+        return NodeOutputRef(relational.operation_id, relational.value_field)
     node = builder.verified.request.index.expression_by_ref.get(ref)
     if node is None:
         raise ValueError("scalar result references a non-scalar semantic value")
@@ -1340,28 +2178,8 @@ def _compile_scalar_result_expression(
             _semantic_ref(builder.verified.request.index, local_id),
         )
 
-    if isinstance(node, Arithmetic):
-        arguments = tuple(value(item) for item in node.argument_refs)
-        return _arithmetic_expression(node.operator, arguments)
-    if isinstance(node, Comparison):
-        return _compile_comparison(
-            builder,
-            node,
-            value=value,
-        )
-    if isinstance(node, BooleanComposition):
-        arguments = tuple(value(item) for item in node.argument_refs)
-        if node.operator is BooleanCompositionOperator.NOT:
-            return UnaryExpression(ExpressionUnaryOperator.NOT, arguments[0])
-        operator = ExpressionBinaryOperator(node.operator.value)
-        current = arguments[0]
-        for argument in arguments[1:]:
-            current = BinaryExpression(operator, current, argument)
-        return current
-    if isinstance(node, NullCheck):
-        return UnaryExpression(node.operator, value(node.argument_ref))
-    raise ValueError(
-        f"semantic node {type(node).__name__} is not a scalar result computation"
+    return _compile_node(
+        builder, node, branch_id=_representative_branch(builder), value_resolver=value
     )
 
 
@@ -1388,10 +2206,13 @@ def _compile_node(
     node: ExpressionNode,
     *,
     branch_id: str,
+    value_resolver: Callable[[str], Expression] | None = None,
 ) -> Expression:
     index = builder.verified.request.index
 
     def value(ref: str) -> Expression:
+        if value_resolver is not None:
+            return value_resolver(ref)
         if ref in builder.inputs.expressions_by_input_ref:
             return builder.inputs.expression_for_question_input(ref)
         return _compile_semantic_ref(
@@ -1421,81 +2242,780 @@ def _compile_node(
     if isinstance(node, NullCheck):
         return UnaryExpression(node.operator, value(node.argument_ref))
     if isinstance(node, TemporalBucket):
-        return FunctionExpression(
-            ExpressionFunction.TEMPORAL_BUCKET,
-            (
-                value(node.value_ref),
-                ConstantRef(
-                    constant_id=f"temporal_grain.{node.id}",
-                    version_ref="semantic-question-contract@1",
-                    value=FactValue.literal(
-                        id=f"temporal_grain.{node.id}",
-                        literal_type=LiteralType.STRING,
-                        value=node.grain.value,
-                    ),
-                ),
-                EnvironmentRef(key=ANCHOR_TIMEZONE_REF),
-            ),
+        return _temporal_bucket_expression(
+            value(node.value_ref),
+            grain=node.grain.value,
+            constant_id=f"temporal_grain.{node.id}",
         )
-    if isinstance(node, Quantify):
-        return _compile_co_resident_exists(
-            builder,
-            node,
-            branch_id=branch_id,
+    if isinstance(node, (Aggregate, Quantify, RelatedRow, Coverage)):
+        value_binding = _lower_relational_value(
+            builder, index.fact_local_ref_by_local_id[node.id], branch_id=branch_id
         )
+        if value_binding.key_set_ref is None:
+            return NodeOutputRef(value_binding.operation_id, value_binding.value_field)
+        return FieldRef(value_binding.value_field)
     raise ValueError(
         f"semantic node {type(node).__name__} requires relational lowering"
     )
 
 
-def _compile_co_resident_exists(
+
+def _connected_occurrences(
     builder: _ProgramBuilder,
-    node: Quantify,
+    branch_id: str,
+    set_refs: Collection[str],
+    *,
+    association_refs: tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    scope = builder.occurrence_scopes[branch_id]
+    needed = {scope.for_set(ref).id for ref in set_refs}
+    if not needed:
+        raise ValueError("relational scope requires a row domain")
+    ordered = [item.id for item in scope.occurrences if item.id in needed]
+    connected = {ordered[0]}
+    allowed = None if association_refs is None else set(association_refs)
+    links = tuple(
+        link
+        for link in scope.links
+        if allowed is None or link.association_ref in allowed
+    )
+    for target in ordered[1:]:
+        queue: list[tuple[str, tuple[str, ...]]] = [(start, ()) for start in connected]
+        visited = set(connected)
+        path = None
+        while queue:
+            current, prefix = queue.pop(0)
+            if current == target:
+                path = prefix
+                break
+            for link in links:
+                other = (
+                    link.right_occurrence
+                    if link.left_occurrence == current
+                    else link.left_occurrence
+                    if link.right_occurrence == current
+                    else None
+                )
+                if other is not None and other not in visited:
+                    visited.add(other)
+                    queue.append((other, (*prefix, other)))
+        if path is None:
+            raise ValueError("logical row domains lack a declared association path")
+        connected.update(path)
+    return tuple(item.id for item in scope.occurrences if item.id in connected)
+
+
+def _set_scope_keys(
+    builder: _ProgramBuilder, set_ref: str, branch_id: str
+) -> tuple[str, ...]:
+    values = builder.verified.binding_plan.set_bindings[set_ref]
+    realized = next(value for value in values if value.branch_id == branch_id)
+    if realized.identity_ref is None:
+        return (
+            _occurrence_row_key(
+                builder.occurrence_scopes[branch_id].for_set(set_ref).id
+            ),
+        )
+    return tuple(
+        component.field_id
+        for component in _identity_projection_components(
+            builder,
+            source_ref=realized.source_ref,
+            identity_ref=realized.identity_ref,
+            logical_ref=set_ref,
+            branch_id=branch_id,
+        )
+    )
+
+
+def _attach_relational_values(
+    builder: _ProgramBuilder,
+    relation_id: str,
+    ref: FactLocalRef | str,
     *,
     branch_id: str,
-) -> Expression:
-    """Reduce a proved subject-grain co-resident EXISTS to its row condition."""
+) -> str:
+    if isinstance(ref, str):
+        return relation_id
+    index = builder.verified.request.index
+    node = index.expression_by_ref.get(ref)
+    if isinstance(node, Aggregate) and not isinstance(
+        index.evaluation_domain_by_ref[ref], RowDomain
+    ):
+        return relation_id
+    if isinstance(node, Quantify) and not relational_free_sets(index, node):
+        # Global results are lowered after every qualifying branch is available.
+        return relation_id
+    if isinstance(node, (Aggregate, Quantify, RelatedRow, Coverage)):
+        value = _lower_relational_value(builder, ref, branch_id=branch_id)
+        if value.key_set_ref is None:
+            return relation_id
+        cache_key = (relation_id, value.relation_id)
+        if cache_key in builder.attached_values:
+            return builder.attached_values[cache_key]
+        output = f"{relation_id}.with_{ref.local_id}"
+        builder.operations.append(
+            Operation(
+                id=f"{output}.operation",
+                output_relation=output,
+                spec=JoinSpec(
+                    relation_id,
+                    value.relation_id,
+                    tuple(JoinKey(key, key) for key in value.key_fields),
+                    JoinMode.LEFT,
+                ),
+            )
+        )
+        builder.fields_by_relation[output] = tuple(
+            dict.fromkeys(
+                (
+                    *builder.fields_by_relation[relation_id],
+                    *builder.fields_by_relation[value.relation_id],
+                )
+            )
+        )
+        builder.grain_by_relation[output] = builder.grain_by_relation[relation_id]
+        builder.attached_values[cache_key] = output
+        return output
+    for child in sorted(index.direct_dependencies_by_ref.get(ref, ()), key=str):
+        relation_id = _attach_relational_values(
+            builder, relation_id, child, branch_id=branch_id
+        )
+    return relation_id
 
-    if node.quantifier is not Quantifier.EXISTS or not node.association_refs:
-        raise ValueError("quantifier requires relational lowering")
-    plan = builder.verified.binding_plan
-    association_sources: set[str] | None = None
-    for association_ref in node.association_refs:
-        token = FactLocalRef(
-            builder.verified.request.index.requested_fact_id,
-            FactLocalKind.ASSOCIATION,
-            association_ref,
-        ).token
-        realizations = tuple(
-            item
-            for item in plan.association_bindings.get(token, ())
-            if item.branch_id == branch_id
+
+def _quantifier_aggregation(node: Quantify | RelatedRow) -> AggregationFunction:
+    return (AggregationFunction.BOOL_ALL
+            if isinstance(node, Quantify) and node.quantifier is Quantifier.FORALL
+            else AggregationFunction.BOOL_ANY)
+
+
+def _lower_global_quantifier(builder: _ProgramBuilder, ref: FactLocalRef, node: Quantify) -> RelationalValue:
+    """Fold Boolean observations over all qualifying branches, including empty ones."""
+    index = builder.verified.request.index
+    base = f"{index.requested_fact_id}.{ref.local_id}.global"
+    condition_field, presence_field = f"{base}.condition", f"{base}.present"
+    over_ref = index.fact_local_ref_by_local_id[node.over_set_ref].token
+    associations = tuple(index.fact_local_ref_by_local_id[item].token for item in node.association_refs)
+    sets = {over_ref}
+    for association in associations:
+        sets.update(value_set_dependencies(index, FactLocalRef.from_token(association)))
+    condition_ref = None if node.condition_ref is None else _semantic_ref(index, node.condition_ref)
+    if condition_ref is not None:
+        sets.update(value_set_dependencies(index, condition_ref))
+    projections = []
+    for branch in builder.verified.request.strategy.branches:
+        root = builder.qualified_branches[branch.branch_id]
+        root_fields = {item.field_id for item in builder.fields_by_relation[root]}
+        scope = builder.occurrence_scopes[branch.branch_id]
+        occurrences = _connected_occurrences(builder, branch.branch_id, sets, association_refs=associations or None)
+        initial = tuple(item.id for item in scope.occurrences if item.id in occurrences and all(
+            set(_set_scope_keys(builder, set_ref, branch.branch_id)) <= root_fields for set_ref in item.set_refs
+        ))
+        domain = _compile_relational_scope(builder, branch_id=branch.branch_id, occurrence_refs=occurrences,
+            association_refs=associations or None, label=f"{ref.local_id}.qualified_domain",
+            initial_relation=root if initial else None, initial_occurrences=initial)
+        presence = _combine_boolean_expressions(tuple(
+            UnaryExpression(ExpressionUnaryOperator.NOT_NULL, FieldRef(key))
+            for key in _set_scope_keys(builder, over_ref, branch.branch_id)
+        ), operator=ExpressionBinaryOperator.AND)
+        if condition_ref is None:
+            condition = presence
+        else:
+            domain = _attach_relational_values(builder, domain, condition_ref, branch_id=branch.branch_id)
+            condition = _compile_scoped_condition(builder, condition_ref, branch_id=branch.branch_id,
+                owner_expression_ref=ref.token, use_site=BooleanRequirementUseSite.QUANTIFIER_CONDITION)
+        projected = f"{base}.{branch.branch_id}.observations"
+        builder.operations.append(Operation(id=f"{projected}.operation", output_relation=projected,
+            spec=ProjectSpec(domain, (NamedExpression(condition_field, condition), NamedExpression(presence_field, presence)))))
+        builder.fields_by_relation[projected] = (
+            RelationField(condition_field, (FieldBindingRole.PREDICATE,)),
+            RelationField(presence_field, (FieldBindingRole.PREDICATE,)),
         )
-        if len(realizations) != 1 or (
-            realizations[0].kind is not AssociationRealizationKind.CO_RESIDENT
-        ):
-            raise ValueError("quantifier requires relational lowering")
-        sources = set(realizations[0].source_refs)
-        association_sources = (
-            sources
-            if association_sources is None
-            else association_sources.intersection(sources)
+        builder.grain_by_relation[projected] = ()
+        if not initial:
+            _declare_independent_population_guarantee(builder, projected)
+        projections.append(projected)
+    domain = projections[0]
+    if len(projections) > 1:
+        domain = f"{base}.observations"
+        # ANY and ALL are idempotent: overlapping branches do not need row deduplication.
+        builder.operations.append(Operation(id=f"{domain}.operation", output_relation=domain,
+            spec=UnionSpec(tuple(projections), (condition_field, presence_field))))
+        builder.fields_by_relation[domain] = builder.fields_by_relation[projections[0]]
+        builder.grain_by_relation[domain] = ()
+    quantified = f"{base}.quantified"
+    result_field = f"{base}.truth"
+    operation_id = f"{quantified}.operation"
+    function = _quantifier_aggregation(node)
+    builder.operations.append(Operation(id=operation_id, output_relation=quantified,
+        spec=AggregateSpec(domain, (), (AggregationSpec(function, result_field, condition_field, filter=FieldRef(presence_field)),))))
+    builder.fields_by_relation[quantified] = (RelationField(result_field, (FieldBindingRole.OUTPUT,)),)
+    builder.grain_by_relation[quantified] = ()
+    if node.quantifier is Quantifier.NOT_EXISTS:
+        scalar = f"{base}.not_exists"
+        builder.operations.append(Operation(id=scalar, spec=ComputeSpec(
+            UnaryExpression(ExpressionUnaryOperator.NOT, NodeOutputRef(operation_id, result_field)), scalar)))
+        operation_id = result_field = scalar
+    return RelationalValue(quantified, None, (), result_field, operation_id)
+
+
+def _lower_relational_value(
+    builder: _ProgramBuilder, ref: FactLocalRef, *, branch_id: str
+) -> RelationalValue:
+    index = builder.verified.request.index
+    node = index.expression_by_ref[ref]
+    if (isinstance(node, Quantify)
+            and not relational_free_sets(index, node)
+            and len(builder.qualified_branches) == len(builder.verified.request.strategy.branches)):
+        if ref not in builder.global_relational_values:
+            builder.global_relational_values[ref] = _lower_global_quantifier(builder, ref, node)
+        return builder.global_relational_values[ref]
+    cached = builder.relational_values.get((branch_id, ref))
+    if cached is not None:
+        return cached
+    index = builder.verified.request.index
+    node = index.expression_by_ref[ref]
+    if isinstance(node, Aggregate):
+        return _lower_correlated_aggregate(builder, ref, node, branch_id=branch_id)
+    if isinstance(node, Coverage):
+        return _lower_coverage_value(builder, ref, node, branch_id=branch_id)
+    assert isinstance(node, (Quantify, RelatedRow))
+    over = node.over_set_ref if isinstance(node, Quantify) else node.set_ref
+    free_sets = relational_free_sets(builder.verified.request.index, node)
+    if len(free_sets) > 1:
+        raise ValueError(
+            "relational value requires a declared single outer candidate scope"
         )
-    subject_ref = builder.verified.request.index.subject_obligation.subject_set_ref.token
-    subject_is_identified_at_association_grain = any(
-        realization.branch_id == branch_id
-        and realization.source_ref in (association_sources or set())
-        and realization.identity_ref is not None
-        and bool(realization.identity_field_refs)
-        for realization in plan.set_bindings.get(subject_ref, ())
+    outer = next(iter(free_sets), None)
+    sets = {*free_sets, index.fact_local_ref_by_local_id[over].token}
+    associations = tuple(
+        index.fact_local_ref_by_local_id[item].token for item in node.association_refs
     )
-    if not subject_is_identified_at_association_grain:
-        raise ValueError("co-resident quantifier lacks complete subject grain")
-    return _compile_semantic_ref(
+    for association in associations:
+        sets.update(
+            value_set_dependencies(builder.verified.request.index, FactLocalRef.from_token(association))
+        )
+    if node.condition_ref is not None:
+        sets.update(
+            value_set_dependencies(builder.verified.request.index, _semantic_ref(index, node.condition_ref))
+        )
+    occurrence_refs = _connected_occurrences(
+        builder, branch_id, sets, association_refs=associations or None
+    )
+    if outer is not None:
+        outer_occurrence = builder.occurrence_scopes[branch_id].for_set(outer).id
+        occurrence_refs = (
+            outer_occurrence,
+            *(item for item in occurrence_refs if item != outer_occurrence),
+        )
+    domain = _compile_relational_scope(
         builder,
-        _semantic_ref(builder.verified.request.index, node.condition_ref),
         branch_id=branch_id,
+        occurrence_refs=occurrence_refs,
+        association_refs=associations or None,
+        label=f"{ref.local_id}.domain",
     )
+    over_ref = index.fact_local_ref_by_local_id[over].token
+    presence_keys = _set_scope_keys(builder, over_ref, branch_id)
+    presence = _combine_boolean_expressions(
+        tuple(
+            UnaryExpression(ExpressionUnaryOperator.NOT_NULL, FieldRef(key))
+            for key in presence_keys
+        ),
+        operator=ExpressionBinaryOperator.AND,
+    )
+    if node.condition_ref is None:
+        condition = presence
+    else:
+        condition_ref = _semantic_ref(index, node.condition_ref)
+        domain = _attach_relational_values(
+            builder, domain, condition_ref, branch_id=branch_id
+        )
+        condition = _compile_scoped_condition(
+            builder,
+            condition_ref,
+            branch_id=branch_id,
+            owner_expression_ref=ref.token,
+            use_site=BooleanRequirementUseSite.QUANTIFIER_CONDITION,
+        )
+    base = f"{index.requested_fact_id}.{branch_id}.{ref.local_id}"
+    condition_field = f"{base}.condition"
+    projected = f"{base}.values"
+    builder.operations.append(
+        Operation(
+            id=f"{projected}.operation",
+            output_relation=projected,
+            spec=ProjectSpec(
+                domain,
+                (
+                    *tuple(
+                        NamedExpression(f.field_id, FieldRef(f.field_id))
+                        for f in builder.fields_by_relation[domain]
+                    ),
+                    NamedExpression(condition_field, condition),
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[projected] = (
+        *builder.fields_by_relation[domain],
+        RelationField(condition_field, (FieldBindingRole.PREDICATE,)),
+    )
+    builder.grain_by_relation[projected] = builder.grain_by_relation[domain]
+    keys = () if outer is None else _set_scope_keys(builder, outer, branch_id)
+    quantified = f"{base}.quantified"
+    result_field = f"{base}.truth"
+    function = _quantifier_aggregation(node)
+    builder.operations.append(
+        Operation(
+            id=f"{quantified}.operation",
+            output_relation=quantified,
+            spec=AggregateSpec(
+                projected,
+                keys,
+                (
+                    AggregationSpec(
+                        function, result_field, condition_field, filter=presence
+                    ),
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[quantified] = (
+        *tuple(f for f in builder.fields_by_relation[projected] if f.field_id in keys),
+        RelationField(
+            result_field, (FieldBindingRole.OUTPUT, FieldBindingRole.PREDICATE)
+        ),
+    )
+    builder.grain_by_relation[quantified] = keys
+    operation_id = f"{quantified}.operation"
+    if isinstance(node, Quantify) and node.quantifier is Quantifier.NOT_EXISTS:
+        negated = f"{base}.not_exists"
+        builder.operations.append(
+            Operation(
+                id=f"{negated}.operation",
+                output_relation=negated,
+                spec=ProjectSpec(
+                    quantified,
+                    (
+                        *tuple(NamedExpression(key, FieldRef(key)) for key in keys),
+                        NamedExpression(
+                            result_field,
+                            UnaryExpression(
+                                ExpressionUnaryOperator.NOT, FieldRef(result_field)
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+        builder.fields_by_relation[negated] = builder.fields_by_relation[quantified]
+        builder.grain_by_relation[negated] = keys
+        quantified = negated
+        if not keys:
+            scalar_id = f"{base}.scalar"
+            builder.operations.append(
+                Operation(
+                    id=scalar_id,
+                    spec=ComputeSpec(
+                        UnaryExpression(
+                            ExpressionUnaryOperator.NOT,
+                            NodeOutputRef(operation_id, result_field),
+                        ),
+                        f"{base}.scalar_truth",
+                    ),
+                )
+            )
+            operation_id = scalar_id
+            result_field = f"{base}.scalar_truth"
+    value = RelationalValue(quantified, outer, keys, result_field, operation_id)
+    builder.relational_values[branch_id, ref] = value
+    return value
+
+
+def _lower_correlated_aggregate(
+    builder: _ProgramBuilder,
+    ref: FactLocalRef,
+    node: Aggregate,
+    *,
+    branch_id: str,
+) -> RelationalValue:
+    index = builder.verified.request.index
+    domain = index.evaluation_domain_by_ref[ref]
+    if not isinstance(domain, RowDomain):
+        raise ValueError("aggregate requires its declared row or result scope")
+    outer = domain.owner_ref.token
+    argument = _semantic_ref(index, node.argument_ref)
+    sets = {outer, *value_set_dependencies(builder.verified.request.index, argument)}
+    if node.filter_ref is not None:
+        sets.update(
+            value_set_dependencies(builder.verified.request.index, _semantic_ref(index, node.filter_ref))
+        )
+    occurrences = _connected_occurrences(builder, branch_id, sets)
+    first = builder.occurrence_scopes[branch_id].for_set(outer).id
+    occurrences = (first, *(item for item in occurrences if item != first))
+    base = f"{index.requested_fact_id}.{branch_id}.{ref.local_id}"
+    relation = _compile_relational_scope(
+        builder,
+        branch_id=branch_id,
+        occurrence_refs=occurrences,
+        label=f"{ref.local_id}.domain",
+    )
+    relation = _attach_relational_values(
+        builder, relation, argument, branch_id=branch_id
+    )
+    if node.filter_ref is not None:
+        relation = _attach_relational_values(
+            builder,
+            relation,
+            _semantic_ref(index, node.filter_ref),
+            branch_id=branch_id,
+        )
+    input_field = ""
+    if argument.kind is not FactLocalKind.SET:
+        input_field = f"{base}.argument"
+        projected = f"{base}.values"
+        builder.operations.append(
+            Operation(
+                id=f"{projected}.operation",
+                output_relation=projected,
+                spec=ProjectSpec(
+                    relation,
+                    (
+                        *tuple(
+                            NamedExpression(item.field_id, FieldRef(item.field_id))
+                            for item in builder.fields_by_relation[relation]
+                        ),
+                        NamedExpression(
+                            input_field,
+                            _compile_semantic_ref(
+                                builder, argument, branch_id=branch_id
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+        builder.fields_by_relation[projected] = (
+            *builder.fields_by_relation[relation],
+            RelationField(input_field, (FieldBindingRole.OUTPUT,)),
+        )
+        builder.grain_by_relation[projected] = builder.grain_by_relation[relation]
+        relation = projected
+    keys = _set_scope_keys(builder, outer, branch_id)
+    output = f"{base}.aggregate"
+    value_field = f"{base}.value"
+    operation_id = f"{output}.operation"
+    builder.operations.append(
+        Operation(
+            id=operation_id,
+            output_relation=output,
+            spec=AggregateSpec(
+                relation,
+                keys,
+                (
+                    AggregationSpec(
+                        _aggregation_function(node),
+                        value_field,
+                        input_field,
+                        filter=None
+                        if node.filter_ref is None
+                        else _compile_aggregate_filter(
+                            builder,
+                            index=index,
+                            aggregate_ref=ref,
+                            filter_ref=node.filter_ref,
+                            branch_id=branch_id,
+                            qualification_applied=False,
+                        ),
+                        distinct_argument=node.distinct_argument,
+                        grain_fields=_aggregate_grain_fields(
+                            builder, argument, branch_id=branch_id
+                        ),
+                    ),
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[output] = (
+        *tuple(
+            item
+            for item in builder.fields_by_relation[relation]
+            if item.field_id in keys
+        ),
+        RelationField(
+            value_field, (FieldBindingRole.OUTPUT, FieldBindingRole.PREDICATE)
+        ),
+    )
+    builder.grain_by_relation[output] = keys
+    result = RelationalValue(output, outer, keys, value_field, operation_id)
+    builder.relational_values[branch_id, ref] = result
+    return result
+
+
+def _aggregation_function(node: Aggregate) -> AggregationFunction:
+    return {
+        "sum": AggregationFunction.SUM,
+        "count": AggregationFunction.COUNT,
+        "minimum": AggregationFunction.MIN,
+        "maximum": AggregationFunction.MAX,
+        "average": AggregationFunction.AVG,
+    }[node.function.value]
+
+
+def _lower_coverage_value(
+    builder: _ProgramBuilder, ref: FactLocalRef, node: Coverage, *, branch_id: str
+) -> RelationalValue:
+    """For each candidate, every required member has some qualifying observation."""
+    index = builder.verified.request.index
+    scope = builder.occurrence_scopes[branch_id]
+    candidate_ref, required_ref, observation_ref = (
+        index.fact_local_ref_by_local_id[item].token
+        for item in (
+            node.candidate_set_ref,
+            node.required_dimension_set_ref,
+            node.observation_set_ref,
+        )
+    )
+    candidate_occurrence = scope.for_set(candidate_ref).id
+    required_occurrence = scope.for_set(required_ref).id
+    if candidate_occurrence == required_occurrence:
+        raise ValueError(
+            "coverage requires independent candidate and required populations"
+        )
+    candidate = builder.occurrence_relations[branch_id, candidate_occurrence]
+    required = builder.occurrence_relations[branch_id, required_occurrence]
+    base = f"{index.requested_fact_id}.{branch_id}.{ref.local_id}"
+    if node.required_member_condition_ref is not None:
+        condition_ref = _semantic_ref(index, node.required_member_condition_ref)
+        required = _attach_relational_values(
+            builder, required, condition_ref, branch_id=branch_id
+        )
+        filtered = f"{base}.required"
+        builder.operations.append(
+            Operation(
+                id=f"{filtered}.operation",
+                output_relation=filtered,
+                spec=FilterSpec(
+                    required,
+                    _compile_scoped_condition(
+                        builder,
+                        condition_ref,
+                        branch_id=branch_id,
+                        owner_expression_ref=ref.token,
+                        use_site=BooleanRequirementUseSite.COVERAGE_REQUIRED_MEMBER,
+                    ),
+                ),
+            )
+        )
+        builder.fields_by_relation[filtered] = builder.fields_by_relation[required]
+        builder.grain_by_relation[filtered] = builder.grain_by_relation[required]
+        required = filtered
+    pairs = f"{base}.pairs"
+    builder.operations.append(
+        Operation(
+            id=f"{pairs}.operation",
+            output_relation=pairs,
+            spec=CrossJoinSpec(candidate, required),
+        )
+    )
+    builder.fields_by_relation[pairs] = (
+        *builder.fields_by_relation[candidate],
+        *builder.fields_by_relation[required],
+    )
+    builder.grain_by_relation[pairs] = (
+        *builder.grain_by_relation[candidate],
+        *builder.grain_by_relation[required],
+    )
+    associations = tuple(
+        index.fact_local_ref_by_local_id[item].token
+        for item in (
+            *node.candidate_observation_association_refs,
+            *node.dimension_observation_association_refs,
+        )
+    )
+    sets = {candidate_ref, required_ref, observation_ref}
+    for association in associations:
+        sets.update(
+            value_set_dependencies(builder.verified.request.index, FactLocalRef.from_token(association))
+        )
+    occurrences = _connected_occurrences(
+        builder, branch_id, sets, association_refs=associations
+    )
+    domain = _compile_relational_scope(
+        builder,
+        branch_id=branch_id,
+        occurrence_refs=occurrences,
+        association_refs=associations,
+        label=f"{ref.local_id}.observations",
+        initial_relation=pairs,
+        initial_occurrences=(candidate_occurrence, required_occurrence),
+    )
+    condition_ref = _semantic_ref(index, node.condition_ref)
+    domain = _attach_relational_values(
+        builder, domain, condition_ref, branch_id=branch_id
+    )
+    condition_field = f"{base}.condition"
+    values = f"{base}.values"
+    builder.operations.append(
+        Operation(
+            id=f"{values}.operation",
+            output_relation=values,
+            spec=ProjectSpec(
+                domain,
+                (
+                    *tuple(
+                        NamedExpression(item.field_id, FieldRef(item.field_id))
+                        for item in builder.fields_by_relation[domain]
+                    ),
+                    NamedExpression(
+                        condition_field,
+                        _compile_scoped_condition(
+                            builder,
+                            condition_ref,
+                            branch_id=branch_id,
+                            owner_expression_ref=ref.token,
+                            use_site=BooleanRequirementUseSite.COVERAGE_CONDITION,
+                        ),
+                    ),
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[values] = (
+        *builder.fields_by_relation[domain],
+        RelationField(condition_field, (FieldBindingRole.PREDICATE,)),
+    )
+    builder.grain_by_relation[values] = builder.grain_by_relation[domain]
+    candidate_keys = _set_scope_keys(builder, candidate_ref, branch_id)
+    required_keys = _set_scope_keys(builder, required_ref, branch_id)
+    presence = _combine_boolean_expressions(
+        tuple(
+            UnaryExpression(ExpressionUnaryOperator.NOT_NULL, FieldRef(key))
+            for key in _set_scope_keys(builder, observation_ref, branch_id)
+        ),
+        operator=ExpressionBinaryOperator.AND,
+    )
+    pair_truth = f"{base}.pair_truth"
+    pair_field = f"{base}.has_observation"
+    pair_keys = (*candidate_keys, *required_keys)
+    builder.operations.append(
+        Operation(
+            id=f"{pair_truth}.operation",
+            output_relation=pair_truth,
+            spec=AggregateSpec(
+                values,
+                pair_keys,
+                (
+                    AggregationSpec(
+                        AggregationFunction.BOOL_ANY,
+                        pair_field,
+                        condition_field,
+                        filter=presence,
+                    ),
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[pair_truth] = (
+        *tuple(
+            item
+            for item in builder.fields_by_relation[values]
+            if item.field_id in pair_keys
+        ),
+        RelationField(pair_field, (FieldBindingRole.OUTPUT,)),
+    )
+    builder.grain_by_relation[pair_truth] = pair_keys
+    all_truth = f"{base}.all_truth"
+    truth_field = f"{base}.truth"
+    count_field = f"{base}.required_count"
+    builder.operations.append(
+        Operation(
+            id=f"{all_truth}.operation",
+            output_relation=all_truth,
+            spec=AggregateSpec(
+                pair_truth,
+                candidate_keys,
+                (
+                    AggregationSpec(
+                        AggregationFunction.BOOL_ALL, truth_field, pair_field
+                    ),
+                    AggregationSpec(AggregationFunction.COUNT, count_field),
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[all_truth] = (
+        *tuple(
+            item
+            for item in builder.fields_by_relation[pair_truth]
+            if item.field_id in candidate_keys
+        ),
+        RelationField(truth_field, (FieldBindingRole.OUTPUT,)),
+        RelationField(count_field, (FieldBindingRole.OUTPUT,)),
+    )
+    builder.grain_by_relation[all_truth] = candidate_keys
+    joined = f"{base}.candidates"
+    builder.operations.append(
+        Operation(
+            id=f"{joined}.operation",
+            output_relation=joined,
+            spec=JoinSpec(
+                candidate,
+                all_truth,
+                tuple(JoinKey(key, key) for key in candidate_keys),
+                JoinMode.LEFT,
+            ),
+        )
+    )
+    builder.fields_by_relation[joined] = tuple(
+        dict.fromkeys(
+            (
+                *builder.fields_by_relation[candidate],
+                *builder.fields_by_relation[all_truth],
+            )
+        )
+    )
+    builder.grain_by_relation[joined] = builder.grain_by_relation[candidate]
+    output = f"{base}.result"
+    # An absent grouped result means no required members. A present unknown truth stays unknown.
+    expression = BinaryExpression(
+        ExpressionBinaryOperator.OR,
+        UnaryExpression(ExpressionUnaryOperator.IS_NULL, FieldRef(count_field)),
+        FieldRef(truth_field),
+    )
+    builder.operations.append(
+        Operation(
+            id=f"{output}.operation",
+            output_relation=output,
+            spec=ProjectSpec(
+                joined,
+                (
+                    *tuple(
+                        NamedExpression(key, FieldRef(key)) for key in candidate_keys
+                    ),
+                    NamedExpression(truth_field, expression),
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[output] = (
+        *tuple(
+            item
+            for item in builder.fields_by_relation[candidate]
+            if item.field_id in candidate_keys
+        ),
+        RelationField(
+            truth_field, (FieldBindingRole.OUTPUT, FieldBindingRole.PREDICATE)
+        ),
+    )
+    builder.grain_by_relation[output] = candidate_keys
+    result = RelationalValue(
+        output, candidate_ref, candidate_keys, truth_field, f"{output}.operation"
+    )
+    builder.relational_values[branch_id, ref] = result
+    return result
 
 
 def _arithmetic_expression(
@@ -1511,6 +3031,29 @@ def _arithmetic_expression(
     return BinaryExpression(operator, arguments[0], arguments[1])
 
 
+def _temporal_bucket_expression(
+    value: Expression,
+    *,
+    grain: str,
+    constant_id: str,
+    timezone_ref: str = ANCHOR_TIMEZONE_REF,
+) -> FunctionExpression:
+    return FunctionExpression(
+        ExpressionFunction.TEMPORAL_BUCKET,
+        (
+            value,
+            ConstantRef(
+                constant_id=constant_id,
+                version_ref="semantic-question-contract@1",
+                value=FactValue.literal(
+                    id=constant_id, literal_type=LiteralType.STRING, value=grain
+                ),
+            ),
+            EnvironmentRef(key=timezone_ref),
+        ),
+    )
+
+
 def _compile_comparison(
     builder: _ProgramBuilder,
     node: Comparison,
@@ -1522,6 +3065,24 @@ def _compile_comparison(
             node.operator,
             value(node.left_ref),
             value(node.right_ref),
+        )
+    temporal_value = next(
+        (
+            item.typed_value.payload
+            for item in builder.verified.request.canonical_values
+            if item.input_ref == node.right_ref
+        ),
+        None,
+    )
+    if not isinstance(temporal_value, TimeValuePayload):
+        raise ValueError("within requires a certified temporal scope")
+    point = value(node.left_ref)
+    if temporal_value.granularity != "hour":
+        point = _temporal_bucket_expression(
+            point,
+            grain="day",
+            constant_id=f"within_day.{node.id}",
+            timezone_ref=temporal_value.timezone_ref,
         )
     lower_bound = builder.inputs.expression_for_question_input(
         node.right_ref,
@@ -1535,15 +3096,100 @@ def _compile_comparison(
         ExpressionBinaryOperator.AND,
         BinaryExpression(
             ExpressionBinaryOperator.GTE,
-            value(node.left_ref),
+            point,
             lower_bound,
         ),
         BinaryExpression(
             ExpressionBinaryOperator.LTE,
-            value(node.left_ref),
+            point,
             upper_bound,
         ),
     )
+
+
+def _occurrence_row_key(occurrence_ref: str) -> str:
+    return f"row_occurrence:{occurrence_ref}"
+
+
+def _source_needs_field_scope(builder: _ProgramBuilder, source_ref: str) -> bool:
+    return any(
+        scope.for_source(source_ref) and len(scope.occurrences) > 1
+        for scope in builder.occurrence_scopes.values()
+    )
+
+
+def _occurrence_for_ref(builder, source_ref, logical_ref, branch_id=None):
+    scopes = (
+        (builder.occurrence_scopes[branch_id],)
+        if branch_id is not None
+        else tuple(builder.occurrence_scopes.values())
+    )
+    ref = (
+        FactLocalRef.from_token(logical_ref)
+        if isinstance(logical_ref, str)
+        else logical_ref
+    )
+    index = builder.verified.request.index
+    if ref is not None and ref.kind is FactLocalKind.FACT:
+        term = index.term_by_ref[ref]
+        owner = (
+            term.value_type.set_ref
+            if isinstance(term.value_type, IdentifierType)
+            else term.owner_ref
+        )
+        ref = index.fact_local_ref_by_local_id[owner]
+    candidates = {}
+    for scope in scopes:
+        if ref is not None and ref.kind is FactLocalKind.SET:
+            occurrence = scope.for_set(ref.token)
+            if occurrence.source_ref == source_ref:
+                candidates[occurrence.id] = occurrence
+        elif ref is not None and ref.kind is FactLocalKind.ASSOCIATION:
+            link = next(
+                (link for link in scope.links if link.association_ref == ref.token),
+                None,
+            )
+            if link is not None:
+                matches = tuple(
+                    item
+                    for item in scope.for_source(source_ref)
+                    if item.id in {link.left_occurrence, link.right_occurrence}
+                )
+                if len(matches) > 1:
+                    matches = tuple(
+                        item for item in matches if item.id == link.left_occurrence
+                    )
+                candidates.update((item.id, item) for item in matches)
+            else:
+                term = index.term_by_ref[ref]
+                occurrence = scope.for_set(
+                    index.fact_local_ref_by_local_id[term.from_set_ref].token
+                )
+                if occurrence.source_ref == source_ref:
+                    candidates[occurrence.id] = occurrence
+        else:
+            candidates.update((item.id, item) for item in scope.for_source(source_ref))
+    if len(candidates) != 1:
+        raise ValueError("producer field requires an unambiguous logical occurrence")
+    return next(iter(candidates.values()))
+
+
+def _execution_field_id(
+    builder: _ProgramBuilder,
+    source_ref: str,
+    field_id: str,
+    *,
+    logical_ref=None,
+    branch_id=None,
+    occurrence_ref=None,
+) -> str:
+    if not _source_needs_field_scope(builder, source_ref):
+        return field_id
+    occurrence_id = (
+        occurrence_ref
+        or _occurrence_for_ref(builder, source_ref, logical_ref, branch_id).id
+    )
+    return f"source_field:{occurrence_id}:{field_id}"
 
 
 def _compiled_field(
@@ -1558,11 +3204,26 @@ def _compiled_field(
         raise ValueError("semantic scalar requires one realized source field")
     [realization] = matching
     source = builder.verified.request.source_catalog.source(realization.source_ref)
-    return next(
-        field.id
-        for field in source.fields
-        if field.field_ref == realization.field_refs[0]
+    return _execution_field_id(
+        builder,
+        source.id,
+        next(
+            field.id
+            for field in source.fields
+            if field.field_ref == realization.field_refs[0]
+        ),
+        logical_ref=ref,
+        branch_id=branch_id,
     )
+
+
+def _result_key_fields(
+    builder: _ProgramBuilder, ref, *, aggregate_fields
+) -> tuple[str, ...]:
+    identity = _result_entity_key(builder, ref)
+    if identity is not None:
+        return tuple(component.field_id for component in identity.components)
+    return (_result_field(builder, ref, aggregate_fields=aggregate_fields),)
 
 
 def _result_field(
@@ -1578,6 +3239,15 @@ def _result_field(
     if ref in builder.projected_fields:
         return builder.projected_fields[ref]
     return _compiled_field_all_branches(builder, ref)
+
+
+def _subject_grain_fields(
+    builder: _ProgramBuilder, *, index: RequestedFactSemanticIndex
+) -> tuple[str, ...]:
+    identity = _result_entity_key(builder, index.subject_obligation.subject_set_ref)
+    if identity is None:
+        raise ValueError("subject rows require a declared identity")
+    return tuple(component.field_id for component in identity.components)
 
 
 def _result_entity_key(
@@ -1598,26 +3268,35 @@ def _result_entity_key(
         realizations = builder.verified.binding_plan.fact_bindings.get(ref.token, ())
     else:
         return None
-    identity_refs = {item.identity_ref for item in realizations}
-    if None in identity_refs or len(identity_refs) != 1:
+    if not realizations or any(item.identity_ref is None for item in realizations):
         raise ValueError("identifier output requires one declared identity authority")
-    identity_ref = next(iter(identity_refs))
-    assert identity_ref is not None
-    evidence = builder.verified.request.source_catalog.identity(identity_ref)
-    projections = {
-        _identity_projection_components(
-            builder,
-            source_ref=item.source_ref,
-            identity_ref=item.identity_ref,
+    catalog = builder.verified.request.source_catalog
+    authorities = {
+        (
+            catalog.identity(item.identity_ref).entity_kind,
+            catalog.identity(item.identity_ref).key_id,
         )
         for item in realizations
+        if item.identity_ref is not None
     }
-    if len(projections) != 1:
-        raise ValueError("strategy branches expose incompatible identity components")
+    if len(authorities) != 1:
+        raise ValueError("identifier output requires one declared identity authority")
+    representative = next(
+        item
+        for item in realizations
+        if item.branch_id == _representative_branch(builder)
+    )
+    entity_kind, key_id = next(iter(authorities))
     return EntityKeyProjection(
-        entity_kind=evidence.entity_kind,
-        key_id=evidence.key_id,
-        components=next(iter(projections)),
+        entity_kind=entity_kind,
+        key_id=key_id,
+        components=_identity_projection_components(
+            builder,
+            source_ref=representative.source_ref,
+            identity_ref=representative.identity_ref,
+            logical_ref=ref,
+            branch_id=representative.branch_id,
+        ),
     )
 
 
@@ -1626,30 +3305,43 @@ def _identity_projection_components(
     *,
     source_ref: str,
     identity_ref: str | None,
+    logical_ref=None,
+    branch_id=None,
 ) -> tuple[EntityKeyProjectionComponent, ...]:
     if identity_ref is None:
         raise ValueError("identifier realization lacks identity authority")
     source = builder.verified.request.source_catalog.source(source_ref)
     evidence = builder.verified.request.source_catalog.identity(identity_ref)
+    if evidence.source_ref != source_ref:
+        raise ValueError("identity authority belongs to another source")
     candidate_key = next(
         (
             key
             for key in source.candidate_keys
-            if key.entity_kind == evidence.entity_kind and key.id == evidence.key_id
+            if identity_ref == f"source_identity:{source.id}:candidate_key:{key.id}"
         ),
         None,
     )
     if candidate_key is not None:
         return tuple(
-            EntityKeyProjectionComponent(component.id, component.field_id)
+            EntityKeyProjectionComponent(
+                component.id,
+                _execution_field_id(
+                    builder,
+                    source_ref,
+                    component.field_id,
+                    logical_ref=logical_ref,
+                    branch_id=branch_id,
+                ),
+            )
             for component in candidate_key.components
         )
     entity_reference = next(
         (
             reference
             for reference in source.entity_references
-            if reference.target_entity_kind == evidence.entity_kind
-            and reference.target_key_id == evidence.key_id
+            if identity_ref
+            == f"source_identity:{source.id}:entity_reference:{reference.id}"
         ),
         None,
     )
@@ -1658,7 +3350,13 @@ def _identity_projection_components(
     return tuple(
         EntityKeyProjectionComponent(
             component.target_component_id,
-            component.local_field_id,
+            _execution_field_id(
+                builder,
+                source_ref,
+                component.local_field_id,
+                logical_ref=logical_ref,
+                branch_id=branch_id,
+            ),
         )
         for component in entity_reference.components
     )
@@ -1717,6 +3415,9 @@ def _project_semantic_values(
         ),
     )
     builder.projected_fields.update(projected)
+    builder.grain_by_relation[output_relation] = builder.grain_by_relation[
+        input_relation
+    ]
     return output_relation
 
 
@@ -1742,45 +3443,8 @@ def _compile_relation_result_expression(
             aggregate_fields=aggregate_fields,
         )
 
-    if isinstance(node, Arithmetic):
-        arguments = tuple(value(item) for item in node.argument_refs)
-        return _arithmetic_expression(node.operator, arguments)
-    if isinstance(node, Comparison):
-        return _compile_comparison(
-            builder,
-            node,
-            value=value,
-        )
-    if isinstance(node, BooleanComposition):
-        arguments = tuple(value(item) for item in node.argument_refs)
-        if node.operator is BooleanCompositionOperator.NOT:
-            return UnaryExpression(ExpressionUnaryOperator.NOT, arguments[0])
-        operator = ExpressionBinaryOperator(node.operator.value)
-        current = arguments[0]
-        for argument in arguments[1:]:
-            current = BinaryExpression(operator, current, argument)
-        return current
-    if isinstance(node, NullCheck):
-        return UnaryExpression(node.operator, value(node.argument_ref))
-    if isinstance(node, TemporalBucket):
-        return FunctionExpression(
-            ExpressionFunction.TEMPORAL_BUCKET,
-            (
-                value(node.value_ref),
-                ConstantRef(
-                    constant_id=f"temporal_grain.{node.id}",
-                    version_ref="semantic-question-contract@1",
-                    value=FactValue.literal(
-                        id=f"temporal_grain.{node.id}",
-                        literal_type=LiteralType.STRING,
-                        value=node.grain.value,
-                    ),
-                ),
-                EnvironmentRef(key=ANCHOR_TIMEZONE_REF),
-            ),
-        )
-    raise ValueError(
-        f"semantic node {type(node).__name__} requires relational lowering"
+    return _compile_node(
+        builder, node, branch_id=_representative_branch(builder), value_resolver=value
     )
 
 
@@ -1803,7 +3467,7 @@ def _selection(builder: _ProgramBuilder, selection):
         )
         if not isinstance(expression, ParameterRef):
             raise ValueError("selection limit requires a parameter")
-        return Take(limit=expression)
+        return AtPosition(position=expression) if isinstance(selection, PositionWithTies) else Take(limit=expression)
     return KeepAll()
 
 
@@ -1818,13 +3482,7 @@ def _compiled_field_all_branches(
     builder: _ProgramBuilder,
     ref: FactLocalRef,
 ) -> str:
-    field_ids = {
-        _compiled_field(builder, ref, branch_id=branch.branch_id)
-        for branch in builder.verified.request.strategy.branches
-    }
-    if len(field_ids) != 1:
-        raise ValueError("strategy branches expose incompatible semantic fields")
-    return next(iter(field_ids))
+    return _compiled_field(builder, ref, branch_id=_representative_branch(builder))
 
 
 def _representative_branch(builder: _ProgramBuilder) -> str:

@@ -205,20 +205,9 @@ def _operation_relation(
     )
 
 
-def _project_grain(
-    input_relation: RelationRows,
-    fields: tuple[NamedExpression, ...],
-) -> tuple[str, ...]:
-    if not input_relation.grain_keys:
-        return ()
-    projections = {
-        field.expression.field_id: field.output_field
-        for field in fields
-        if isinstance(field.expression, FieldRef)
-    }
-    if not all(field in projections for field in input_relation.grain_keys):
-        return ()
-    return tuple(projections[field] for field in input_relation.grain_keys)
+def _project_grain(relation: RelationRows, outputs: tuple[NamedExpression, ...]) -> tuple[str, ...]:
+    from fervis.lookup.plan_execution.expression_schema import projected_grain
+    return projected_grain(relation.grain_keys, outputs)
 
 
 def _operation_proof_refs(
@@ -490,8 +479,13 @@ def _aggregate_value(
     rows: list[Row],
     field_types: dict[str, str],
     *,
+    empty_is_null: bool = False,
+    node_outputs: dict[str, dict[str, RuntimeValue]],
+    node_output_types: dict[str, dict[str, str]],
     scalars: dict[str, RuntimeValue],
     scalar_types: dict[str, str],
+    environment_values: dict[str, RuntimeValue],
+    environment_types: dict[str, str],
 ) -> RuntimeValue:
     if aggregation.filter is not None:
         rows = [
@@ -500,14 +494,40 @@ def _aggregate_value(
             if evaluate_condition(
                 aggregation.filter,
                 environment=ExpressionEnvironment(
+                    node_outputs=node_outputs, node_output_types=node_output_types,
                     row=row,
                     field_types=field_types,
                     scalars=scalars,
                     scalar_types=scalar_types,
+                environment_values=environment_values,
+                environment_types=environment_types,
                 ),
             )
         ]
+    if aggregation.grain_fields:
+        observations: dict[tuple[object, ...], Row] = {}
+        for row in rows:
+            identity = tuple(_field(row, field) for field in aggregation.grain_fields)
+            if any(value is None for value in identity):
+                continue
+            key = tuple(declared_key(value, field_types.get(field))
+                        for field, value in zip(aggregation.grain_fields, identity, strict=True))
+            previous = observations.get(key)
+            if previous is not None and aggregation.input_field and declared_key(
+                _field(previous, aggregation.input_field), field_types.get(aggregation.input_field)
+            ) != declared_key(_field(row, aggregation.input_field), field_types.get(aggregation.input_field)):
+                raise RelationEngineError("aggregate observation has conflicting values for one identity")
+            observations[key] = row
+        rows = list(observations.values())
     function = aggregation.function
+    if function in {AggregationFunction.BOOL_ANY, AggregationFunction.BOOL_ALL}:
+        truths = [_field(row, aggregation.input_field) for row in rows]
+        if any(value is not None and not isinstance(value, bool) for value in truths):
+            raise RelationEngineError("Boolean aggregation requires Boolean values")
+        decisive = function is AggregationFunction.BOOL_ANY
+        if any(value is decisive for value in truths):
+            return decisive
+        return None if any(value is None for value in truths) else not decisive
     if function == AggregationFunction.COUNT and not aggregation.input_field:
         return len(rows)
     values = [
@@ -527,6 +547,8 @@ def _aggregate_value(
     if not values:
         reason = empty_aggregation_undefined_reason(function)
         if reason is not None:
+            if empty_is_null:
+                return None
             raise UndefinedOperationError(
                 reason_code=reason,
                 input_refs=(aggregation.input_field,),
@@ -563,24 +585,6 @@ def _aggregate_value(
             else None
         )
     raise RelationEngineError(f"unsupported aggregation {function}")
-
-
-def _join_match(
-    left: Row,
-    right: Row,
-    join_keys: Iterable[JoinKey],
-    left_types: dict[str, str],
-    right_types: dict[str, str],
-) -> bool:
-    return all(
-        declared_equal(
-            _field(left, key.left),
-            left_types.get(key.left),
-            _field(right, key.right),
-            right_types.get(key.right),
-        )
-        for key in join_keys
-    )
 
 
 def _merge_rows(

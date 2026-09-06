@@ -1,0 +1,17 @@
+id: concrete_aggregate_types_use_the_same_operator_contract
+description: Aggregate compatibility is determined by the same operator contract before and after catalog binding.
+kind: algorithm
+algorithm: semantic.operator_signature
+input:
+  cases:
+    - aggregate: minimum
+      source_types: [string]
+    - aggregate: maximum
+      source_types: [date]
+    - aggregate: sum
+      source_types: [decimal]
+    - aggregate: sum
+      source_types: [string]
+expect:
+  result_equals:
+    accepted: [true, true, true, false]

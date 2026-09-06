@@ -76,6 +76,10 @@ class ResolvedLiteralQuestionInput:
     def context_texts(self) -> tuple[str, ...]:
         return (self.value_source_text, self.resolved_value_text)
 
+    @property
+    def operand_text(self) -> str:
+        return self.resolved_value_text
+
     def row_set_memory_references(self) -> tuple[str, ...]:
         return ()
 
@@ -107,6 +111,10 @@ class ResolvedRowSetQuestionInput:
 
     def context_texts(self) -> tuple[str, ...]:
         return (self.reference_text,)
+
+    @property
+    def operand_text(self) -> str:
+        return self.reference_text
 
     def row_set_memory_references(self) -> tuple[str, ...]:
         return self.memory_ids
@@ -159,6 +167,7 @@ class CompiledResolvedClause:
     def to_prompt_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "current_clause_text": self.current_clause_text,
+            "resolved_request": self.resolved_text,
             "resolved_values": [
                 value.to_prompt_payload() for value in self.values if value.source_kinds
             ],
@@ -222,6 +231,9 @@ class CompiledConversationResolution:
             )
         )
 
+    def question_contract_input_text_by_ref(self) -> dict[str, str]:
+        return {item.input_ref: item.operand_text for item in self.inputs}
+
     @property
     def clarification_lineage_refs(self) -> tuple[str, ...]:
         if self.active_clarification is None:
@@ -231,7 +243,8 @@ class CompiledConversationResolution:
     @property
     def uses_prior_context(self) -> bool:
         return (
-            self.frame_call is not None
+            self.active_clarification is not None
+            or self.frame_call is not None
             or any(clause.retained_frame_parts for clause in self.clauses)
             or any(
                 source.uses_prior_context()
@@ -298,8 +311,7 @@ def _active_clarification(
     used_source_ids = {
         source.source_id
         for clause in resolution.clauses
-        for value in clause.values
-        for source in value.sources
+        for source in clause.attribution_sources
         if isinstance(source, ContextAnchorSource)
     }
     active_sources = tuple(

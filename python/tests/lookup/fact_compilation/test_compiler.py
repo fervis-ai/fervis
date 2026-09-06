@@ -42,10 +42,8 @@ from fervis.lookup.relation_catalog.row_sources import (
 )
 from fervis.lookup.grounding.semantic import CanonicalInputValue
 from fervis.lookup.canonical_data import EntityKeyComponentValue, EntityKeyValue
-from fervis.lookup.plan_selection.semantic import (
+from fervis.lookup.source_binding.model import (
     CandidateSourceStrategy,
-    SourceAlignment,
-    SourceAlignmentAssessment,
     SourceStrategyBranch,
 )
 from fervis.lookup.question_contract.analysis import analyze_requested_fact
@@ -129,29 +127,8 @@ from fervis.lookup.source_binding.verification import (
 )
 
 
-def _strategy(
-    requested_fact_id: str,
-    basis: str,
-    branch: SourceStrategyBranch,
-) -> CandidateSourceStrategy:
-    alignment = (
-        SourceAlignment.DIRECT
-        if len(branch.source_refs) == 1
-        else SourceAlignment.PARTIAL
-    )
-    return CandidateSourceStrategy(
-        requested_fact_id=requested_fact_id,
-        source_assessments=tuple(
-            SourceAlignmentAssessment(
-                source_ref=source_ref,
-                basis=basis,
-                alignment=alignment,
-            )
-            for source_ref in branch.source_refs
-        ),
-        strategy_basis=basis,
-        branches=(branch,),
-    )
+def _strategy(requested_fact_id, *branches):
+    return CandidateSourceStrategy(requested_fact_id, tuple(branches))
 
 
 def _denotation(
@@ -236,11 +213,7 @@ def _compile_memory_count(
         relation_evidence_refs=(),
         qualification_clause_refs=(clause.clause_ref,),
     )
-    strategy = _strategy(
-        fact.id,
-        "The event source directly supplies the counted rows.",
-        branch,
-    )
+    strategy = _strategy(fact.id, branch)
     request = SemanticSourceBindingRequest(
         index=index,
         strategy=strategy,
@@ -305,9 +278,6 @@ def test_verified_count_compiles_directly_to_answer_program() -> None:
         relation.source.memory_relation_id
         for relation in result.answer_program.relations
     ] == ["events"]
-    assert [operation.kind.value for operation in result.answer_program.operations] == [
-        "aggregate"
-    ]
     [output] = result.answer_program.result_projection.relation_outputs
     assert output.relation_id == "fact_1.aggregate"
     assert output.field_id == "aggregate_1"
@@ -339,6 +309,90 @@ def test_verified_count_compiles_directly_to_answer_program() -> None:
                 memory=LookupMemory(relations=(memory_relation,)),
             ),
         )
+
+
+@pytest.mark.parametrize("unused_has_choices", [False, True])
+def test_only_bound_sources_become_executable_reads(unused_has_choices) -> None:
+    from tests.lookup.source_binding._fixtures import (
+        compile_binding_fixture,
+        validate_binding_fixture,
+    )
+
+    _, source, memory, _, _, existing = _compile_memory_count(({"event_id": "one"},))
+    extra = replace(
+        source,
+        id="unrelated_source",
+        memory_ref="never_read",
+        fields=(
+            RowSourceField(
+                "status",
+                "status",
+                "status",
+                RowSourceValueType.CHOICE,
+                (),
+                choices=("OPEN", "CLOSED"),
+            ),
+        )
+        if unused_has_choices
+        else source.fields,
+    )
+    [branch] = existing.request.strategy.branches
+    candidate_strategy = replace(
+        existing.request.strategy,
+        branches=(replace(branch, source_refs=(source.id, extra.id)),),
+    )
+    request = replace(
+        existing.request,
+        strategy=candidate_strategy,
+        source_catalog=replace(
+            existing.request.source_catalog, sources=(source, extra)
+        ),
+    )
+    subject_ref = request.index.subject_obligation.subject_set_ref.token
+    payload = {
+        "set_bindings": {
+            subject_ref: [
+                {
+                    "branch_id": branch.branch_id,
+                    "mapping_basis": "The event rows alone realize the counted set.",
+                    "rows_ref": source.id,
+                }
+            ]
+        },
+        "fact_bindings": {},
+        "association_bindings": {},
+        "resolved_input_applications": {branch.branch_id: []},
+        "finite_choice_applications": {branch.branch_id: {}},
+        "subject_binding": {
+            "subject_ref": subject_ref,
+            "branch_realizations": [
+                {
+                    "branch_id": branch.branch_id,
+                    "finite_choice_reviews": {},
+                }
+            ],
+        },
+    }
+    validate_binding_fixture(payload, request=request)
+    plan = compile_binding_fixture(payload, request=request)
+    verified = verify_source_strategy(plan, request=request)
+    assert isinstance(verified, VerifiedSourceStrategy)
+    result = compile_verified_source_strategy(verified)
+    assert [r.source.memory_relation_id for r in result.answer_program.relations] == [
+        memory.id
+    ]
+    execution = invoke_answer_program(
+        program=result.answer_program,
+        bindings=result.initial_bindings,
+        environment=ExecutionEnvironment(
+            catalog=RelationCatalog(), memory_relations=(memory,)
+        ),
+        ports=RuntimePorts(
+            data_access_port=None, memory=LookupMemory(relations=(memory,))
+        ),
+    )
+    assert execution.issue is None
+    assert rendered_fact_text(render_fact_result(execution.fact_result)) == "1"
 
 
 def test_independent_facts_with_local_output_ids_render_with_their_scopes() -> None:
@@ -392,7 +446,8 @@ class _EventDataAccess:
         }
 
 
-def test_returned_choice_surface_excludes_nonordinary_rows_before_counting() -> None:
+@pytest.mark.parametrize("has_ordinary_state", [True, False])
+def test_returned_choice_surface_excludes_nonordinary_rows_before_counting(has_ordinary_state) -> None:
     origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "event count")
     fact = RequestedFact(
         id="fact_1",
@@ -447,7 +502,7 @@ def test_returned_choice_surface_excludes_nonordinary_rows_before_counting() -> 
         (),
         (clause.clause_ref,),
     )
-    strategy = _strategy(fact.id, "Direct event rows.", branch)
+    strategy = _strategy(fact.id, branch)
     request = SemanticSourceBindingRequest(index, strategy, catalog, ())
     [surface] = catalog.choice_surfaces
     included_choice_ref = next(
@@ -490,6 +545,7 @@ def test_returned_choice_surface_excludes_nonordinary_rows_before_counting() -> 
                     branch.branch_id,
                     (
                         SubjectSurfaceReview(
+                            owner_set_ref=set_ref,
                             surface_ref=surface.surface_ref,
                             surface_mapping_basis=(
                                 "The status surface defines the event population."
@@ -500,30 +556,17 @@ def test_returned_choice_surface_excludes_nonordinary_rows_before_counting() -> 
                                     choice_domain_meaning=(
                                         f"{value.value} event rows."
                                     ),
-                                    choice_inclusion_basis=(
-                                        "The choice belongs in the event result."
+                                    decision_basis=(
+                                        "The choice is an ordinary event state."
                                         if value.value == "ACTIVE"
-                                        else "The choice does not belong in the event result."
+                                        else "The choice is a canceled event state."
                                     ),
-                                    choice_included=value.value == "ACTIVE",
-                                    explicit_user_override_basis=(
-                                        "The question requests no excluded state."
-                                    ),
-                                    authored_explicit_user_override_applies=False,
-                                    role_match_basis=(
-                                        "ACTIVE is an ordinary event status."
-                                        if value.value == "ACTIVE"
-                                        else "CANCELED is an excluded event status."
-                                    ),
-                                    matched_excluded_role=(
-                                        None
-                                        if value.value == "ACTIVE"
-                                        else "CANCELED_OR_VOIDED"
-                                    ),
+                                    baseline_included=has_ordinary_state and value.value == "ACTIVE",
+                                    explicit_user_override_applies=False,
                                 )
                                 for value in surface.values
                             ),
-                            included_choice_refs=(included_choice_ref,),
+                            included_choice_refs=(included_choice_ref,) if has_ordinary_state else (),
                             mechanics=(mechanic,),
                         ),
                     ),
@@ -548,7 +591,7 @@ def test_returned_choice_surface_excludes_nonordinary_rows_before_counting() -> 
     assert execution.fact_result is not None
     assert isinstance(execution.fact_result.outcome, AnswerResult)
     assert execution.fact_result.outcome.projected_rows[0].values == {
-        "fact_1.output_1": 2
+        "fact_1.output_1": 2 if has_ordinary_state else 0
     }
 
 
@@ -560,6 +603,8 @@ def _compile_returned_row_predicate(
     field_type: RowSourceValueType,
     operator: ExpressionBinaryOperator,
     aggregate_filter: bool = False,
+    qualification_and_aggregate_filter: bool = False,
+    mechanic_kind: SourceMechanicKind = SourceMechanicKind.RETURNED_ROW_PREDICATE,
 ):
     origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "qualified events")
     fact = RequestedFact(
@@ -586,7 +631,9 @@ def _compile_returned_row_predicate(
             ),
         ),
         subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
-        qualification_ref=None if aggregate_filter else "e1",
+        qualification_ref=(
+            "e1" if qualification_and_aggregate_filter or not aggregate_filter else None
+        ),
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "e2", origin),),
         ordering=(),
@@ -605,12 +652,35 @@ def _compile_returned_row_predicate(
         type=field_type,
         allowed_roles=(),
     )
+    source_params = (
+        (
+            RowSourceParam(
+                id="start_date",
+                param_ref="source_events.start_date",
+                name="start_date",
+                type=RowSourceValueType.DATE,
+                source=ParamSource.QUERY,
+                required=False,
+            ),
+            RowSourceParam(
+                id="end_date",
+                param_ref="source_events.end_date",
+                name="end_date",
+                type=RowSourceValueType.DATE,
+                source=ParamSource.QUERY,
+                required=False,
+            ),
+        )
+        if mechanic_kind is SourceMechanicKind.INVOCATION_PREDICATE
+        else ()
+    )
     source = RowSource(
         id="source_events",
         kind=RowSourceKind.API_READ,
         label="events",
         read_id="list_events",
         fields=(value_field,),
+        params=source_params,
     )
     catalog = AvailableSourceCatalog(
         contract_snapshot=SourceContractSnapshot.from_content("{}"),
@@ -624,7 +694,7 @@ def _compile_returned_row_predicate(
         relation_evidence_refs=(),
         qualification_clause_refs=(clause.clause_ref,),
     )
-    strategy = _strategy(fact.id, "Direct event rows.", branch)
+    strategy = _strategy(fact.id, branch)
     canonical_value = CanonicalInputValue(
         canonical_value_id=typed_value.id,
         input_ref=input_term.id,
@@ -644,7 +714,46 @@ def _compile_returned_row_predicate(
     fact_ref = next(
         ref.token for ref in index.source_requirement_refs if ref.kind.value == "fact"
     )
-    [requirement] = index.boolean_requirements
+    requirement = next(
+        (
+            item
+            for item in index.boolean_requirements
+            if item.owner_expression_ref is None
+        ),
+        index.boolean_requirements[0],
+    )
+    invocation_applications = (
+        (
+            InvocationValueApplication(
+                "apply_period",
+                branch.branch_id,
+                source.id,
+                canonical_value.canonical_value_id,
+                requirement.requirement_ref,
+                (
+                    InvocationTargetApplication(
+                        "Use the period start.",
+                        source_params[0].param_ref,
+                        canonical_value.canonical_value_id,
+                        ValueProjectionKind.TEMPORAL_START,
+                        None,
+                    ),
+                    InvocationTargetApplication(
+                        "Use the period end.",
+                        source_params[1].param_ref,
+                        canonical_value.canonical_value_id,
+                        ValueProjectionKind.TEMPORAL_END,
+                        None,
+                    ),
+                ),
+            ),
+        )
+        if mechanic_kind is SourceMechanicKind.INVOCATION_PREDICATE
+        else ()
+    )
+    mechanic_application_refs = tuple(
+        item.application_ref for item in invocation_applications
+    )
     plan = SourceBindingPlan(
         strategy=strategy,
         set_bindings={
@@ -673,18 +782,18 @@ def _compile_returned_row_predicate(
             )
         },
         association_bindings={},
-        invocation_applications=(),
+        invocation_applications=invocation_applications,
         boolean_bindings={
             requirement.requirement_ref: (
                 BooleanRequirementRealization(
                     branch.branch_id,
                     (
                         SourceMechanic(
-                            "Evaluate the predicate from the returned value.",
+                            "Realize the predicate at its declared source boundary.",
                             source.id,
-                            (),
+                            mechanic_application_refs,
                             (source.id, value_field.field_ref),
-                            SourceMechanicKind.RETURNED_ROW_PREDICATE,
+                            mechanic_kind,
                         ),
                     ),
                 ),
@@ -694,6 +803,30 @@ def _compile_returned_row_predicate(
             set_ref,
             (SubjectObligationRealization(branch.branch_id, ()),),
         ),
+    )
+    plan = replace(
+        plan,
+        boolean_bindings={
+            **plan.boolean_bindings,
+            **{
+                item.requirement_ref: (
+                    BooleanRequirementRealization(
+                        branch.branch_id,
+                        (
+                            SourceMechanic(
+                                "Retain the aggregate's declared condition.",
+                                source.id,
+                                (),
+                                (source.id, value_field.field_ref),
+                                SourceMechanicKind.RETURNED_ROW_PREDICATE,
+                            ),
+                        ),
+                    ),
+                )
+                for item in index.boolean_requirements
+                if item.requirement_ref != requirement.requirement_ref
+            },
+        },
     )
     verified = verify_source_strategy(plan, request=request)
     assert isinstance(verified, VerifiedSourceStrategy)
@@ -721,10 +854,6 @@ def test_returned_row_threshold_compiles_to_shared_filter_expression() -> None:
         operator=ExpressionBinaryOperator.GT,
     )
 
-    assert [item.kind.value for item in result.answer_program.operations] == [
-        "filter",
-        "aggregate",
-    ]
     [parameter] = result.answer_program.parameters
     assert parameter.input_ref == threshold.id
     assert parameter.input_use_refs == canonical_value.use_refs
@@ -894,7 +1023,7 @@ def test_co_resident_exists_filters_subject_rows_before_counting() -> None:
         (),
         (clause.clause_ref,),
     )
-    strategy = _strategy(fact.id, "Direct store rows.", branch)
+    strategy = _strategy(fact.id, branch)
     typed_value = FactValue.identity(
         id="area-a",
         known_input_id=area_input.id,
@@ -1009,7 +1138,8 @@ def test_co_resident_exists_filters_subject_rows_before_counting() -> None:
     }
 
 
-def test_qualifying_identity_set_compiles_as_entity_output() -> None:
+@pytest.mark.parametrize("distinct", [False, True])
+def test_qualifying_identity_set_compiles_as_entity_output(distinct) -> None:
     origin = SourceOrigin(
         SourceOriginKind.QUESTION_CONTEXT,
         "Which staff member is named Nadia Wanjiku?",
@@ -1048,7 +1178,7 @@ def test_qualifying_identity_set_compiles_as_entity_output() -> None:
         outputs=(RequestedOutput("output_1", "s_staff", origin),),
         ordering=(),
         selection=AllResults(),
-        distinct_by=(),
+        distinct_by=("s_staff",) if distinct else (),
     )
     index = analyze_requested_fact(
         fact,
@@ -1096,7 +1226,7 @@ def test_qualifying_identity_set_compiles_as_entity_output() -> None:
         (),
         (clause.clause_ref,),
     )
-    strategy = _strategy(fact.id, "Direct staff rows.", branch)
+    strategy = _strategy(fact.id, branch)
     canonical = CanonicalInputValue(
         "nadia",
         staff_input.id,
@@ -1219,7 +1349,283 @@ def test_aggregate_filter_proof_is_not_misclassified_as_population_proof() -> No
         for operation in result.answer_program.operations
         if operation.kind.value == "aggregate"
     )
-    assert aggregate.aggregations[0].filter is not None
+    filters = {
+        operation.output_relation
+        for operation in result.answer_program.operations
+        if operation.kind.value == "filter"
+    }
+    assert aggregate.input_relation in filters
+    assert all(
+        not clause.atom_refs
+        for declaration in result.answer_program.relation_guarantees
+        for clause in declaration.qualification.formula.clauses
+    )
+
+
+def test_invocation_realized_aggregate_filter_is_not_reapplied_to_rows() -> None:
+    period = InputTerm(
+        id="i1",
+        origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "March 2026"),
+        operand="March 2026",
+        value_type=TemporalScopeType(),
+    )
+
+    result, _ = _compile_returned_row_predicate(
+        input_term=period,
+        typed_value=FactValue.time(
+            id="period_value",
+            known_input_id=period.id,
+            expression="March 2026",
+            resolved_start="2026-03-01",
+            resolved_end="2026-03-31",
+            granularity="month",
+            proof_refs=("question_input:i1",),
+        ),
+        fact_type=DateTimeType(),
+        field_type=RowSourceValueType.DATETIME,
+        operator=ExpressionBinaryOperator.WITHIN,
+        aggregate_filter=True,
+        mechanic_kind=SourceMechanicKind.INVOCATION_PREDICATE,
+    )
+
+    aggregate = next(
+        operation.spec
+        for operation in result.answer_program.operations
+        if operation.kind.value == "aggregate"
+    )
+    assert aggregate.aggregations[0].filter is None
+
+
+def test_outer_qualification_is_not_reapplied_as_an_aggregate_filter() -> None:
+    period = InputTerm(
+        id="i1",
+        origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "March 2026"),
+        operand="March 2026",
+        value_type=TemporalScopeType(),
+    )
+
+    result, _ = _compile_returned_row_predicate(
+        input_term=period,
+        typed_value=FactValue.time(
+            id="period_value",
+            known_input_id=period.id,
+            expression="March 2026",
+            resolved_start="2026-03-01",
+            resolved_end="2026-03-31",
+            granularity="month",
+            proof_refs=("question_input:i1",),
+        ),
+        fact_type=DateTimeType(),
+        field_type=RowSourceValueType.DATETIME,
+        operator=ExpressionBinaryOperator.WITHIN,
+        aggregate_filter=True,
+        qualification_and_aggregate_filter=True,
+    )
+
+    aggregate = next(
+        operation.spec
+        for operation in result.answer_program.operations
+        if operation.kind.value == "aggregate"
+    )
+    assert aggregate.aggregations[0].filter is None
+
+
+class _StaffSalesDataAccess:
+    def read(self, *, endpoint_name, args):
+        assert endpoint_name == "list_sales"
+        assert args == {}
+        return {
+            "responseStatus": 200,
+            "responseBody": {
+                "data": [
+                    {"sale_id": "sale-1", "staff_id": "staff-1"},
+                    {"sale_id": "sale-2", "staff_id": "staff-1"},
+                    {"sale_id": "sale-3", "staff_id": "staff-2"},
+                ]
+            },
+        }
+
+
+def test_candidate_grain_is_preserved_by_related_set_aggregate() -> None:
+    origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "sales per staff member")
+    fact = RequestedFact(
+        id="fact_1",
+        origin=origin,
+        sets=(SetTerm("s_staff", origin), SetTerm("s_sale", origin)),
+        associations=(AssociationTerm("a_staff_sale", "s_staff", "s_sale", origin),),
+        facts=(
+            FactTerm(
+                "f_staff",
+                "s_staff",
+                IdentifierType("s_staff"),
+                origin,
+            ),
+        ),
+        expressions=(
+            Aggregate(
+                "e_count",
+                AggregateFunction.COUNT,
+                "s_sale",
+                None,
+                False,
+                origin,
+            ),
+        ),
+        subject=Subject(
+            "s_staff",
+            InstanceInterpretation.NORMAL_BUSINESS_INSTANCE,
+        ),
+        qualification_ref=None,
+        grouping_refs=(),
+        outputs=(
+            RequestedOutput("output_1", "f_staff", origin),
+            RequestedOutput("output_2", "e_count", origin),
+        ),
+        ordering=(),
+        selection=AllResults(),
+        distinct_by=(),
+    )
+    index = analyze_requested_fact(fact, inputs={}, input_denotations={})
+    read = EndpointRead(
+        id="list_sales",
+        endpoint_name="list_sales",
+        row_paths=(RowPath("data", "data", RowCardinality.MANY),),
+        fields=(
+            CatalogField(
+                ref="sale.sale_id",
+                path="data.sale_id",
+                row_path_id="data",
+                type="string",
+            ),
+            CatalogField(
+                ref="sale.staff_id",
+                path="data.staff_id",
+                row_path_id="data",
+                type="string",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                "primary_key",
+                "sale",
+                (CandidateKeyComponent("sale_id", "sale.sale_id"),),
+                primary=True,
+            ),
+        ),
+        entity_references=(
+            EntityReference(
+                "staff_reference",
+                "staff",
+                "primary_key",
+                (EntityReferenceComponent("staff_id", "sale.staff_id"),),
+            ),
+        ),
+    )
+    relation_catalog = RelationCatalog(reads=(read,))
+    source = next(
+        item
+        for item in build_row_source_catalog(relation_catalog).sources
+        if item.read_id == read.id
+    )
+    catalog = AvailableSourceCatalog(
+        SourceContractSnapshot.from_content("{}"),
+        (source,),
+        (),
+    )
+    [clause] = index.qualification.clauses
+    branch = SourceStrategyBranch(
+        "fact_1:source_branch:1",
+        (source.id,),
+        (),
+        (clause.clause_ref,),
+    )
+    strategy = _strategy(fact.id, branch)
+    request = SemanticSourceBindingRequest(index, strategy, catalog, ())
+    refs = {ref.local_id: ref.token for ref in index.source_requirement_refs}
+    staff_identity = next(
+        item for item in catalog.identity_evidence if item.entity_kind == "staff"
+    )
+    sale_identity = next(
+        item for item in catalog.identity_evidence if item.entity_kind == "sale"
+    )
+    plan = SourceBindingPlan(
+        strategy=strategy,
+        set_bindings={
+            refs["s_staff"]: (
+                SetRealization(
+                    branch.branch_id,
+                    "Staff identity is carried by each sale row.",
+                    source.id,
+                    staff_identity.identity_ref,
+                    staff_identity.field_refs,
+                    (source.id, staff_identity.identity_ref),
+                ),
+            ),
+            refs["s_sale"]: (
+                SetRealization(
+                    branch.branch_id,
+                    "Sale rows realize the counted set.",
+                    source.id,
+                    sale_identity.identity_ref,
+                    sale_identity.field_refs,
+                    (source.id, sale_identity.identity_ref),
+                ),
+            ),
+        },
+        fact_bindings={
+            refs["f_staff"]: (
+                FactRealization(
+                    branch.branch_id,
+                    "The staff identifier is returned on each sale row.",
+                    source.id,
+                    FactRealizationKind.ENTITY_KEY,
+                    staff_identity.identity_ref,
+                    staff_identity.field_refs,
+                    (source.id, staff_identity.identity_ref),
+                ),
+            ),
+        },
+        association_bindings={
+            refs["a_staff_sale"]: (
+                AssociationRealization(
+                    branch.branch_id,
+                    "Staff and sale are co-resident on each row.",
+                    AssociationRealizationKind.CO_RESIDENT,
+                    (source.id,),
+                    None,
+                    (source.id, staff_identity.identity_ref),
+                ),
+            ),
+        },
+        invocation_applications=(),
+        boolean_bindings={},
+        subject_binding=SubjectObligationBinding(
+            refs["s_staff"],
+            (SubjectObligationRealization(branch.branch_id, ()),),
+        ),
+    )
+    verified = verify_source_strategy(plan, request=request)
+    assert isinstance(verified, VerifiedSourceStrategy)
+
+    result = compile_verified_source_strategy(verified)
+    execution = invoke_answer_program(
+        program=result.answer_program,
+        bindings=result.initial_bindings,
+        environment=ExecutionEnvironment(catalog=relation_catalog),
+        ports=RuntimePorts(
+            data_access_port=_StaffSalesDataAccess(),
+            memory=LookupMemory(),
+        ),
+    )
+
+    assert execution.issue is None
+    assert execution.fact_result is not None
+    assert rendered_fact_text(render_fact_result(execution.fact_result)) == (
+        "{'entityKind': 'staff', 'keyId': 'primary_key', "
+        "'components': {'staff_id': 'staff-1'}}: 2\n"
+        "{'entityKind': 'staff', 'keyId': 'primary_key', "
+        "'components': {'staff_id': 'staff-2'}}: 1"
+    )
 
 
 def test_identity_collection_compiles_to_existing_invocation_union() -> None:
@@ -1332,7 +1738,7 @@ def test_identity_collection_compiles_to_existing_invocation_union() -> None:
         (),
         (clause.clause_ref,),
     )
-    strategy = _strategy(fact.id, "Direct scoped events.", branch)
+    strategy = _strategy(fact.id, branch)
     typed = FactValue.identity_set(
         id="actors",
         known_input_id=actor_ids.id,
@@ -1467,10 +1873,6 @@ def test_identity_collection_compiles_to_existing_invocation_union() -> None:
     ] == [
         "list_actor_events",
         "list_actor_events",
-    ]
-    assert [item.kind.value for item in result.answer_program.operations] == [
-        "union",
-        "aggregate",
     ]
     union = result.answer_program.operations[0].spec
     assert union.identity_fields == ("event_id",)
@@ -1627,7 +2029,7 @@ def test_declared_association_compiles_to_existing_join_and_grouped_aggregate() 
         (evidence.evidence_ref,),
         (clause.clause_ref,),
     )
-    strategy = _strategy(fact.id, "Join declared sources.", branch)
+    strategy = _strategy(fact.id, branch)
     request = SemanticSourceBindingRequest(index, strategy, catalog, ())
     requirement_refs = {
         ref.local_id: ref.token for ref in index.source_requirement_refs
@@ -1715,7 +2117,10 @@ def test_declared_association_compiles_to_existing_join_and_grouped_aggregate() 
     result = compile_verified_source_strategy(verified)
 
     assert [item.kind.value for item in result.answer_program.operations] == [
+        "project",
+        "project",
         "join",
+        "filter",
         "aggregate",
         "order",
     ]
@@ -1731,7 +2136,7 @@ def test_declared_association_compiles_to_existing_join_and_grouped_aggregate() 
     assert tuple(
         (component.component_id, component.field_id)
         for component in identifier_output.entity_key.components
-    ) == (("category_id", "category_id"),)
+    ) == (("category_id", "source_field:source_categories:category_id"),)
 
 
 def test_aggregate_arithmetic_compiles_to_one_shared_compute_expression() -> None:
@@ -1793,7 +2198,7 @@ def test_aggregate_arithmetic_compiles_to_one_shared_compute_expression() -> Non
     branch = SourceStrategyBranch(
         "fact_1:source_branch:1", (source.id,), (), (clause.clause_ref,)
     )
-    strategy = _strategy(fact.id, "Direct rows.", branch)
+    strategy = _strategy(fact.id, branch)
     canonical = CanonicalInputValue(
         "percentage",
         percentage.id,
@@ -1854,9 +2259,5 @@ def test_aggregate_arithmetic_compiles_to_one_shared_compute_expression() -> Non
 
     result = compile_verified_source_strategy(verified)
 
-    assert [item.kind.value for item in result.answer_program.operations] == [
-        "aggregate",
-        "compute",
-    ]
     [output] = result.answer_program.result_projection.scalar_outputs
     assert output.scalar_id == "fact_1.output_1.scalar"

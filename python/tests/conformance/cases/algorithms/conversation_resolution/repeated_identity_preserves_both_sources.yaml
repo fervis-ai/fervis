@@ -18,10 +18,11 @@ input:
     outcome:
       kind: resolved
       resolution_basis: Current meaning and retained prior meaning form the resolved question.
-      contextualized_question: Where did Nadia Wanjiku work on her first two shifts?
       clauses:
         - current_clause_text: Where did Nadia Wanjiku work on her first two shifts?
           occurrence: 1
+          request_shape_basis: The current clause states the complete factual request.
+          request_shape_source: current_clause_supplies_request
           resolved_text: Where did Nadia Wanjiku work on her first two shifts?
           retained_frame_parts: []
           values:

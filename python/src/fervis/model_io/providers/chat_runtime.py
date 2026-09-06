@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 import json
 import os
@@ -119,22 +119,19 @@ class ConfiguredChatLoopRuntime:
                 self.request_payload(request),
             )
         except ProviderExecutionError as exc:
+            context = dict(exc.context)
+            if exc.usage:
+                context["model_usage"] = dict(_result_from_worker_payload(
+                    self.config, request, exc.usage,
+                ).usage)
             raise provider_unavailable_error(
                 self.config,
                 reason=exc.reason,
                 error_class=exc.error_class,
-                context=exc.context,
+                context=context,
             ) from exc
         try:
-            return build_provider_run_result(
-                self.config,
-                model_name=request.model_id or self.config.model_name,
-                answer=str(payload.get("answer") or ""),
-                input_tokens=int(payload.get("inputTokens") or 0),
-                output_tokens=int(payload.get("outputTokens") or 0),
-                thinking_tokens=int(payload.get("thinkingTokens") or 0),
-                usage_details=_dict_or_empty(payload.get("usageDetails")),
-            )
+            return _result_from_worker_payload(self.config, request, payload)
         except ProviderExecutionError as exc:
             raise provider_unavailable_error(
                 self.config,
@@ -144,6 +141,19 @@ class ConfiguredChatLoopRuntime:
             ) from exc
 
 
+def _result_from_worker_payload(
+    config: ChatProviderConfig, request: ProviderRunRequest, payload: dict[str, Any],
+) -> ProviderRunResult:
+    return build_provider_run_result(
+        config, model_name=request.model_id or config.model_name,
+        answer=str(payload.get("answer") or ""),
+        input_tokens=int(payload.get("inputTokens") or 0),
+        output_tokens=int(payload.get("outputTokens") or 0),
+        thinking_tokens=int(payload.get("thinkingTokens") or 0),
+        usage_details=_dict_or_empty(payload.get("usageDetails")),
+    )
+
+
 class ProviderExecutionError(RuntimeError):
     def __init__(
         self,
@@ -151,7 +161,9 @@ class ProviderExecutionError(RuntimeError):
         error_class: str,
         reason: str,
         context: dict[str, Any] | None = None,
+        usage: dict[str, Any] | None = None,
     ) -> None:
+        self.usage = dict(usage or {})
         self.error_class = error_class
         self.reason = reason
         self.context = context or {}
@@ -342,6 +354,17 @@ def build_provider_run_result(
         )
     actual_model_name = model_name or config.model_name
     pricing = _pricing_for_model(config, actual_model_name)
+    service_tier = str(_dict_or_empty(usage_details).get("serviceTier") or "")
+    if config.provider_name == "openai" and service_tier == "flex" and pricing.cost_source == CostSource.MODELS_DEV:
+        # OpenAI Flex uses Batch rates: half the standard token rates.
+        # Use the returned tier, never merely the requested tier.
+        pricing = replace(
+            pricing,
+            input_cost_per_million_tokens=pricing.input_cost_per_million_tokens / 2,
+            output_cost_per_million_tokens=pricing.output_cost_per_million_tokens / 2,
+            thinking_cost_per_million_tokens=pricing.thinking_cost_per_million_tokens / 2,
+            pricing_version=f"{pricing.pricing_version}:flex",
+        )
     if not pricing.priced:
         return ProviderRunResult(
             provider=config.provider_name,
@@ -379,6 +402,8 @@ def build_provider_run_result(
         UsageKey.COST_SOURCE: pricing.cost_source,
         UsageKey.PRICING_VERSION: pricing.pricing_version,
     }
+    if service_tier:
+        usage["serviceTier"] = service_tier
     model_subcalls = _priced_model_subcalls(
         pricing,
         _dict_or_empty(usage_details).get(UsageKey.MODEL_SUBCALLS),
@@ -517,9 +542,9 @@ def provider_max_retries() -> int:
 def provider_max_output_tokens() -> int:
     return _environment_int(
         "FERVIS_PROVIDER_MAX_OUTPUT_TOKENS",
-        default=4096,
+        default=16384,
         minimum=1024,
-        maximum=8192,
+        maximum=128000,
     )
 
 
@@ -582,6 +607,7 @@ def run_provider_worker(
             error_class=str(result.get("errorClass") or "ProviderExecutionError"),
             reason=str(result.get("error") or "Provider request failed."),
             context=_provider_error_context(result),
+            usage=_dict_or_empty(result.get("usage")),
         )
     return dict(result)
 
@@ -616,12 +642,23 @@ def provider_error_payload(exc: BaseException) -> dict[str, Any]:
         }
         if exc.context:
             execution_error["context"] = dict(exc.context)
+        if exc.usage:
+            execution_error["usage"] = dict(exc.usage)
         return execution_error
     payload: dict[str, Any] = {
         "ok": False,
         "errorClass": exc.__class__.__name__,
         "error": str(exc),
     }
+    causes: list[str] = []
+    seen = {id(exc)}
+    cause = exc.__cause__
+    while cause is not None and id(cause) not in seen and len(causes) < 8:
+        seen.add(id(cause))
+        causes.append(f"{type(cause).__module__}.{type(cause).__qualname__}")
+        cause = cause.__cause__
+    if causes:
+        payload["errorCauses"] = causes
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
         error_body = body.get("error")
@@ -653,7 +690,7 @@ def _provider_error_context(result: dict[str, Any]) -> dict[str, Any]:
     raw_context = dict(context) if isinstance(context, dict) else {}
     metadata = {
         key: result[key]
-        for key in ("statusCode", "requestId", "errorCode", "errorType")
+        for key in ("statusCode", "requestId", "errorCode", "errorType", "errorCauses")
         if key in result
     }
     existing_metadata = raw_context.get("provider_metadata")

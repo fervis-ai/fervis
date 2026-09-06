@@ -1,23 +1,9 @@
 """Outcome contracts for the semantic downstream responsibility cut."""
 
-from dataclasses import replace
 
 from jsonschema import ValidationError, validate
 import pytest
 
-from fervis.lookup.answer_program.values import FactValue
-from fervis.lookup.available_sources import (
-    SourceContractSnapshot,
-    AvailableSourceCatalog,
-)
-from fervis.lookup.canonical_data import EntityKeyComponentValue, EntityKeyValue
-from fervis.lookup.grounding import CanonicalInputValue
-from fervis.lookup.plan_selection.semantic import SemanticPlanSelectionRequest
-from fervis.lookup.plan_selection.semantic_parser import parse_semantic_plan_selection
-from fervis.lookup.plan_selection.semantic_prompt import SemanticPlanSelectionTurnPrompt
-from fervis.lookup.plan_selection.semantic_schema import (
-    build_semantic_plan_selection_schema,
-)
 from fervis.lookup.question_contract.analysis import analyze_requested_fact
 from fervis.lookup.question_contract.model import (
     Aggregate,
@@ -39,9 +25,7 @@ from fervis.lookup.read_eligibility.semantic_schema import (
 )
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.relation_catalog.row_sources import build_row_source_catalog
-from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.turn_prompts.projections.semantic_requirements import (
-    plan_selection_fact_prompt_payload,
     semantic_requirements_prompt_payload,
 )
 from fervis.lookup.semantic_types import (
@@ -138,7 +122,6 @@ def test_downstream_requirements_project_a_direct_boolean_fact_predicate() -> No
     )
 
     payload = semantic_requirements_prompt_payload(index)
-    plan_payload = plan_selection_fact_prompt_payload(index)
 
     assert payload["boolean_requirements"] == [
         {
@@ -158,12 +141,6 @@ def test_downstream_requirements_project_a_direct_boolean_fact_predicate() -> No
                     }
                 ],
             },
-        }
-    ]
-    assert plan_payload["qualification_clauses"] == [
-        {
-            "clause_ref": "fact_1:qualification_clause:1",
-            "conditions": ["qualifying events"],
         }
     ]
 
@@ -220,145 +197,3 @@ def test_read_eligibility_schema_makes_dropped_field_retention_impossible() -> N
 
     with pytest.raises(ValidationError):
         validate(payload, build_semantic_read_eligibility_schema(request))
-
-
-def test_plan_selection_authors_alignment_and_backend_composes_strategy() -> None:
-    parsed = _semantic_contract()
-    [index] = parsed.semantic_indexes
-    [source] = tuple(
-        source
-        for source in build_row_source_catalog(
-            RelationCatalog(reads=(_staff_read(),))
-        ).sources
-        if source.read_id
-    )
-    catalog = AvailableSourceCatalog(
-        contract_snapshot=SourceContractSnapshot.from_content("{}"),
-        sources=(source,),
-        relation_evidence=(),
-    )
-    request = SemanticPlanSelectionRequest(
-        indexes=(index,),
-        source_catalog=catalog,
-    )
-    payload = {
-        "source_assessments_by_requested_fact": {
-            index.requested_fact_id: {
-                source.id: {
-                    "basis": "This source contains the complete raw ingredients for the requested fact.",
-                    "alignment": "DIRECT",
-                }
-            }
-        }
-    }
-
-    schema = build_semantic_plan_selection_schema(request)
-    validate(payload, schema)
-    [strategy] = parse_semantic_plan_selection(payload, request=request)
-
-    [assessment] = strategy.source_assessments
-    assert assessment.source_ref == source.id
-    assert assessment.alignment.value == "DIRECT"
-    assert strategy.branches[0].source_refs == (source.id,)
-
-
-def test_plan_selection_sees_certified_values_and_declared_source_identities() -> None:
-    parsed = _semantic_contract()
-    [index] = parsed.semantic_indexes
-    [input_term] = parsed.contract.inputs
-    [use] = index.input_use_sites
-    [source] = tuple(
-        source
-        for source in build_row_source_catalog(
-            RelationCatalog(reads=(_staff_read(),))
-        ).sources
-        if source.read_id
-    )
-    source = replace(source, resource_names=("staff member",))
-    canonical_value = CanonicalInputValue(
-        canonical_value_id="canonical_staff_1",
-        input_ref=input_term.id,
-        use_refs=(use.use_ref,),
-        typed_value=FactValue.identity(
-            id="canonical_staff_1",
-            known_input_id=input_term.id,
-            key=EntityKeyValue(
-                entity_kind="staff",
-                key_id="primary_key",
-                components=(EntityKeyComponentValue("staff_id", "staff_1"),),
-            ),
-            display_value="Ada",
-            proof_refs=("resolver:list_staff_list",),
-        ),
-        certification_refs=("resolver:list_staff_list",),
-    )
-    request = SemanticPlanSelectionRequest(
-        indexes=(index,),
-        source_catalog=AvailableSourceCatalog(
-            contract_snapshot=SourceContractSnapshot.from_content("{}"),
-            sources=(source,),
-            relation_evidence=(),
-        ),
-        canonical_values=(canonical_value,),
-    )
-
-    invocation = SemanticPlanSelectionTurnPrompt(request).to_model_invocation(
-        build_turn_prompt_context(
-            current_question="Which staff member is named Ada?",
-            conversation_context={},
-        )
-    )
-
-    assert "Requested facts:" in invocation.prompt_text
-    assert '"fact_text": "staff members named Ada"' in invocation.prompt_text
-    assert '"candidate_instance_kind": "staff members"' in invocation.prompt_text
-    assert '"answer_outputs"' in invocation.prompt_text
-    assert '"value_kind": "canonical_identity"' in invocation.prompt_text
-    assert '"identified_set_meaning": "staff members"' in invocation.prompt_text
-    assert '"required_facts"' in invocation.prompt_text
-    assert '"meaning": "staff member identity"' in invocation.prompt_text
-    assert '"term_requirements"' not in invocation.prompt_text
-    assert '"boolean_requirements"' not in invocation.prompt_text
-    assert '"entity_kind": "staff"' in invocation.prompt_text
-    assert '"key_id": "primary_key"' in invocation.prompt_text
-    assert '"identity_ref": "source_identity:' in invocation.prompt_text
-    assert '"resource_names": [' in invocation.prompt_text
-    assert '"staff member"' in invocation.prompt_text
-    assert '"param_ref": "list_staff_list.query.name"' in invocation.prompt_text
-    assert (
-        "Assess each source without reinterpreting any shown certified input. "
-        "Applying those inputs belongs to Source Binding."
-        in invocation.prompt_text
-    )
-    assert (
-        "A source restricted to a specialized population not requested by the "
-        "question is NOT_ALIGNED"
-        in invocation.prompt_text
-    )
-    assert (
-        "including every requested output at its declared value kind"
-        in invocation.prompt_text
-    )
-    assert (
-        "Producing a requested canonical identity requires matching declared "
-        "identity evidence."
-        in invocation.prompt_text
-    )
-
-    incompatible_source = replace(
-        source,
-        candidate_keys=tuple(
-            replace(key, entity_kind="area") for key in source.candidate_keys
-        ),
-    )
-    incompatible_request = replace(
-        request,
-        source_catalog=replace(request.source_catalog, sources=(incompatible_source,)),
-    )
-    alignment_schema = build_semantic_plan_selection_schema(incompatible_request)[
-        "properties"
-    ]["source_assessments_by_requested_fact"]["properties"][
-        index.requested_fact_id
-    ]["properties"][incompatible_source.id]["properties"]["alignment"]
-
-    assert alignment_schema["enum"] == ["PARTIAL", "NOT_ALIGNED"]

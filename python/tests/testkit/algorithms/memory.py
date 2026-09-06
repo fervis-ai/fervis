@@ -86,6 +86,7 @@ def run_memory_prior_answer_request_case(
         Aggregate,
         AggregateFunction,
         AllResults,
+        ExpressionNode,
         InstanceInterpretation,
         RequestedFact,
         RequestedOutput,
@@ -104,13 +105,10 @@ def run_memory_prior_answer_request_case(
         SourceOriginKind.QUESTION_CONTEXT,
         str(request["output_meaning"]),
     )
-    fact = RequestedFact(
-        id="fact_1",
-        origin=output_origin,
-        sets=(SetTerm("s1", subject_origin),),
-        associations=(),
-        facts=(),
-        expressions=(
+    output_kind = str(request.get("output_kind") or "count")
+    expressions: tuple[ExpressionNode, ...]
+    if output_kind == "count":
+        expressions = (
             Aggregate(
                 id="e1",
                 function=AggregateFunction.COUNT,
@@ -119,11 +117,24 @@ def run_memory_prior_answer_request_case(
                 distinct_argument=False,
                 origin=output_origin,
             ),
-        ),
+        )
+        output_ref = "e1"
+    elif output_kind == "set":
+        expressions = ()
+        output_ref = "s1"
+    else:
+        raise ValueError(f"unsupported prior-request output kind: {output_kind}")
+    fact = RequestedFact(
+        id="fact_1",
+        origin=output_origin,
+        sets=(SetTerm("s1", subject_origin),),
+        associations=(),
+        facts=(),
+        expressions=expressions,
         subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
         qualification_ref=None,
         grouping_refs=(),
-        outputs=(RequestedOutput("output_1", "e1", output_origin),),
+        outputs=(RequestedOutput("output_1", output_ref, output_origin),),
         ordering=(),
         selection=AllResults(),
         distinct_by=(),

@@ -50,6 +50,7 @@ from fervis.lookup.answer_program.operations import (
     SortDirection,
     SortKey,
     Take,
+    AtPosition,
     UnionSpec,
     UniversalConditionSpec,
 )
@@ -368,6 +369,8 @@ def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
                 )
             )
         )
+        if selection_payload["kind"] == "at_position":
+            selection = AtPosition(position=ParameterRef(parameter_id=str(selection_payload["limit_input_id"])))
         return OrderSpec(
             input_relation=str(payload["input_relation"]),
             order_by=tuple(_sort_key(item) for item in payload["order_by"]),

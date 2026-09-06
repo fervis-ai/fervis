@@ -1,0 +1,24 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "relationships_between_declared_sets declares a relationship between two\ndifferent sets already declared in the same graph.",
+      "new": "",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/$defs/answer_request_fact_1/properties/set_graph/properties/relationships_between_declared_sets"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/$defs/answer_request_fact_1/properties/set_graph/required",
+      "value": [
+        "related_sets"
+      ]
+    }
+  ]
+}

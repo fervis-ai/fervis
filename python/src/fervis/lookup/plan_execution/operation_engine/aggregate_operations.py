@@ -19,10 +19,11 @@ from fervis.lookup.outcomes.errors import UndefinedOperationError
 from fervis.lookup.outcomes.operation_semantics import empty_aggregation_undefined_reason
 from fervis.lookup.answer_program.operations import (
     AggregateSpec,
+    AggregationFunction,
     SortDirection,
 )
 from fervis.lookup.canonical_data import RuntimeValue
-from fervis.lookup.answer_program.operations import KeepAll, OrderSpec, Take
+from fervis.lookup.answer_program.operations import AtPosition, KeepAll, OrderSpec, Take, order_selection_expression
 from fervis.lookup.plan_execution.operation_engine.expression_evaluator import (
     ExpressionEnvironment,
     evaluate_expression,
@@ -47,8 +48,12 @@ def _aggregate(
     spec: AggregateSpec,
     relations: dict[str, RelationRows],
     *,
+    node_outputs: dict[str, dict[str, RuntimeValue]],
+    node_output_types: dict[str, dict[str, str]],
     scalars: dict[str, RuntimeValue],
     scalar_types: dict[str, str],
+    environment_values: dict[str, RuntimeValue],
+    environment_types: dict[str, str],
     operation_refs: tuple[str, ...] = (),
 ) -> RelationRows:
     input_relation = _relation(relations, spec.input_relation)
@@ -57,7 +62,7 @@ def _aggregate(
             relation_id=input_relation.id,
             proof_refs=input_relation.completeness.proof_refs,
         )
-    if not input_relation.rows:
+    if not input_relation.rows and not spec.group_by:
         for aggregation in spec.aggregations:
             reason = empty_aggregation_undefined_reason(aggregation.function)
             if reason is not None:
@@ -86,8 +91,13 @@ def _aggregate(
                 aggregation,
                 rows,
                 field_types,
+                empty_is_null=bool(spec.group_by),
+                node_outputs=node_outputs,
+                node_output_types=node_output_types,
                 scalars=scalars,
                 scalar_types=scalar_types,
+                environment_values=environment_values,
+                environment_types=environment_types,
             )
         output.append(result)
     return _operation_relation(
@@ -100,7 +110,7 @@ def _aggregate(
             **{field: field_types.get(field, "") for field in spec.group_by},
             **{
                 aggregation.output_field: (
-                    "integer"
+                    "boolean" if aggregation.function in {AggregationFunction.BOOL_ANY, AggregationFunction.BOOL_ALL} else "integer"
                     if aggregation.function.value == "count"
                     else "decimal"
                     if aggregation.function.value in {"sum", "avg"}
@@ -117,8 +127,12 @@ def _order(
     spec: OrderSpec,
     relations: dict[str, RelationRows],
     *,
+    node_outputs: dict[str, dict[str, RuntimeValue]],
+    node_output_types: dict[str, dict[str, str]],
     scalars: dict[str, RuntimeValue],
     scalar_types: dict[str, str],
+    environment_values: dict[str, RuntimeValue],
+    environment_types: dict[str, str],
     operation_refs: tuple[str, ...] = (),
 ) -> RelationRows:
     input_relation = _relation(relations, spec.input_relation)
@@ -147,12 +161,17 @@ def _order(
         key=lambda item: item[0],
     )
     limit = len(sorted_keyed_rows)
-    if isinstance(spec.selection, Take):
+    if isinstance(spec.selection, (Take, AtPosition)):
+        selection_expression = order_selection_expression(spec.selection)
+        assert selection_expression is not None
         evaluated = evaluate_expression(
-            spec.selection.limit,
+            selection_expression,
             environment=ExpressionEnvironment(
+                node_outputs=node_outputs, node_output_types=node_output_types,
                 scalars=scalars,
                 scalar_types=scalar_types,
+                environment_values=environment_values,
+                environment_types=environment_types,
             ),
         )
         try:
@@ -161,7 +180,11 @@ def _order(
             raise RelationEngineError("order take requires a positive integer") from exc
     elif not isinstance(spec.selection, KeepAll):
         assert_never(spec.selection)
-    selected_rows = _rows_through_boundary_ties(sorted_keyed_rows, limit=limit)
+    if isinstance(spec.selection, AtPosition):
+        boundary_key = sorted_keyed_rows[limit - 1][0] if limit <= len(sorted_keyed_rows) else None
+        selected_rows = [item for item in sorted_keyed_rows if item[0] == boundary_key]
+    else:
+        selected_rows = _rows_through_boundary_ties(sorted_keyed_rows, limit=limit)
     sorted_rows = [dict(row) for _, row in selected_rows]
     return _operation_relation(
         operation,

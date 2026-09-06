@@ -8,7 +8,8 @@ Usage:
 
 Options:
   --case-ids CASES        Comma-separated goldset case ids. Defaults to
-                          FERVIS_GOLDSET_CASE_IDS. Required.
+                          FERVIS_GOLDSET_CASE_IDS. Required unless --all-cases.
+  --all-cases             Run every case exported by the selected suite.
   --project-root PATH     Host API project root. Defaults to FERVIS_HOST_PROJECT_ROOT
                           or the current directory when config/fervis.json exists.
   --suite REF             Goldset suite path or import entrypoint. Defaults to
@@ -43,6 +44,8 @@ local_profile="${FERVIS_LOCAL_GOLDSET_PROFILE:-$repo_root/.fervis/local-goldset.
 fervis_load_env_file "$local_profile"
 
 case_ids="${FERVIS_GOLDSET_CASE_IDS:-}"
+all_cases=0
+case_ids_explicit=0
 project_root="${FERVIS_HOST_PROJECT_ROOT:-}"
 suite_ref="${FERVIS_GOLDSET_SUITE:-}"
 tenant_id="${FERVIS_GOLDSET_TENANT_ID:-}"
@@ -60,7 +63,12 @@ retry_sleep_seconds="300"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --all-cases)
+      all_cases=1
+      shift
+      ;;
     --case-ids)
+      case_ids_explicit=1
       case_ids="${2:-}"
       shift 2
       ;;
@@ -145,8 +153,8 @@ if [[ -z "$project_root" || ! -d "$project_root" ]]; then
   exit 2
 fi
 
-fervis_load_env_file "$project_root/.env"
 fervis_load_env_file "$repo_root/.env"
+fervis_load_env_file "$project_root/.env"
 
 case_ids="${case_ids:-${FERVIS_GOLDSET_CASE_IDS:-}}"
 suite_ref="${suite_ref:-${FERVIS_GOLDSET_SUITE:-}}"
@@ -154,7 +162,11 @@ tenant_id="${tenant_id:-${FERVIS_GOLDSET_TENANT_ID:-}}"
 principal_id="${principal_id:-${FERVIS_GOLDSET_PRINCIPAL_ID:-}}"
 database_url="${database_url:-${FERVIS_LOCAL_DATABASE_URL:-${DATABASE_URL:-}}}"
 
-if [[ -z "$case_ids" ]]; then
+if (( all_cases && case_ids_explicit )); then
+  echo "Choose --all-cases or --case-ids, not both." >&2
+  exit 2
+fi
+if [[ -z "$case_ids" && "$all_cases" == 0 ]]; then
   echo "Goldset case ids not found. Pass --case-ids or set FERVIS_GOLDSET_CASE_IDS." >&2
   usage >&2
   exit 2
@@ -211,7 +223,7 @@ export FERVIS_GOLDSET_TENANT_ID="$tenant_id"
 export FERVIS_GOLDSET_PRINCIPAL_ID="$principal_id"
 export FERVIS_GOLDSET_ADMIN_USER_ID="${FERVIS_GOLDSET_ADMIN_USER_ID:-$principal_id}"
 
-"$python_bin" -P - "$repo_root" <<'PY'
+"$python_bin" - "$repo_root" <<'PY'
 from __future__ import annotations
 
 import inspect
@@ -236,6 +248,18 @@ if expected not in (prompt_path, *prompt_path.parents):
     )
 PY
 
+if (( all_cases )); then
+  case_ids="$("$python_bin" - <<'PYCASES'
+import os
+from fervis.evaluation.goldsets.loader import load_goldset_suite
+suite = load_goldset_suite(os.environ["FERVIS_GOLDSET_SUITE"])
+if not suite.cases:
+    raise SystemExit("Selected goldset suite has no cases")
+print(",".join(case.case_id for case in suite.cases))
+PYCASES
+)"
+fi
+
 IFS=',' read -r -a cases <<< "$case_ids"
 if [[ -z "$max_failures" ]]; then
   if (( ${#cases[@]} > 10 )); then
@@ -258,7 +282,7 @@ for raw_case in "${cases[@]}"; do
   stderr_file="$ledger_dir/$case_id.stderr.txt"
   ledger_file="$ledger_dir/$case_id.ledger.jsonl"
 
-  "$python_bin" -P - "$case_id" <<'PY'
+  "$python_bin" - "$case_id" <<'PY'
 from __future__ import annotations
 
 import os
@@ -277,7 +301,7 @@ PY
   set +e
   (
     cd "$project_root"
-    FERVIS_GOLDSET_CASE_IDS="$case_id" "$python_bin" -P - \
+    FERVIS_GOLDSET_CASE_IDS="$case_id" "$python_bin" - \
       "$ledger_file" "$wait_seconds" "$stable_runs" \
       "$enforce_structured_determinism" "$attempts" \
       "$retry_provider_failures" "$retry_sleep_seconds" <<'PY'
@@ -321,7 +345,7 @@ PY
   exit_code=$?
   set -e
 
-  "$python_bin" -P - "$case_id" "$exit_code" "$stdout_file" "$stderr_file" <<'PY'
+  "$python_bin" - "$case_id" "$exit_code" "$stdout_file" "$stderr_file" <<'PY'
 from __future__ import annotations
 
 import json

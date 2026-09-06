@@ -78,7 +78,10 @@ def prepare_answer_program(
 ) -> PreparedAnswerProgram:
     bindings = compiled_inputs.bindings
     _verify_semantic_templates(answer)
-    if not answer.operations:
+    if not answer.operations and not (
+        answer.result_projection.relation_outputs
+        or answer.result_projection.scalar_outputs
+    ):
         raise VerificationError("answer plan requires at least one operation")
     try:
         verify_capability_declarations(answer)
@@ -225,7 +228,7 @@ def _verify_fact_fulfillment(
         semantic_index = semantic_indexes[fact.id]
         if not qualification_entails(
             semantic_guarantee.qualification.formula,
-            semantic_index.qualification,
+            semantic_index.output_qualification(item.answer_output_id),
         ):
             raise VerificationError("fulfillment does not enforce qualification")
         subject = semantic_guarantee.subject

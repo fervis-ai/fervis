@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing_extensions import assert_never
+from fervis.lookup.plan_execution.expression_schema import expression_value_type
 
 from fervis.lookup.plan_execution.operation_runtime import (
     RelationEngineError,
@@ -69,6 +70,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
     scalar_proofs: dict[str, tuple[str, ...]] = {}
     scalar_types: dict[str, str] = {}
     node_outputs: dict[str, dict[str, RuntimeValue]] = {}
+    node_output_types: dict[str, dict[str, str]] = {}
     for scalar_input in engine_input.scalar_inputs:
         if not isinstance(scalar_input, ScalarInput):
             raise RelationEngineError("scalar input must be ScalarInput")
@@ -88,6 +90,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                 scalar_proofs,
                 scalar_types,
                 node_outputs,
+                node_output_types=node_output_types,
                 environment_values=dict(engine_input.environment_values or {}),
                 environment_types=dict(engine_input.environment_types or {}),
                 operation_proof_refs=operation_proof_refs,
@@ -130,6 +133,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                     raise RelationEngineError(
                         f"operation {operation.id} did not produce one scalar row"
                     )
+                node_output_types[operation.id] = {output_id:(result.field_types or {}).get(output_id, "") for output_id in scalar_output_ids}
                 node_outputs[operation.id] = {
                     output_id: result.rows[0][output_id]
                     for output_id in scalar_output_ids
@@ -148,7 +152,8 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                     *operation_proof_refs.get(operation.id, ()),
                 ),
             )
-            scalar_types[output_scalar] = "decimal"
+            scalar_types[output_scalar] = expression_value_type(operation.spec.expression, scalar_types=scalar_types, node_output_types=node_output_types, environment_types=engine_input.environment_types)
+            node_output_types[operation.id] = {output_scalar:scalar_types[output_scalar]}
         else:
             raise RelationEngineError(f"{operation.id} produced invalid result")
     return RelationEngineOutput(
@@ -167,6 +172,7 @@ def _execute_operation(
     scalar_types: dict[str, str],
     node_outputs: dict[str, dict[str, RuntimeValue]],
     *,
+    node_output_types: dict[str, dict[str, str]],
     environment_values: dict[str, RuntimeValue],
     environment_types: dict[str, str],
     operation_proof_refs: dict[str, tuple[str, ...]],
@@ -181,6 +187,10 @@ def _execute_operation(
             scalar_proofs,
             scalar_types,
             operation_refs=operation_proof_refs.get(operation.id, ()),
+            node_output_types=node_output_types,
+            node_outputs=node_outputs,
+            environment_values=environment_values,
+            environment_types=environment_types,
         )
     if isinstance(spec, ProjectSpec):
         return _project(
@@ -191,6 +201,7 @@ def _execute_operation(
             scalar_proofs,
             scalar_types,
             node_outputs,
+            node_output_types=node_output_types,
             environment_values=environment_values,
             environment_types=environment_types,
         )
@@ -215,6 +226,10 @@ def _execute_operation(
             scalar_proofs,
             scalar_types,
             operation_refs=operation_proof_refs.get(operation.id, ()),
+            node_output_types=node_output_types,
+            node_outputs=node_outputs,
+            environment_values=environment_values,
+            environment_types=environment_types,
         )
     if isinstance(spec, AggregateSpec):
         return _aggregate(
@@ -224,6 +239,10 @@ def _execute_operation(
             scalars=scalars,
             scalar_types=scalar_types,
             operation_refs=operation_proof_refs.get(operation.id, ()),
+            node_output_types=node_output_types,
+            node_outputs=node_outputs,
+            environment_values=environment_values,
+            environment_types=environment_types,
         )
     if isinstance(spec, OrderSpec):
         return _order(
@@ -233,6 +252,10 @@ def _execute_operation(
             scalars=scalars,
             scalar_types=scalar_types,
             operation_refs=operation_proof_refs.get(operation.id, ()),
+            node_output_types=node_output_types,
+            node_outputs=node_outputs,
+            environment_values=environment_values,
+            environment_types=environment_types,
         )
     if isinstance(spec, ComputeSpec):
         return _compute(
@@ -240,5 +263,8 @@ def _execute_operation(
             node_outputs,
             scalars=scalars,
             scalar_types=scalar_types,
+            node_output_types=node_output_types,
+            environment_values=environment_values,
+            environment_types=environment_types,
         )
     assert_never(spec)

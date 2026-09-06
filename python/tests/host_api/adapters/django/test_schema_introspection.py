@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.db import models
+import pytest
 from rest_framework import generics, serializers
 
 from fervis.host_api.adapters.django.schema_introspection import (
@@ -12,6 +13,37 @@ from fervis.host_api.adapters.django.schema_introspection import (
     relation_keys_from_serializer,
     response_fields_from_serializer,
 )
+
+
+@pytest.mark.parametrize("key_field", [models.UUIDField, models.CharField])
+def test_related_object_display_is_not_certified_as_its_primary_key(key_field):
+    class Target(models.Model):
+        target_id = key_field(primary_key=True)
+
+        class Meta:
+            app_label = f"test_display_reference_{key_field.__name__.lower()}"
+
+    class Observation(models.Model):
+        target = models.ForeignKey(Target, on_delete=models.CASCADE)
+
+        class Meta:
+            app_label = f"test_display_reference_{key_field.__name__.lower()}"
+
+    class ObservationSerializer(serializers.ModelSerializer):
+        label = serializers.CharField(source="target", read_only=True)
+        explicit_key = serializers.ReadOnlyField(source="target.target_id")
+
+        class Meta:
+            model = Observation
+            fields = ("target", "target_id", "explicit_key", "label")
+
+    inspection = inspect_response_serializer(ObservationSerializer)
+
+    assert {component.local_field_path for reference in inspection.entity_references
+            for component in reference.components} == {
+        "target", "target_id", "explicit_key",
+    }
+    assert next(field for field in inspection.response_fields if field.name == "label").type == "string"
 
 
 def test_foreign_key_path_param_targets_the_related_candidate_key() -> None:
@@ -137,6 +169,34 @@ def test_plain_response_serializer_derives_keys_and_references_from_model_contex
     assert authority.entity_kind == "location"
     assert authority.key_id == "primary_key"
     assert authority.components[0].type == "uuid"
+
+
+def test_nested_many_serializer_declares_its_own_row_identity() -> None:
+    class Location(models.Model):
+        location_id = models.UUIDField(primary_key=True)
+
+        class Meta:
+            app_label = "test_schema_introspection_nested_many_identity"
+
+    class LocationRowSerializer(serializers.Serializer):
+        location_id = serializers.UUIDField()
+
+        class Meta:
+            model = Location
+
+    class ReportSerializer(serializers.Serializer):
+        data = LocationRowSerializer(many=True)
+
+    inspection = inspect_response_serializer(ReportSerializer)
+
+    assert tuple(
+        (
+            key.entity_kind,
+            key.key_id,
+            tuple(component.field_path for component in key.components),
+        )
+        for key in inspection.candidate_keys
+    ) == (("location", "primary_key", ("data.location_id",)),)
 
 
 def test_method_field_name_does_not_override_declared_relation_structure():

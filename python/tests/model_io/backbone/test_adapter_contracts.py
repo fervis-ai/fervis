@@ -132,11 +132,12 @@ def test_question_frame_schema_is_decisions_only():
     } == {
         "has_one_of": True,
         "root_required": ["decision_basis", "outcome"],
-        "answer_required": [
-            "kind",
-            "answer_requests",
-            "supplied_values",
-        ],
+            "answer_required": [
+                "kind",
+                "answer_requests",
+                "supplied_values",
+                "question_input_inventory_check",
+            ],
         "answer_kind_enum": ["question_meaning"],
         "missing_fact_required": [
             "kind",
@@ -1935,3 +1936,14 @@ def test_stub_adapter_passes_contract_smoke_test(fervis_foundation_reset):
         "stub:hello",
         "stub",
     )
+
+
+def test_provider_connection_diagnostics_preserve_cause_types_without_cause_text():
+    from fervis.model_io.providers.chat_runtime import _provider_error_context
+    cause = ConnectionResetError('private connection details')
+    error = RuntimeError('Connection error.')
+    error.__cause__ = cause
+    payload = provider_error_payload(error)
+    assert payload['errorCauses'] == ['builtins.ConnectionResetError']
+    assert 'private connection details' not in str(payload)
+    assert _provider_error_context(payload)['provider_metadata']['errorCauses'] == ['builtins.ConnectionResetError']

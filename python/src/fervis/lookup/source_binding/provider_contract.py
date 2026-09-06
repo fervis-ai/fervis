@@ -11,22 +11,13 @@ from fervis.lookup.provider_contract import ProviderOutput
 class SetRealizationOutput(ProviderOutput):
     branch_id: str
     mapping_basis: str
-    source_ref: str
-    identity_ref: str | None
-
-
-@dataclass(frozen=True)
-class IdentifierFactRealizationOutput(ProviderOutput):
-    branch_id: str
-    mapping_basis: str
-    source_ref: str
+    rows_ref: str
 
 
 @dataclass(frozen=True)
 class ReturnedFactRealizationOutput(ProviderOutput):
     branch_id: str
     mapping_basis: str
-    source_ref: str
     field_ref: str
 
 
@@ -34,7 +25,10 @@ class ReturnedFactRealizationOutput(ProviderOutput):
 class AssociationRealizationOutput(ProviderOutput):
     branch_id: str
     mapping_basis: str
+    from_rows_ref: str
+    to_rows_ref: str
     realization_ref: str
+    reference_from_set_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,49 +48,29 @@ class FiniteChoiceApplicationOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class SubjectChoiceReviewOutput(ProviderOutput):
-    choice_domain_meaning: str
-    role_match_basis: str
-    matched_excluded_role: str
-    choice_inclusion_basis: str
-    choice_inclusion: str
+class ChoiceRequirementApplicationOutput(ProviderOutput):
+    mapping_basis: str
+    selected_by_requirements: tuple[str, ...]
 
 
 @dataclass(frozen=True)
-class SubjectSurfaceReviewOutput(ProviderOutput):
-    surface_mapping_basis: str
-    choice_reviews: dict[str, SubjectChoiceReviewOutput]
-
-
-@dataclass(frozen=True)
-class SubjectObligationRealizationOutput(ProviderOutput):
-    branch_id: str
-    finite_choice_reviews: dict[str, SubjectSurfaceReviewOutput]
-
-
-@dataclass(frozen=True)
-class SubjectObligationBindingOutput(ProviderOutput):
-    subject_ref: str
-    branch_realizations: tuple[SubjectObligationRealizationOutput, ...]
+class SourceRealizationOutput(ProviderOutput):
+    set_bindings: dict[str, tuple[SetRealizationOutput, ...]]
+    fact_bindings: dict[str, tuple[ReturnedFactRealizationOutput, ...]]
+    association_bindings: dict[str, tuple[AssociationRealizationOutput, ...]]
 
 
 @dataclass(frozen=True)
 class SemanticSourceBindingOutput(ProviderOutput):
-    set_bindings: dict[str, tuple[SetRealizationOutput, ...]]
     resolved_input_applications: dict[
         str,
         tuple[ResolvedInputApplicationOutput, ...],
     ]
     finite_choice_applications: dict[
         str,
-        dict[str, FiniteChoiceApplicationOutput],
+        dict[str, FiniteChoiceApplicationOutput | None],
     ]
-    fact_bindings: dict[
-        str,
-        tuple[IdentifierFactRealizationOutput | ReturnedFactRealizationOutput, ...],
-    ]
-    association_bindings: dict[str, tuple[AssociationRealizationOutput, ...]]
-    subject_binding: SubjectObligationBindingOutput
+    choice_requirement_applications: dict[str, dict[str, dict[str, ChoiceRequirementApplicationOutput]]]
 
 
 __all__ = tuple(name for name in globals() if not name.startswith("_"))

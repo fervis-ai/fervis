@@ -8,10 +8,10 @@ from fervis.lookup.question_contract import (
     Comparison,
     Coverage,
     FactLocalRef,
-    FactLocalKind,
     FactTerm,
     NullCheck,
     Quantify,
+    RelatedRow,
     RequestedFactSemanticIndex,
 )
 from fervis.lookup.semantic_types import IdentifierType
@@ -42,101 +42,6 @@ def semantic_requirements_prompt_payload(
             item.output_ref.token for item in index.output_requirements
         ],
     }
-
-
-def plan_selection_fact_prompt_payload(
-    index: RequestedFactSemanticIndex,
-) -> dict[str, object]:
-    """Project the requested result meaning needed to assess source alignment."""
-
-    return {
-        "requested_fact_id": index.requested_fact_id,
-        "fact_text": index.requested_fact.origin.meaning,
-        "candidate_instance_kind": index.term_by_ref[
-            index.subject_obligation.subject_set_ref
-        ].origin.meaning,
-        "required_facts": [
-            _term_requirement_prompt_item(index, ref)
-            for ref in sorted(
-                index.term_requirement_refs,
-                key=lambda item: item.token,
-            )
-            if isinstance(index.term_by_ref[ref], FactTerm)
-        ],
-        "answer_outputs": [
-            _plan_selection_output_prompt_item(index, position)
-            for position, _ in enumerate(index.requested_fact.outputs)
-        ],
-        "qualification_clauses": [
-            {
-                "clause_ref": clause.clause_ref,
-                "conditions": [
-                    _local_value_meaning(
-                        index,
-                        FactLocalRef.from_token(atom.value_ref),
-                    )
-                    for atom in clause.atom_refs
-                ],
-            }
-            for clause in index.qualification.clauses
-        ],
-        "required_associations": [
-            {
-                "association_ref": ref.token,
-                "meaning": index.term_by_ref[ref].origin.meaning,
-            }
-            for ref in sorted(
-                index.association_requirement_refs,
-                key=lambda item: item.token,
-            )
-        ],
-        "grouping": [
-            {
-                "group_ref": ref.token,
-                "meaning": _local_value_meaning(index, ref),
-            }
-            for ref in index.grouping_refs
-        ],
-        "ordering": [
-            {
-                "ordering_ref": ref.token,
-                "meaning": _local_value_meaning(index, ref),
-            }
-            for ref in index.ordering_refs
-        ],
-    }
-
-
-def _plan_selection_output_prompt_item(
-    index: RequestedFactSemanticIndex,
-    position: int,
-) -> dict[str, str]:
-    output = index.requested_fact.outputs[position]
-    requirement = index.output_requirements[position]
-    payload = {
-        "answer_output_id": output.id,
-        "meaning": output.origin.meaning,
-    }
-    identified_set_ref: FactLocalRef | None = None
-    if (
-        isinstance(requirement.value_ref, FactLocalRef)
-        and requirement.value_ref.kind is FactLocalKind.SET
-    ):
-        identified_set_ref = requirement.value_ref
-    else:
-        value_type = index.inferred_type_by_ref[requirement.value_ref]
-        if isinstance(value_type, IdentifierType):
-            identified_set_ref = index.fact_local_ref_by_local_id[
-                value_type.set_ref
-            ]
-    if identified_set_ref is not None:
-        payload.update(
-            value_kind="canonical_identity",
-            identified_set_meaning=index.term_by_ref[
-                identified_set_ref
-            ].origin.meaning,
-        )
-    return payload
 
 
 def _local_value_meaning(index: RequestedFactSemanticIndex, ref) -> str:
@@ -220,6 +125,11 @@ def _boolean_condition_prompt_item(
     elif isinstance(node, Quantify):
         operator = node.quantifier.value
         operand_refs = (node.condition_ref,)
+    elif isinstance(node, RelatedRow):
+        operator = "related_row"
+        operand_refs = (
+            () if node.condition_ref is None else (node.condition_ref,)
+        )
     elif isinstance(node, Coverage):
         operator = "coverage"
         operand_refs = (
@@ -266,6 +176,5 @@ def _semantic_operand_prompt_item(
 
 __all__ = [
     "boolean_requirement_prompt_items",
-    "plan_selection_fact_prompt_payload",
     "semantic_requirements_prompt_payload",
 ]

@@ -240,6 +240,8 @@
         "questions.projection",
         "relation_catalog.row_source_projection",
         "semantic.kernel",
+        "semantic.field_capability",
+        "semantic.operator_signature",
         "semantic.query_enrichment",
         "semantic.question_contract",
         "semantic.source_binding",

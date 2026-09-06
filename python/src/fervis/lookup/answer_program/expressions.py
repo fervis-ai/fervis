@@ -18,6 +18,7 @@ from .values import ConstantRef, EnvironmentRef, NodeOutputRef, ParameterRef
 
 class ExpressionFunction(StrEnum):
     TEMPORAL_BUCKET = "temporal_bucket"
+    ROW_NUMBER = "row_number"
 
 
 @dataclass(frozen=True)
@@ -48,8 +49,9 @@ class FunctionExpression:
     arguments: tuple[Expression, ...]
 
     def __post_init__(self) -> None:
-        if not self.arguments:
-            raise ValueError("function expression requires arguments")
+        required_arity = {ExpressionFunction.TEMPORAL_BUCKET:3, ExpressionFunction.ROW_NUMBER:0}[self.function]
+        if len(self.arguments) != required_arity:
+            raise ValueError("function expression has invalid arity")
 
 
 Expression: TypeAlias = (

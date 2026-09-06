@@ -127,6 +127,7 @@ def execute_identity_selection(
         value = FactValue.identity_set(
             id=f"{input_term.id}:identity_set",
             keys=tuple(keys),
+            identity_evidence=tuple(evidence for resolved in resolved_values for evidence in resolved.identity_evidence),
             display_value=", ".join(operands),
             proof_refs=tuple(dict.fromkeys(certification_refs)),
             source_refs=tuple(

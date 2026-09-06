@@ -78,14 +78,6 @@ def test_every_expression_node_round_trips_through_the_answer_program_codec() ->
         function=ExpressionFunction.TEMPORAL_BUCKET,
         arguments=(
             FieldRef("recorded_at"),
-            UnaryExpression(
-                operator=ExpressionUnaryOperator.NEGATE,
-                operand=BinaryExpression(
-                    operator=ExpressionBinaryOperator.ADD,
-                    left=ParameterRef("question.offset"),
-                    right=NodeOutputRef("prior", "amount"),
-                ),
-            ),
             ConstantRef(
                 constant_id="grain",
                 version_ref="test@1",
@@ -103,6 +95,27 @@ def test_every_expression_node_round_trips_through_the_answer_program_codec() ->
             Operation(
                 id="expression",
                 spec=ComputeSpec(expression=expression, output_scalar="value"),
+            ),
+            Operation(
+                id="arithmetic",
+                spec=ComputeSpec(
+                    expression=UnaryExpression(
+                        operator=ExpressionUnaryOperator.NEGATE,
+                        operand=BinaryExpression(
+                            operator=ExpressionBinaryOperator.ADD,
+                            left=ParameterRef("question.offset"),
+                            right=NodeOutputRef("prior", "amount"),
+                        ),
+                    ),
+                    output_scalar="arithmetic",
+                ),
+            ),
+            Operation(
+                id="row_number",
+                spec=ComputeSpec(
+                    expression=FunctionExpression(ExpressionFunction.ROW_NUMBER, ()),
+                    output_scalar="row_number",
+                ),
             ),
         )
     )
@@ -167,7 +180,7 @@ def test_expression_evaluator_composes_boolean_conditions() -> None:
         ExpressionBinaryOperator.GTE,
     ),
 )
-def test_comparisons_with_null_are_false(
+def test_comparisons_with_null_are_unknown(
     operator: ExpressionBinaryOperator,
 ) -> None:
     result = evaluate_expression(
@@ -184,7 +197,8 @@ def test_comparisons_with_null_are_false(
         ),
     )
 
-    assert result.value is False
+    assert result.value is None
+    assert result.value_type == "boolean"
 
 
 def test_field_expression_requires_row_context() -> None:
@@ -290,9 +304,7 @@ def test_compute_consumes_one_scalar_output_from_a_prior_aggregate() -> None:
                         {"amount": Decimal("30")},
                     ),
                     field_types={"amount": "decimal"},
-                    completeness=CompletenessProof(
-                        status=CompletenessStatus.COMPLETE
-                    ),
+                    completeness=CompletenessProof(status=CompletenessStatus.COMPLETE),
                 ),
             ),
             operations=(

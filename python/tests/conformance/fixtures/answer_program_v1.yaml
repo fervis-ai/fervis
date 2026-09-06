@@ -1,7 +1,7 @@
 schema_revision: 1
 programs:
   canonical_a:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -16,6 +16,7 @@ programs:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: plan.limit
               role:
                 $enum: ParameterRole
@@ -31,6 +32,7 @@ programs:
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.place
               role:
                 $enum: ParameterRole
@@ -60,14 +62,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
+            schema_revision: 13
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   canonical_b:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -82,6 +84,7 @@ programs:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: plan.limit
               role:
                 $enum: ParameterRole
@@ -97,6 +100,7 @@ programs:
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.place
               role:
                 $enum: ParameterRole
@@ -122,14 +126,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
+            schema_revision: 13
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   compile_catalog_default:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -149,6 +153,7 @@ programs:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -260,14 +265,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
+            schema_revision: 13
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   compile_hidden_value:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -287,6 +292,7 @@ programs:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -400,14 +406,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
+            schema_revision: 13
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   invocation:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -450,14 +456,14 @@ programs:
               ordering: {$tuple: []}
               selection: {$type: AllResults, fields: {}}
               distinct_by: {$tuple: []}
-        fulfillment:
+        fulfillment: &invocation_fulfillment
           $tuple:
           - $type: FactFulfillment
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
               result_output_id: answer_1
-        relation_guarantees:
+        relation_guarantees: &invocation_relation_guarantees
           $tuple:
           - $type: RelationGuaranteeDeclaration
             fields:
@@ -483,10 +489,11 @@ programs:
                   subject_set_ref: fact_1:set:s1
                   interpretation: NormalBusinessInstance
                   proof_refs: {$tuple: [sales]}
-        parameters:
+        parameters: &invocation_parameters
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -502,6 +509,7 @@ programs:
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.sale_states
               role:
                 $enum: ParameterRole
@@ -519,7 +527,7 @@ programs:
               semantic_control_ref: sales.state_population
         capabilities:
           $tuple: []
-        relations:
+        relations: &invocation_relations
           $tuple:
           - $type: Relation
             fields:
@@ -615,38 +623,38 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 13
+            compiler_version: fervis.answer_program.compiler@4
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -655,9 +663,71 @@ programs:
                     $enum: SourceContractKind
                     value: catalog_read
                   source_id: rs_c9f84da27ca2f8d1
-                  fingerprint: e5f219437b6d51ec5e9f09abaccfc93da03eb8974bcae5656647fa59278c801b
+                  fingerprint: cbd5b34acb360f4360860465922136a9639ea10a5cf7dd96078eb2d54ad7f2a7
+  direct_invocation:
+    schema_revision: 13
+    program:
+      $type: AnswerProgram
+      fields:
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: *semantic_fact_template
+        fulfillment: *invocation_fulfillment
+        relation_guarantees: *invocation_relation_guarantees
+        parameters: *invocation_parameters
+        capabilities: {$tuple: []}
+        relations: *invocation_relations
+        operations: {$tuple: []}
+        result_projection:
+          $type: ResultProjection
+          fields:
+            relation_outputs:
+              $tuple:
+              - $type: RelationResultOutput
+                fields:
+                  id: answer_1
+                  relation_id: sales_rows
+                  field_id: ''
+                  entity_key:
+                    $type: EntityKeyProjection
+                    fields:
+                      entity_kind: sale
+                      key_id: primary_key
+                      components:
+                        $tuple:
+                        - $type: EntityKeyProjectionComponent
+                          fields: {component_id: sale_id, field_id: sale_id}
+                  label: ''
+                  role: answer_value
+            scalar_outputs: {$tuple: []}
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 13
+            compiler_version: fervis.answer_program.compiler@4
+            function_semantics:
+              $tuple:
+              - $type: FunctionSemanticVersion
+                fields: {function_key: answer.classify, version: '3'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: answer.materialize, version: '3'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: fact.materialize, version: '3'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: proof.construct, version: '3'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: source.instantiate_read, version: '3'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: source.read_relation, version: '3'}
+            source_contracts:
+              $tuple:
+              - $type: SourceContractPin
+                fields:
+                  kind: {$enum: SourceContractKind, value: catalog_read}
+                  source_id: rs_c9f84da27ca2f8d1
+                  fingerprint: cbd5b34acb360f4360860465922136a9639ea10a5cf7dd96078eb2d54ad7f2a7
   memory_backed:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -696,18 +766,18 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 13
+            compiler_version: fervis.answer_program.compiler@4
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.classify, version: '1'}
+                fields: {function_key: answer.classify, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.materialize, version: '1'}
+                fields: {function_key: answer.materialize, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: fact.materialize, version: '1'}
+                fields: {function_key: fact.materialize, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: proof.construct, version: '1'}
+                fields: {function_key: proof.construct, version: '3'}
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -716,7 +786,7 @@ programs:
                   source_id: mem_fe7f674c7ac59e4a
                   fingerprint: 8a2f05f7e1f6c2aee3b39cb8f1d4572306d28bfbd81a671f099af87d915638f2
   population_required:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -736,6 +806,7 @@ programs:
           - &population_question_parameter
             $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -751,6 +822,7 @@ programs:
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.store_population
               role:
                 $enum: ParameterRole
@@ -893,42 +965,42 @@ programs:
         compatibility: &population_compatibility
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 13
+            compiler_version: fervis.answer_program.compiler@4
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.filter
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -939,7 +1011,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   population_scalar_invalid:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -953,6 +1025,7 @@ programs:
           - *population_question_parameter
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.store_population
               role: {$enum: ParameterRole, value: semantic_control}
               value_type: {$enum: ParameterValueType, value: string}
@@ -965,7 +1038,7 @@ programs:
         result_projection: *population_result_projection
         compatibility: *population_compatibility
   population_plan_control_invalid:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -979,6 +1052,7 @@ programs:
           - *population_question_parameter
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.store_population
               role: {$enum: ParameterRole, value: plan_control}
               value_type: {$enum: ParameterValueType, value: string_set}
@@ -991,7 +1065,7 @@ programs:
         result_projection: *population_result_projection
         compatibility: *population_compatibility
   population_optional:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -1010,6 +1084,7 @@ programs:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -1025,6 +1100,7 @@ programs:
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.store_population
               role:
                 $enum: ParameterRole
@@ -1169,42 +1245,42 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 13
+            compiler_version: fervis.answer_program.compiler@4
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.row_filter
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1215,7 +1291,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   capability:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -1234,6 +1310,7 @@ programs:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -1255,6 +1332,7 @@ programs:
               parameter:
                 $type: ParameterDeclaration
                 fields:
+                  fixed_value_fingerprint: ''
                   id: semantic.sale_channels
                   role:
                     $enum: ParameterRole
@@ -1281,7 +1359,7 @@ programs:
               proof_refs:
                 $tuple:
                 - capability:sales.channel
-              function_semantics_version: '1'
+              function_semantics_version: '3'
               kind:
                 $enum: CapabilityKind
                 value: narrow_population
@@ -1388,46 +1466,46 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 13
+            compiler_version: fervis.answer_program.compiler@4
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: program.capability.narrow_population
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: program.capability.narrow_population
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1438,7 +1516,7 @@ programs:
                   source_id: sales
                   fingerprint: e7351d0771a04bb0704b7babf7f953eb634c0b1f8a0e9d88dffbf3ed981ab612
   incompatible_compiler:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -1457,6 +1535,7 @@ programs:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -1472,6 +1551,7 @@ programs:
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.sale_states
               role:
                 $enum: ParameterRole
@@ -1585,38 +1665,38 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
-            compiler_version: incompatible.compiler@1
+            schema_revision: 13
+            compiler_version: incompatible.compiler@2
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1627,7 +1707,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   incompatible_function:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -1646,6 +1726,7 @@ programs:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -1661,6 +1742,7 @@ programs:
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.sale_states
               role:
                 $enum: ParameterRole
@@ -1774,8 +1856,8 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 13
+            compiler_version: fervis.answer_program.compiler@4
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
@@ -1785,27 +1867,27 @@ programs:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1816,7 +1898,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   compute_versioned_constant:
-    schema_revision: 8
+    schema_revision: 13
     program:
       $type: AnswerProgram
       fields:
@@ -1913,20 +1995,20 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 8
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 13
+            compiler_version: fervis.answer_program.compiler@4
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.classify, version: '1'}
+                fields: {function_key: answer.classify, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.materialize, version: '1'}
+                fields: {function_key: answer.materialize, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: fact.materialize, version: '1'}
+                fields: {function_key: fact.materialize, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: proof.construct, version: '1'}
+                fields: {function_key: proof.construct, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: relation.compute, version: '1'}
+                fields: {function_key: relation.compute, version: '3'}
             source_contracts: {$tuple: []}
 binding_sets:
   invocation:

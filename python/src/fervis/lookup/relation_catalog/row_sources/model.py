@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from fervis.host_api.contracts import ParameterSemantics
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from fervis.types.enums import StrEnum
 
 from fervis.lookup.relation_catalog.model import (
@@ -14,16 +17,14 @@ from fervis.lookup.relation_catalog.model import (
 from fervis.lookup.relation_catalog.parameter_values import CatalogParameterValue
 from fervis.lookup.answer_program.relations import FieldBindingRole
 
+if TYPE_CHECKING:
+    from fervis.lookup.semantic_types import ValueType
+
 
 class RowSourceKind(StrEnum):
     API_READ = "api_read"
     MEMORY_READ = "memory_read"
     GENERATED_CALENDAR = "generated_calendar"
-
-
-class RowSourceParamSemantics(StrEnum):
-    OPAQUE_QUERY_PARAM = "opaque_query_param"
-    RESPONSE_SHAPE = "response_shape"
 
 
 class RowSourceValueType(StrEnum):
@@ -73,10 +74,17 @@ class RowSourceField:
     path: str = ""
     response_path: str = ""
     description: str = ""
+    declared_entity_kind: str = ""
+
+    @property
+    def finite_choices(self) -> tuple[str, ...]:
+        return self.choices or (
+            ("false", "true") if self.type is RowSourceValueType.BOOLEAN else ()
+        )
 
     @property
     def can_carry_lookup_text(self) -> bool:
-        return self.type in {
+        return not self.declared_entity_kind and self.type in {
             RowSourceValueType.STRING,
             RowSourceValueType.ARRAY,
             RowSourceValueType.LIST,
@@ -98,7 +106,7 @@ class RowSourceParam:
     default: CatalogParameterValue = None
     default_source: str = ""
     entity_target: EntityKeyComponentTarget | None = None
-    semantics: RowSourceParamSemantics = RowSourceParamSemantics.OPAQUE_QUERY_PARAM
+    semantics: ParameterSemantics = ParameterSemantics.OPAQUE_QUERY_PARAM
 
     @property
     def accepts_lookup_text(self) -> bool:
@@ -144,13 +152,72 @@ class RowSourceEntityReference:
     context_field_ids: tuple[str, ...] = ()
 
 
+class RowSourceIdentityKind(StrEnum):
+    ENTITY_ROW = "entity_row"
+    ENTITY_REFERENCE = "entity_reference"
+
+
 @dataclass(frozen=True)
 class RowSourceIdentityEvidence:
     identity_ref: str
+    kind: RowSourceIdentityKind
     source_ref: str
     entity_kind: str
     key_id: str
     field_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RowSourceRelationEvidence:
+    evidence_ref: str
+    left_source_ref: str
+    right_source_ref: str
+    left_field_refs: tuple[str, ...]
+    right_field_refs: tuple[str, ...]
+
+
+def row_source_relation_evidence(
+    sources: tuple[RowSource, ...],
+) -> tuple[RowSourceRelationEvidence, ...]:
+    """Project declared entity references onto compatible candidate keys."""
+
+    evidence: list[RowSourceRelationEvidence] = []
+    for left in sources:
+        for reference in left.entity_references:
+            local_by_component = {
+                component.target_component_id: component.local_field_id
+                for component in reference.components
+            }
+            for right in sources:
+                for key in right.candidate_keys:
+                    if (
+                        key.entity_kind != reference.target_entity_kind
+                        or key.id != reference.target_key_id
+                    ):
+                        continue
+                    right_by_component = {
+                        component.id: component.field_id for component in key.components
+                    }
+                    if set(local_by_component) != set(right_by_component):
+                        continue
+                    component_ids = tuple(sorted(local_by_component))
+                    evidence.append(
+                        RowSourceRelationEvidence(
+                            evidence_ref=(
+                                f"source_relation:{left.id}:{reference.id}:"
+                                f"{right.id}:{key.id}"
+                            ),
+                            left_source_ref=left.id,
+                            right_source_ref=right.id,
+                            left_field_refs=tuple(
+                                local_by_component[item] for item in component_ids
+                            ),
+                            right_field_refs=tuple(
+                                right_by_component[item] for item in component_ids
+                            ),
+                        )
+                    )
+    return tuple(sorted(evidence, key=lambda item: item.evidence_ref))
 
 
 def row_source_value_type(raw_value: str) -> RowSourceValueType:
@@ -192,6 +259,18 @@ class RowSource:
     params: tuple[RowSourceParam, ...] = ()
     blocked_facts: tuple[RowSourceBlockedFact, ...] = ()
 
+    def fields_supporting_type(
+        self, value_type: ValueType
+    ) -> tuple[RowSourceField, ...]:
+        """Return declared fields admissible under the shared value-type rules."""
+        from .semantic_types import row_source_type_supports_semantic_type
+
+        return tuple(
+            field
+            for field in self.fields
+            if row_source_type_supports_semantic_type(field.type, value_type)
+        )
+
     def field(self, field_id: str) -> RowSourceField:
         for item in self.fields:
             if item.id == field_id:
@@ -203,6 +282,7 @@ class RowSource:
         return tuple(
             RowSourceIdentityEvidence(
                 identity_ref=f"source_identity:{self.id}:candidate_key:{key.id}",
+                kind=RowSourceIdentityKind.ENTITY_ROW,
                 source_ref=self.id,
                 entity_kind=key.entity_kind,
                 key_id=key.id,
@@ -218,6 +298,7 @@ class RowSource:
                     f"source_identity:{self.id}:entity_reference:{reference.id}"
                 ),
                 source_ref=self.id,
+                kind=RowSourceIdentityKind.ENTITY_REFERENCE,
                 entity_kind=reference.target_entity_kind,
                 key_id=reference.target_key_id,
                 field_refs=tuple(

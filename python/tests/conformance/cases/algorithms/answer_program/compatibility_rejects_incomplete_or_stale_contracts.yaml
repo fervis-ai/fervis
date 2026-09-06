@@ -18,15 +18,15 @@ input:
           value: {kind: string_set, values: [COMPLETED]}
           provenance: {kind: semantic_choice}
       compatibility: &missing_function
-        schema_revision: 8
-        compiler_version: fervis.answer_program.compiler@1
+        schema_revision: 13
+        compiler_version: fervis.answer_program.compiler@4
         function_semantics:
-          - {function_key: answer.materialize, version: '1'}
-          - {function_key: fact.materialize, version: '1'}
-          - {function_key: proof.construct, version: '1'}
-          - {function_key: relation.project, version: '1'}
-          - {function_key: source.instantiate_read, version: '1'}
-          - {function_key: source.read_relation, version: '1'}
+          - {function_key: answer.materialize, version: '3'}
+          - {function_key: fact.materialize, version: '3'}
+          - {function_key: proof.construct, version: '3'}
+          - {function_key: relation.project, version: '3'}
+          - {function_key: source.instantiate_read, version: '3'}
+          - {function_key: source.read_relation, version: '3'}
         source_contracts: &sources
           - {kind: catalog_read, source_id: rs_c9f84da27ca2f8d1, fingerprint: e5f219437b6d51ec5e9f09abaccfc93da03eb8974bcae5656647fa59278c801b}
     - <<: *base_attempt
@@ -34,28 +34,28 @@ input:
       compatibility:
         <<: *missing_function
         function_semantics:
-          - {function_key: answer.classify, version: '1'}
-          - {function_key: answer.materialize, version: '1'}
-          - {function_key: fact.materialize, version: '1'}
-          - {function_key: proof.construct, version: '1'}
-          - {function_key: relation.aggregate, version: '1'}
-          - {function_key: relation.project, version: '1'}
-          - {function_key: source.instantiate_read, version: '1'}
-          - {function_key: source.read_relation, version: '1'}
+          - {function_key: answer.classify, version: '3'}
+          - {function_key: answer.materialize, version: '3'}
+          - {function_key: fact.materialize, version: '3'}
+          - {function_key: proof.construct, version: '3'}
+          - {function_key: relation.aggregate, version: '3'}
+          - {function_key: relation.project, version: '3'}
+          - {function_key: source.instantiate_read, version: '3'}
+          - {function_key: source.read_relation, version: '3'}
         source_contracts: *sources
     - <<: *base_attempt
       id: incompatible_compiler
       compatibility:
         <<: *missing_function
-        compiler_version: incompatible.compiler@1
+        compiler_version: incompatible.compiler@2
         function_semantics: &functions
-          - {function_key: answer.classify, version: '1'}
-          - {function_key: answer.materialize, version: '1'}
-          - {function_key: fact.materialize, version: '1'}
-          - {function_key: proof.construct, version: '1'}
-          - {function_key: relation.project, version: '1'}
-          - {function_key: source.instantiate_read, version: '1'}
-          - {function_key: source.read_relation, version: '1'}
+          - {function_key: answer.classify, version: '3'}
+          - {function_key: answer.materialize, version: '3'}
+          - {function_key: fact.materialize, version: '3'}
+          - {function_key: proof.construct, version: '3'}
+          - {function_key: relation.project, version: '3'}
+          - {function_key: source.instantiate_read, version: '3'}
+          - {function_key: source.read_relation, version: '3'}
         source_contracts: *sources
     - <<: *base_attempt
       id: incompatible_function
@@ -63,12 +63,19 @@ input:
         <<: *missing_function
         function_semantics:
           - {function_key: answer.classify, version: incompatible}
-          - {function_key: answer.materialize, version: '1'}
-          - {function_key: fact.materialize, version: '1'}
-          - {function_key: proof.construct, version: '1'}
-          - {function_key: relation.project, version: '1'}
-          - {function_key: source.instantiate_read, version: '1'}
-          - {function_key: source.read_relation, version: '1'}
+          - {function_key: answer.materialize, version: '3'}
+          - {function_key: fact.materialize, version: '3'}
+          - {function_key: proof.construct, version: '3'}
+          - {function_key: relation.project, version: '3'}
+          - {function_key: source.instantiate_read, version: '3'}
+          - {function_key: source.read_relation, version: '3'}
+        source_contracts: *sources
+    - <<: *base_attempt
+      id: previous_compiler
+      compatibility:
+        <<: *missing_function
+        compiler_version: fervis.answer_program.compiler@3
+        function_semantics: *functions
         source_contracts: *sources
     - <<: *base_attempt
       id: incompatible_source
@@ -84,4 +91,5 @@ expect:
       - {id: extra_function, status: rejected, code: incomplete_compatibility_manifest, reads: 0}
       - {id: incompatible_compiler, status: rejected, code: incompatible_compiler_version, reads: 0}
       - {id: incompatible_function, status: rejected, code: incompatible_function_semantics, reads: 0}
+      - {id: previous_compiler, status: rejected, code: incompatible_compiler_version, reads: 0}
       - {id: incompatible_source, status: rejected, code: incompatible_source_contract, reads: 0}

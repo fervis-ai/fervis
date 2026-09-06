@@ -1,44 +1,74 @@
 id: distinct_set_refs_require_declared_association
-description: Two explicit set refs remain distinct even when their origins match, so a source-backed second set requires a declared association from the candidate set.
+description: An expression cannot reference a set that was never introduced from the candidate graph.
 kind: algorithm
 algorithm: semantic.question_contract
 input:
-  question_context_texts: ["How many facilities are there?"]
+  question_context_texts:
+  - How many facilities are there?
   frame_payload:
     decision_basis: The question asks for one count of qualifying facilities.
     outcome:
       kind: question_meaning
       answer_requests:
-        - result_kind: scalar
-          qualifying_row_kind: {meaning: facilities, origin: {kind: question}}
-          grouping_meanings: []
-          return_request_basis: Return the facility count.
-          returned_result: {kind: values}
-          answer_values:
-            - {value_ref: v1, meaning: facility count, origin: {kind: question}}
-          returned_value_refs: [v1]
-          ordering_value_refs: []
-          selection: {kind: all_results}
-          universal_shape: none
-      supplied_values: []
+      - return_request_basis: Return the facility count.
+        relational_shape_basis: The requested relational shape is ordinary.
+        request:
+          relational_shape: ordinary
+          result_grain_basis: The requested result grain is one_value_for_population.
+          result:
+            kind: one_value_for_population
+            population_rows:
+              instance_kind: facilities
+              origin:
+                kind: question
+            returned_meanings:
+            - meaning_ref: r1
+              meaning: facility count
+              origin:
+                kind: question
+            result_order:
+              ordering_request_basis: The question requests no ordering.
+              ordering:
+                kind: no_ordering_requested
+              selection:
+                kind: all_results
+      supplied_values:
+        selection_limits: []
+        operands: []
+      question_input_inventory_check:
+        all_input_like_phrases_declared: true
   payload:
     decision_basis: Count the qualifying facilities.
     outcome:
       kind: question_contract
       answer_requests:
-        - requested_fact_ref: fact_1
-          origin: {source: question_context, meaning: facility count, resolved_input_ref: null}
-          other_sets:
-            - id: s2
-              origin: {source: question_context, meaning: facilities, resolved_input_ref: null}
-          other_associations: []
-          candidate_set: {instance_interpretation: normal_business_instance}
-          qualification: null
-          grouping: []
-          ordering: []
-          selection: null
-          distinct_by: []
-          outputs:
-            - {expression: {kind: aggregate, function: count, argument: {kind: set_ref, set_ref: s2}, distinct_argument: false}}
+      - requested_fact_ref: fact_1
+        origin:
+          source: question_context
+          meaning: facility count
+          resolved_input_ref: null
+        candidate_set:
+          instance_interpretation: normal_business_instance
+        set_graph:
+          identity_input_relations: {}
+          requested_output_relations: {}
+          other_related_sets: []
+        qualification: null
+        grouping: []
+        ordering: []
+        selection: null
+        distinct_by: []
+        outputs:
+          result_key_outputs: []
+          requested_value_outputs:
+          - output_ref: r1
+            expression:
+              kind: aggregate
+              function: count
+              argument:
+                kind: set_ref
+                set_ref: s2
+              distinct_argument: false
 expect:
-  result_contains: {status: rejected}
+  result_contains:
+    status: rejected

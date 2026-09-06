@@ -4,7 +4,6 @@ from dataclasses import field
 
 from ._shared import (
     FieldBindingRole,
-    FieldRef,
     NamedExpression,
     VerificationError,
     dataclass,
@@ -215,20 +214,9 @@ def _common_entity_keys(
     return tuple(key for key in contracts[0].entity_keys if key in common)
 
 
-def _project_contract_grain(
-    source: RelationContract,
-    fields: tuple[NamedExpression, ...],
-) -> tuple[str, ...]:
-    if not source.grain_keys:
-        return ()
-    projections = {
-        output.expression.field_id: output.output_field
-        for output in fields
-        if isinstance(output.expression, FieldRef)
-    }
-    if not all(field in projections for field in source.grain_keys):
-        return ()
-    return tuple(projections[field] for field in source.grain_keys)
+def _project_contract_grain(contract: RelationContract, outputs: tuple[NamedExpression, ...]) -> tuple[str, ...]:
+    from fervis.lookup.plan_execution.expression_schema import projected_grain
+    return projected_grain(contract.grain_keys, outputs)
 
 
 def _contract(

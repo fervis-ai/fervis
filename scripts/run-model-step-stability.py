@@ -52,6 +52,8 @@ PYTHON_SRC = REPO_ROOT / "python" / "src"
 REPO_PYTHON = REPO_ROOT / "python" / ".venv" / "bin" / "python"
 if REPO_PYTHON.exists() and Path(sys.executable).resolve() != REPO_PYTHON.resolve():
     os.execv(str(REPO_PYTHON), (str(REPO_PYTHON), *sys.argv))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(PYTHON_SRC) not in sys.path:
     sys.path.insert(0, str(PYTHON_SRC))
 
@@ -59,6 +61,9 @@ from fervis.model_io.backbone.dto import ToolSpec  # noqa: E402
 from fervis.model_io.backbone.factory import build_provider_backbone  # noqa: E402
 from fervis.model_io.structured_output.generation import (  # noqa: E402
     generate_one_of_tool_output,
+)
+from fervis.model_io.structured_output.schema import (  # noqa: E402
+    without_unreferenced_definitions,
 )
 from fervis.questions.contracts import DEFAULT_MAX_THINKING_TOKENS  # noqa: E402
 
@@ -85,6 +90,7 @@ class StabilityResult:
     arguments: dict[str, Any] | None
     errors: tuple[str, ...]
     arguments_hash: str = ""
+    usage: dict[str, Any] | None = None
 
     @property
     def passed(self) -> bool:
@@ -120,6 +126,11 @@ def _arguments() -> argparse.Namespace:
         help="Patch file to apply; repeat to layer one controlled change",
     )
     parser.add_argument("--assertion-file", type=Path)
+    parser.add_argument(
+        "--assertion-context",
+        type=Path,
+        help="JSON object containing only the assertion's expected outcomes",
+    )
     parser.add_argument("--provider")
     parser.add_argument("--model-key")
     parser.add_argument(
@@ -138,12 +149,18 @@ def main() -> int:
     if args.runs < 1 or args.workers < 1:
         raise SystemExit("--runs and --workers must be positive")
     patch = _combined_patches(args.patch_file or [])
+    assertion_context = (
+        _json_object(args.assertion_context)
+        if args.assertion_context is not None
+        else {}
+    )
     if args.boundary_file is not None:
         boundary = _load_standalone_boundary(
             args.boundary_file,
             patch=patch,
             provider_override=args.provider,
             model_key_override=args.model_key,
+            assertion_context=assertion_context,
         )
     else:
         if not args.step:
@@ -155,6 +172,7 @@ def main() -> int:
             patch=patch,
             provider_override=args.provider,
             model_key_override=args.model_key,
+            assertion_context=assertion_context,
         )
     assertion = _load_assertion(args.assertion_file)
     label = args.label or boundary.purpose
@@ -169,6 +187,7 @@ def main() -> int:
 
     def run(run_number: int) -> StabilityResult:
         generated_arguments: dict[str, Any] | None = None
+        usage: dict[str, Any] | None = None
         try:
             output = generate_one_of_tool_output(
                 model_port=model_port,
@@ -179,6 +198,7 @@ def main() -> int:
                 tool_specs=boundary.tool_specs,
             )
             generated_arguments = output.arguments
+            usage = dict(output.output["usage"])
             context = {
                 "label": label,
                 "run_number": run_number,
@@ -198,8 +218,12 @@ def main() -> int:
                 arguments=output.arguments,
                 errors=errors,
                 arguments_hash=sha256(canonical.encode()).hexdigest(),
+                usage=usage,
             )
         except Exception as exc:  # provider/schema boundary is reported per run
+            failure_output = getattr(exc, "output", None)
+            if isinstance(failure_output, dict) and isinstance(failure_output.get("usage"), dict):
+                usage = dict(failure_output["usage"])
             rejected_arguments = getattr(exc, "arguments", None)
             if generated_arguments is None and isinstance(rejected_arguments, dict):
                 generated_arguments = rejected_arguments
@@ -216,6 +240,7 @@ def main() -> int:
                 run_number=run_number,
                 arguments=generated_arguments,
                 errors=(f"{type(exc).__name__}: {exc!r}{cause}{provider_details}",),
+                usage=usage,
             )
 
     results: list[StabilityResult] = []
@@ -284,6 +309,7 @@ def _load_boundary(
     patch: dict[str, Any],
     provider_override: str | None,
     model_key_override: str | None,
+    assertion_context: dict[str, Any],
 ) -> ExperimentBoundary:
     index = _json_object(index_path)
     turns = [
@@ -317,6 +343,7 @@ def _load_boundary(
         raw_specs,
         patch.get("schema_property_removals", []),
     )
+    _apply_schema_transforms(raw_specs, patch.get("schema_transforms", []))
     tool_specs = tuple(_tool_spec(item) for item in raw_specs)
     if not tool_specs:
         raise ValueError("selected turn has no tool specs")
@@ -333,7 +360,10 @@ def _load_boundary(
         system_prompt=system_prompt,
         prompt=prompt,
         tool_specs=tool_specs,
-        assertion_context=dict(patch.get("assertion_context") or {}),
+        assertion_context={
+            **assertion_context,
+            **dict(patch.get("assertion_context") or {}),
+        },
     )
 
 
@@ -343,6 +373,7 @@ def _load_standalone_boundary(
     patch: dict[str, Any],
     provider_override: str | None,
     model_key_override: str | None,
+    assertion_context: dict[str, Any],
 ) -> ExperimentBoundary:
     value = _json_object(path)
     prompt = _replace_text(
@@ -363,6 +394,7 @@ def _load_standalone_boundary(
     _remove_named_schema_properties(
         raw_specs, patch.get("schema_property_removals", [])
     )
+    _apply_schema_transforms(raw_specs, patch.get("schema_transforms", []))
     tool_specs = tuple(_tool_spec(item) for item in raw_specs)
     provider = str(provider_override or value.get("provider") or "").strip()
     model_key = str(model_key_override or value.get("model_key") or "").strip()
@@ -380,6 +412,7 @@ def _load_standalone_boundary(
         tool_specs=tool_specs,
         assertion_context={
             **dict(value.get("assertion_context") or {}),
+            **assertion_context,
             **dict(patch.get("assertion_context") or {}),
         },
     )
@@ -400,6 +433,27 @@ def _replace_text(text: str, replacements: object, *, surface: str) -> str:
             )
         text = text.replace(old, new)
     return text
+
+
+def _apply_schema_transforms(
+    specs: list[dict[str, Any]],
+    transforms: object,
+) -> None:
+    specs_by_name = {str(spec.get("name") or ""): spec for spec in specs}
+    for item in transforms if isinstance(transforms, list) else []:
+        if not isinstance(item, dict):
+            raise ValueError("schema transform must be an object")
+        tool_name = str(item.get("tool_name") or "")
+        spec = specs_by_name.get(tool_name)
+        if spec is None:
+            raise ValueError(f"schema transform references unknown tool {tool_name!r}")
+        name = str(item.get("name") or "")
+        if name != "prune_unreferenced_definitions":
+            raise ValueError(f"unknown schema transform {name!r}")
+        input_schema = spec.get("input_schema")
+        if not isinstance(input_schema, dict):
+            raise ValueError(f"tool {tool_name!r} has no object input schema")
+        spec["input_schema"] = without_unreferenced_definitions(input_schema)
 
 
 def _apply_named_tool_patches(
@@ -654,6 +708,7 @@ def _serialized_result(result: StabilityResult) -> str:
                 "errors": list(result.errors),
                 "arguments_hash": result.arguments_hash,
                 "arguments": result.arguments,
+                "usage": result.usage,
             },
             sort_keys=True,
             default=str,

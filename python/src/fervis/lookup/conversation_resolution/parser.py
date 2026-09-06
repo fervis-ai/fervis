@@ -28,6 +28,7 @@ from fervis.lookup.conversation_resolution.model import (
     ResolutionSource,
     ResolutionSourceKind,
     ResolvedConversationClause,
+    RequestShapeSource,
     ResolvedConversationValue,
     ResolvedValueFrameArgument,
     SourceEvidence,
@@ -113,16 +114,14 @@ def _parse_outcome(value: ProviderObject, *, context: _ParseContext) -> _ParsedO
     if kind is _OutcomeKind.RESOLVED:
         item = value.parse_as(output.ResolvedOutcomeOutput)
         resolution_basis = _required_text(item.resolution_basis)
-        contextualized_question = _required_text(item.contextualized_question)
         clauses = _resolved_clauses(
             item.clauses,
-            contextualized_question=contextualized_question,
             context=context,
         )
         frame_call = _derived_frame_call(clauses, context=context)
         return _ParsedOutcome(
             resolution_basis=resolution_basis,
-            contextualized_question=contextualized_question,
+            contextualized_question=_render_resolved_question(clauses, context=context),
             clauses=clauses,
             frame_call=frame_call,
             unresolved=UnresolvedResolution(
@@ -230,14 +229,12 @@ def _unique_by_id(
 def _resolved_clauses(
     items: tuple[output.ResolvedClauseOutput, ...],
     *,
-    contextualized_question: str,
     context: _ParseContext,
 ) -> tuple[ResolvedConversationClause, ...]:
     clauses = tuple(
         _resolved_clause(
             item,
             path=f"clauses[{index}]",
-            contextualized_question=contextualized_question,
             context=context,
         )
         for index, item in enumerate(items)
@@ -249,7 +246,6 @@ def _resolved_clause(
     item: output.ResolvedClauseOutput,
     *,
     path: str,
-    contextualized_question: str,
     context: _ParseContext,
 ) -> ResolvedConversationClause:
     current_clause_text = _required_text(item.current_clause_text)
@@ -263,8 +259,6 @@ def _resolved_clause(
         path=f"{path}.current_clause_text",
     )
     resolved_text = _required_text(item.resolved_text)
-    if resolved_text not in contextualized_question:
-        raise ValueError(f"{path}.resolved_text must occur in contextualized_question")
     values = tuple(
         _resolved_value(
             value,
@@ -274,7 +268,23 @@ def _resolved_clause(
         )
         for index, value in enumerate(item.values)
     )
+    shape = RequestShapeSource(item.request_shape_source)
+    shape_sources: tuple[ContextAnchorSource, ...] = ()
+    if shape is RequestShapeSource.ACTIVE_CLARIFICATION:
+        sources = tuple(source for source in context.source_contracts.values() if source.kind == "active_clarification")
+        if len(sources) != 1:
+            raise ValueError("active clarification request shape requires one visible active clarification")
+        [source] = sources
+        anchors = tuple(anchor for anchor in source.meaning_anchors if anchor.kind == "original_question")
+        if len(anchors) != 1:
+            raise ValueError("active clarification request shape requires one original-question anchor")
+        [anchor] = anchors
+        shape_sources = (ContextAnchorSource(source.source_id, anchor.anchor_id, anchor.text),)
+    if (shape is RequestShapeSource.PRIOR_FRAME) != bool(item.retained_frame_parts):
+        raise ValueError("request shape source disagrees with retained frame parts")
     return ResolvedConversationClause(
+        request_shape_source=shape,
+        request_shape_sources=shape_sources,
         current_clause_text=current_clause_text,
         occurrence=occurrence,
         resolved_text=resolved_text,
@@ -590,16 +600,12 @@ def _used_sources(
 ) -> tuple[_SourceText, ...]:
     source_ids: list[str] = []
     for clause in clauses:
-        for retained in clause.retained_frame_parts:
-            for frame_source_id in context.frames[retained.frame_id].source_ids:
-                _append_unique(source_ids, frame_source_id)
-        for value in clause.values:
-            for source in value.sources:
-                for source_id in source.context_source_references():
-                    _append_unique(source_ids, source_id)
-                for frame_id, _ in source.frame_part_references():
-                    for frame_source_id in context.frames[frame_id].source_ids:
-                        _append_unique(source_ids, frame_source_id)
+        for source in clause.attribution_sources:
+            for source_id in source.context_source_references():
+                _append_unique(source_ids, source_id)
+            for frame_id, _ in source.frame_part_references():
+                for frame_source_id in context.frames[frame_id].source_ids:
+                    _append_unique(source_ids, frame_source_id)
     if frame_call is not None:
         for source_id in context.frames[frame_call.frame_id].source_ids:
             _append_unique(source_ids, source_id)
@@ -668,25 +674,34 @@ def _append_unique(items: list[str], value: str) -> None:
 
 
 def _require_occurrence(
-    *,
-    text: str,
-    occurrence: int,
-    source: str,
-    path: str,
-) -> None:
-    if _occurrence_count(source, text) < occurrence:
-        raise ValueError(f"{path} occurrence does not appear in source text")
-
-
-def _occurrence_count(source: str, text: str) -> int:
-    count = 0
+    *, text: str, occurrence: int, source: str, path: str,
+) -> tuple[int, int]:
     start = 0
-    while True:
+    for _ in range(occurrence):
         index = source.find(text, start)
         if index < 0:
-            return count
-        count += 1
+            raise ValueError(f"{path} occurrence does not appear in source text")
         start = index + len(text)
+    return start - len(text), start
+
+
+def _render_resolved_question(
+    clauses: tuple[ResolvedConversationClause, ...], *, context: _ParseContext,
+) -> str:
+    replacements = sorted(
+        (*_require_occurrence(text=clause.current_clause_text, occurrence=clause.occurrence,
+                              source=context.current_question, path="current clause"), clause.resolved_text)
+        for clause in clauses
+    )
+    fragments: list[str] = []
+    cursor = 0
+    for start, end, text in replacements:
+        if start < cursor:
+            raise ValueError("resolved clause spans overlap")
+        fragments.extend((context.current_question[cursor:start], text))
+        cursor = end
+    fragments.append(context.current_question[cursor:])
+    return "".join(fragments)
 
 
 def _required_text(value: str) -> str:

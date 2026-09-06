@@ -1,0 +1,10 @@
+id: orderable_capability_rejects_non_orderable_fields
+description: Minimum and maximum accept orderable scalar fields and reject Boolean and structured fields.
+kind: algorithm
+algorithm: semantic.field_capability
+input:
+  capability: orderable
+  source_types: [date, datetime, decimal, string, boolean, array, object]
+expect:
+  result_contains:
+    compatible_source_types: [date, datetime, decimal, string]

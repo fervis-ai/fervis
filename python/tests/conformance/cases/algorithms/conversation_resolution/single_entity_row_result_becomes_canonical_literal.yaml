@@ -27,10 +27,11 @@ input:
     outcome:
       kind: resolved
       resolution_basis: The current name and prior verified identity establish one person.
-      contextualized_question: Where did Nadia work?
       clauses:
         - current_clause_text: Where did Nadia work?
           occurrence: 1
+          request_shape_basis: The current clause states the complete factual request.
+          request_shape_source: current_clause_supplies_request
           resolved_text: Where did Nadia work?
           retained_frame_parts: []
           values:

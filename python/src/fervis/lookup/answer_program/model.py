@@ -22,7 +22,7 @@ from fervis.lookup.question_contract import (
 from fervis.lookup.qualification import QualificationGuarantee, SubjectGuarantee
 
 
-ANSWER_PROGRAM_SCHEMA_REVISION = 8
+from .versions import ANSWER_PROGRAM_SCHEMA_REVISION as ANSWER_PROGRAM_SCHEMA_REVISION
 
 
 @dataclass(frozen=True)

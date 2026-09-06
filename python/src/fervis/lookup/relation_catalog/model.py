@@ -207,6 +207,10 @@ class EndpointRead:
     source_metadata: dict[str, Any] | None = None
 
     @property
+    def description(self) -> str:
+        return str((self.source_metadata or {}).get("description") or "")
+
+    @property
     def fields_by_path(self) -> dict[str, CatalogField]:
         return {item.path: item for item in self.fields}
 

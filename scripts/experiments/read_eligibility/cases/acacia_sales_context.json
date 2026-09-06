@@ -1,0 +1,13 @@
+{
+  "requested_fact_ref": "fact_1",
+  "expected_read_decisions": {
+    "list_sale_list": "RETAIN",
+    "list_online_sale_list": "DROP",
+    "list_online_sale_summary": "DROP",
+    "get_sale_detail": "DROP",
+    "get_sale_receipt": "DROP"
+  },
+  "identity_task_ref": "fact_1:input_use:e1:1:reference_grounding",
+  "expected_canonical_option_id": "fact_1:input_use:e1:1:reference_grounding:canonical_option:1",
+  "expected_resolver_route_id": "bind_i1_rs_7d752a2759a3cfdc_location_primary_key"
+}

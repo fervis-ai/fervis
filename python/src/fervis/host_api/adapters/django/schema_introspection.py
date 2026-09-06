@@ -306,6 +306,7 @@ def _inspect_serializer(
         output_path = f"{prefix}.{output_name}" if prefix else output_name
         nested = _nested_serializer(serializer_field)
         if nested is not None:
+            nested_model = _serializer_model(nested.__class__)
             related_model = _related_model_for_serializer_field(
                 model,
                 output_name=output_name,
@@ -328,9 +329,9 @@ def _inspect_serializer(
                 fields,
                 bindings,
                 prefix=output_path,
-                model_context=related_model,
+                model_context=nested_model or related_model,
                 relation_model=(
-                    related_model
+                    nested_model or related_model
                     if isinstance(serializer_field, serializers.ListSerializer)
                     else relation_model
                 ),
@@ -365,6 +366,16 @@ def _inspect_serializer(
         source_path = _serializer_field_source(output_name, serializer_field)
         owner_model, model_field = _resolve_model_field(model, source_path=source_path)
         if owner_model is None or model_field is None:
+            continue
+        if (
+            isinstance(model_field, models.ForeignKey)
+            and source_path.split(".")[-1] == model_field.name
+            and not isinstance(serializer_field, serializers.PrimaryKeyRelatedField)
+        ):
+            # A field reading the related object can serialize its display text,
+            # slug, or URL. Only DRF's primary-key field certifies that this
+            # object-valued access returns the target key. Explicit key paths
+            # and foreign-key attnames already address the scalar itself.
             continue
         owner_model, model_field = _nested_key_binding(
             owner_model,

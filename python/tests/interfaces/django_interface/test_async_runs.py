@@ -802,30 +802,50 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
                         "kind": "question_meaning",
                         "answer_requests": [
                             {
-                                "result_kind": "scalar",
-                                "qualifying_row_kind": {
-                                    "meaning": "restricted fact",
-                                    "origin": {"kind": "question"},
-                                },
-                                "grouping_meanings": [],
                                 "return_request_basis": (
                                     "Return the requested scalar fact."
                                 ),
-                                "returned_result": {"kind": "values"},
-                                "answer_values": [
-                                    {
-                                        "value_ref": "v1",
-                                        "meaning": "restricted fact",
-                                        "origin": {"kind": "question"},
-                                    }
-                                ],
-                                "returned_value_refs": ["v1"],
-                                "ordering_value_refs": [],
-                                "selection": {"kind": "all_results"},
-                                "universal_shape": "none",
+                                "relational_shape_basis": (
+                                    "This is an ordinary scalar request."
+                                ),
+                                "request": {
+                                    "relational_shape": "ordinary",
+                                    "result_grain_basis": (
+                                        "One value summarizes the population."
+                                    ),
+                                    "result": {
+                                        "kind": "one_value_for_population",
+                                        "population_rows": {
+                                            "instance_kind": "restricted fact",
+                                            "origin": {"kind": "question"},
+                                        },
+                                        "returned_meanings": [
+                                            {
+                                                "meaning_ref": "r1",
+                                                "meaning": "restricted fact",
+                                                "origin": {"kind": "question"},
+                                            }
+                                        ],
+                                        "result_order": {
+                                            "ordering_request_basis": (
+                                                "No ordering is requested."
+                                            ),
+                                            "ordering": {
+                                                "kind": "no_ordering_requested"
+                                            },
+                                            "selection": {"kind": "all_results"},
+                                        },
+                                    },
+                                },
                             }
                         ],
-                        "supplied_values": [],
+                        "supplied_values": {
+                            "operands": [],
+                            "selection_limits": [],
+                        },
+                        "question_input_inventory_check": {
+                            "all_input_like_phrases_declared": True,
+                        },
                     },
                 }
             else:

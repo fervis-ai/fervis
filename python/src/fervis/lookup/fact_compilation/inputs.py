@@ -16,6 +16,38 @@ from fervis.lookup.answer_program.contracts import (
 )
 from fervis.lookup.answer_program.values import FactValue, LiteralType
 from fervis.lookup.source_binding import VerifiedSourceStrategy
+from fervis.lookup.contract_codec import canonical_contract_fingerprint
+
+
+def source_choice_literal(choice, *, snapshot_ref: str) -> FactValue:
+    """Preserve the declared primitive type of a catalog choice token."""
+    from fervis.lookup.relation_catalog.row_sources import RowSourceValueType
+
+    if choice.declared_type is RowSourceValueType.BOOLEAN:
+        literal_type, value = (
+            LiteralType.BOOLEAN,
+            "true" if choice.boolean_value else "false",
+        )
+    elif choice.declared_type in {
+        RowSourceValueType.INTEGER,
+        RowSourceValueType.DECIMAL,
+    }:
+        literal_type, value = LiteralType.NUMBER, str(choice.value)
+    else:
+        literal_type, value = LiteralType.STRING, str(choice.value)
+    return FactValue.literal(
+        id=choice.value_ref,
+        literal_type=literal_type,
+        value=value,
+        label=choice.label,
+        proof_refs=(
+            snapshot_ref,
+            choice.source_ref,
+            choice.surface_ref,
+            choice.value_ref,
+        ),
+        source_refs=(choice.source_ref,),
+    )
 
 
 def semantic_compiler_inputs(
@@ -24,6 +56,14 @@ def semantic_compiler_inputs(
     """Declare each verified typed value once for program reuse and invocation."""
 
     request = verified.request
+    mapped_value_refs = {
+        value_ref
+        for branch in verified.binding_plan.subject_binding.branch_realizations
+        for review in branch.surface_reviews
+        for choice in review.choice_reviews
+        for owner in choice.selection_requirement_refs
+        for value_ref in request.requirement_value_refs(owner)
+    }
     parameters: list[ParameterDeclaration] = []
     bindings: list[ParameterBinding] = []
     for value in request.canonical_values:
@@ -35,6 +75,11 @@ def semantic_compiler_inputs(
                 value_type=parameter_value_type(value.typed_value),
                 input_ref=value.input_ref,
                 input_use_refs=value.use_refs,
+                fixed_value_fingerprint=canonical_contract_fingerprint(
+                    value.typed_value.payload
+                )
+                if value.canonical_value_id in mapped_value_refs
+                else "",
             )
         )
         bindings.append(
@@ -57,17 +102,8 @@ def semantic_compiler_inputs(
     source_choice_values = tuple(
         (
             value.value_ref,
-            FactValue.literal(
-                id=value.value_ref,
-                literal_type=LiteralType.STRING,
-                value=str(value.value),
-                label=value.label,
-                proof_refs=(
-                    request.source_catalog.contract_snapshot.ref,
-                    value.source_ref,
-                    value.surface_ref,
-                ),
-                source_refs=(value.source_ref,),
+            source_choice_literal(
+                value, snapshot_ref=request.source_catalog.contract_snapshot.ref
             ),
             (
                 request.source_catalog.contract_snapshot.ref,
@@ -96,6 +132,9 @@ def semantic_compiler_inputs(
                 id=parameter_id,
                 role=ParameterRole.PLAN_CONTROL,
                 value_type=parameter_value_type(typed_value),
+                fixed_value_fingerprint=canonical_contract_fingerprint(
+                    typed_value.payload
+                ),
             )
         )
         bindings.append(

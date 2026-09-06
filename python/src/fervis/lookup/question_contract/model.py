@@ -214,6 +214,15 @@ class Quantify:
 
 
 @dataclass(frozen=True)
+class RelatedRow:
+    id: str
+    set_ref: str
+    association_refs: tuple[str, ...]
+    condition_ref: str | None
+    origin: SourceOrigin
+
+
+@dataclass(frozen=True)
 class Coverage:
     id: str
     candidate_set_ref: str
@@ -234,6 +243,7 @@ ExpressionNode: TypeAlias = (
     | TemporalBucket
     | Aggregate
     | Quantify
+    | RelatedRow
     | Coverage
 )
 
@@ -283,7 +293,12 @@ class TakeWithBoundaryTies:
     limit_input_ref: str
 
 
-ResultSelection: TypeAlias = AllResults | FirstRankWithTies | TakeWithBoundaryTies
+@dataclass(frozen=True)
+class PositionWithTies:
+    limit_input_ref: str
+
+
+ResultSelection: TypeAlias = AllResults | FirstRankWithTies | TakeWithBoundaryTies | PositionWithTies
 
 
 @dataclass(frozen=True)

@@ -28,6 +28,16 @@ from fervis.lookup.turn_prompts import (
 from fervis.model_io.structured_output.specs import required_tool_spec
 
 
+def _context_source_model_payload(source: ConversationContextSource, frames: tuple[ConversationContextFrame, ...]) -> dict[str, object]:
+    payload = source.to_model_dict()
+    frame_ids = [frame.frame_id for frame in frames if source.source_id in frame.source_ids]
+    if source.kind == "prior_fervis_answer" and not source.meaning_anchors and frame_ids:
+        payload.pop("text", None)
+        payload["request_frame_ids"] = frame_ids
+        payload["value_authority"] = "Use the typed request frames to evaluate the earlier facts again; their previous result values are not new literal inputs."
+    return payload
+
+
 class ConversationResolutionTurnPrompt(TurnPromptBase):
     turn_name = "conversation resolution"
     turn_task = (
@@ -60,7 +70,7 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                 {
                     "current_question_text": self.request.question,
                     "context_sources": [
-                        item.to_model_dict()
+                        _context_source_model_payload(item, conversation_resolution_context_frames(self.request))
                         for item in conversation_resolution_context_sources(
                             self.request
                         )
@@ -134,8 +144,9 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "authoritative. Prior context fills what the current wording leaves "
                     "implicit; it does not overwrite explicit current meaning unless "
                     "the current wording supports that interpretation.",
-                    "If the current wording needs no prior context, copy it exactly as "
-                    "the resolved question and copy each clause exactly as resolved_text.",
+                    "When the current wording states the complete factual request, "
+                    "copy it exactly as the resolved question and copy each clause "
+                    "exactly as resolved_text.",
                     "Use only the current question, visible context sources, and visible "
                     "context frames.",
                     "An active_clarification context source contains the original question and every clarification question and answer in order. Resolve the current utterance using the complete chain.",
@@ -148,10 +159,9 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "Write resolution_basis first. State which explicit current "
                     "meanings replace prior meanings, which prior meanings remain, and "
                     "why the resulting question is coherent.",
-                    "contextualized_question is the complete question formed from all "
-                    "resolved clauses.",
                     "For every answerable clause, copy current_clause_text exactly and "
                     "write resolved_text as a complete standalone factual clause.",
+                    "Each resolved_text is the complete factual request for its current-clause span. The engine combines these spans into the resolved question; do not author a second copy.",
                     "A resolved clause must retain every current constraint and every "
                     "prior meaning needed to answer it.",
                     "Every value added to the resolved clause but absent from the "
@@ -164,13 +174,27 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Retained Frame Shape",
                 (
-                    "retained_frame_parts is the sole representation of fixed prior "
-                    "question shape that the resolved clause still uses but the "
-                    "current clause omits.",
-                    "Select retained subject, qualification, grouping, requested "
-                    "output, ordering, selection, and canonical output identity parts.",
-                    "Explicit current meaning replaces the corresponding prior part. "
-                    "Omitted prior meaning remains through retained_frame_parts.",
+                    "Write request_shape_basis before request_shape_source. "
+                    "request_shape_source records where the current factual request "
+                    "gets its request shape.",
+                    "current_clause_supplies_request means current_clause_text itself "
+                    "states the complete factual request. A complete request containing "
+                    "a pronoun or contextual reference keeps the current request shape "
+                    "while prior evidence resolves that value. Canonical identity or "
+                    "type evidence for a value in that request belongs in resolved "
+                    "values. retained_frame_parts is empty.",
+                    "active_clarification_supplies_request means current_clause_text "
+                    "answers or continues the shown active clarification, whose "
+                    "original question supplies the factual request. "
+                    "retained_frame_parts is empty.",
+                    "prior_frame_supplies_omitted_request_parts means "
+                    "current_clause_text supplies only a changed or reaffirmed value "
+                    "while a shown prior frame supplies omitted request parts. "
+                    "Conversational scaffolding such as 'what about', 'how about', "
+                    "'same question', 'and', or 'instead' supplies no request shape. "
+                    "retained_frame_parts contains exactly the omitted subject, "
+                    "qualification, grouping, requested output, ordering, selection, "
+                    "or canonical output identity.",
                 ),
             ),
             builder.instruction_block(
@@ -235,8 +259,10 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "evidence that produces that resolution. Competing candidates must "
                     "cite different context evidence; the same context evidence with "
                     "different imagined readings is not a conversation ambiguity.",
-                    "Use missing_input when required information is absent and explain "
-                    "what is missing.",
+                    "Use missing_input only when essential meaning is absent, so the "
+                    "visible conversation does not determine one complete factual "
+                    "question. Facts that must be fetched to answer a complete question "
+                    "are downstream data, not missing question meaning.",
                 ),
             ),
             builder.instruction_block(
@@ -246,6 +272,9 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "Return only valid JSON arguments for that tool call.",
                 ),
             ),
+            builder.instruction_block('Context value authority', (
+                'Resolved values cite only the shown meaning anchors or permitted frame parts. Earlier answer text is discourse context, not authority for new literal inputs. For a new calculation over earlier facts, carry their original subject and input constraints and express the new calculation, so those facts can be evaluated again.',
+            )),
         )
 
     def response_contract(self) -> ProviderResponseContract:

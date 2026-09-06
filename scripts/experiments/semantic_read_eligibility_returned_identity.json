@@ -1,8 +1,0 @@
-{
-  "kind": "returned_identity",
-  "question": "Which member has the highest total amount?",
-  "expected_read": "list_event_list",
-  "expected_identity_entity_kind": "member",
-  "expected_identity_field": "event.member_id",
-  "expected_value_field": "event.amount"
-}

@@ -1,0 +1,8 @@
+{
+  "schema_transforms": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "name": "prune_unreferenced_definitions"
+    }
+  ]
+}

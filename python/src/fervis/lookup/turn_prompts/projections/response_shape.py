@@ -81,6 +81,7 @@ class ApiReadResponseShapeProjector:
             "read_id": self.read.id,
             "endpoint_name": self.read.endpoint_name,
             "resource_names": list(self.read.resource_names),
+            "description": self.read.description,
             "input_params": self.input_params(
                 include_param_tokens=include_evidence_tokens
             ),
@@ -504,6 +505,31 @@ def semantic_read_sources_xml(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def semantic_read_relations_xml(payload: dict[str, Any]) -> str:
+    lines = ["<source_relations>"]
+    for relation in _array(payload.get("relations")):
+        if not isinstance(relation, Mapping):
+            continue
+        lines.append(
+            "  <relation"
+            + _xml_attrs(
+                {
+                    "left_source": relation.get("left_source_ref"),
+                    "left_field_refs": _space_separated(
+                        relation.get("left_field_refs")
+                    ),
+                    "right_source": relation.get("right_source_ref"),
+                    "right_field_refs": _space_separated(
+                        relation.get("right_field_refs")
+                    ),
+                }
+            )
+            + " />"
+        )
+    lines.append("</source_relations>")
+    return "\n".join(lines)
+
+
 def semantic_identity_resolution_tasks_xml(payload: dict[str, Any]) -> str:
     lines = ["<identity_resolution_tasks>"]
     for task in _array(payload.get("identity_resolution_tasks")):
@@ -525,6 +551,45 @@ def semantic_identity_resolution_tasks_xml(payload: dict[str, Any]) -> str:
             lines.append("    </canonical_option>")
         lines.append("  </identity_task>")
     lines.append("</identity_resolution_tasks>")
+    return "\n".join(lines)
+
+
+def semantic_canonical_identity_uses_xml(payload: dict[str, Any]) -> str:
+    lines = ["<canonical_identity_uses>"]
+    for option in _array(payload.get("canonical_options")):
+        if not isinstance(option, Mapping):
+            continue
+        attrs = {
+            "id": option.get("canonical_option_id"),
+            "result": option.get("identity_ref"),
+        }
+        answer_reads = tuple(
+            item
+            for item in _array(option.get("answer_reads"))
+            if isinstance(item, Mapping)
+        )
+        if not answer_reads:
+            lines.append(f"  <canonical_option{_xml_attrs(attrs)} />")
+            continue
+        lines.append(f"  <canonical_option{_xml_attrs(attrs)}>")
+        for answer_read in answer_reads:
+            lines.append(
+                f"    <answer_read{_xml_attrs({'read': answer_read.get('read_id')})}>"
+            )
+            for param_ref in _array(answer_read.get("request_param_refs")):
+                lines.append(
+                    f"      <request_target{_xml_attrs({'param_ref': param_ref})} />"
+                )
+            for identity in _array(answer_read.get("returned_identities")):
+                if not isinstance(identity, Mapping):
+                    continue
+                lines.append(
+                    f"      <returned_identity"
+                    f"{_xml_attrs({'identity_ref': identity.get('identity_ref'), 'field_refs': _array(identity.get('field_refs'))})} />"
+                )
+            lines.append("    </answer_read>")
+        lines.append("  </canonical_option>")
+    lines.append("</canonical_identity_uses>")
     return "\n".join(lines)
 
 
@@ -574,6 +639,7 @@ def _resolver_api_read_xml_lines(
         "resources": _space_separated(api_read.get("resource_names")),
     }
     lines = [f"{indent}<api_read{_xml_attrs(attrs)}>"]
+    lines.extend(_text_node_xml_lines("description", api_read.get("description"), indent=indent + "  "))
     lines.extend(
         _input_params_xml_lines(api_read.get("input_params"), indent=indent + "  ")
     )
@@ -657,6 +723,8 @@ def _input_params_xml_lines(params: object, *, indent: str) -> list[str]:
                 "required",
                 "param_ref",
                 "param_token",
+                "description",
+                "default",
             )
             if key in param
         }

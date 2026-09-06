@@ -21,7 +21,7 @@ from fervis.lookup.answer_program.values import (
     IdentitySetValuePayload,
     IdentityValuePayload,
 )
-from fervis.lookup.question_contract import InputTerm
+from fervis.lookup.question_contract import InputDenotation, InputTerm
 from fervis.lookup.semantic_types import SourceOrigin, SourceOriginKind
 from fervis.lookup.grounding.identity import ExpectedInputIdentity
 from fervis.memory.conversation_context import (
@@ -78,15 +78,37 @@ class CallableFrameProgram:
         return tuple(
             replace(
                 inputs[argument.input_ref],
-                origin=SourceOrigin(
-                    SourceOriginKind.CONVERSATION_RESOLUTION,
-                    argument.source_text,
-                    resolved_input_ref=argument.input_ref,
-                ),
+                origin=_changed_input_origin(argument),
                 operand=argument.operand,
             )
             for argument in self.arguments
         )
+
+    @property
+    def changed_input_denotations(self) -> tuple[InputDenotation, ...]:
+        denotations = {
+            item.input_ref: item for item in self.program.input_denotations
+        }
+        return tuple(
+            replace(
+                denotations[argument.input_ref],
+                operand_meaning=argument.operand,
+                denotation_basis=argument.source_text,
+                denoted_instance_kind=(
+                    argument.expected_identity.entity_kind
+                    if argument.expected_identity is not None
+                    else denotations[argument.input_ref].denoted_instance_kind
+                ),
+            )
+            for argument in self.arguments
+        )
+
+    @property
+    def changed_input_origins(self) -> dict[str, SourceOrigin]:
+        return {
+            argument.input_ref: _changed_input_origin(argument)
+            for argument in self.arguments
+        }
 
     @property
     def certified_argument_values(self) -> tuple[FactValue, ...]:
@@ -325,4 +347,12 @@ def _callable_argument(
         operand=resolved.resolved_value_text,
         expected_identity=_expected_input_identity(binding.value),
         canonical_identity=resolved.canonical_identity,
+    )
+
+
+def _changed_input_origin(argument: CallableFrameArgument) -> SourceOrigin:
+    return SourceOrigin(
+        SourceOriginKind.CONVERSATION_RESOLUTION,
+        argument.source_text,
+        resolved_input_ref=argument.input_ref,
     )

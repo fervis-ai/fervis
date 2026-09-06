@@ -1,0 +1,88 @@
+{
+  "frame_payload": {
+    "decision_basis": "The question asks for one temperature value for each of the first two readings.",
+    "outcome": {
+      "kind": "question_meaning",
+      "answer_requests": [
+        {
+          "return_request_basis": "State the temperature recorded for each of the first two readings.",
+          "relational_shape_basis": "Each result is one reading row and states its temperature.",
+          "request": {
+            "relational_shape": "ordinary",
+            "result_grain_basis": "One result per qualifying reading.",
+            "result": {
+              "kind": "one_result_per_qualifying_row",
+              "result_candidates": {
+                "instance_kind": "reading",
+                "origin": {
+                  "kind": "question"
+                }
+              },
+              "projection": {
+                "projection_basis": "Return each reading's temperature without returning the reading identity.",
+                "candidate_identity": "omitted",
+                "explicitly_requested_values": [
+                  {
+                    "value_ref": "v1",
+                    "value_kind_basis": "The answer states the recorded temperature value.",
+                    "value_kind": "value",
+                    "meaning": "recorded temperature",
+                    "origin": {
+                      "kind": "question"
+                    }
+                  }
+                ]
+              },
+              "result_order": {
+                "ordering_request_basis": "First two requires chronological ordering before selection.",
+                "ordering": {
+                  "kind": "ordered_by",
+                  "values": [
+                    {
+                      "kind": "unreturned_ordering_meaning",
+                      "ownership_basis": "Reading chronology selects rows but is not returned.",
+                      "meaning": "reading chronological order",
+                      "origin": {
+                        "kind": "question"
+                      }
+                    }
+                  ]
+                },
+                "selection": {
+                  "kind": "take_with_boundary_ties"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "supplied_values": {
+        "entity_references": [],
+        "non_entity_values": [],
+        "selection_limits": [
+          {
+            "answer_request_number": 1,
+            "meaning": "first two",
+            "denotation_basis": "Two is the requested result limit.",
+            "non_entity_value": {
+              "value": {
+                "operands": [
+                  "2"
+                ],
+                "value_type": {
+                  "kind": "integer"
+                },
+                "origin": {
+                  "kind": "question"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "question_input_inventory_check": {
+        "all_input_like_phrases_declared": true
+      }
+    }
+  }
+}

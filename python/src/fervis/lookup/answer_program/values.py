@@ -83,23 +83,29 @@ ValueComponentValue = str | bool | Decimal | tuple[str, ...]
 
 
 @dataclass(frozen=True)
+class IdentityMatchEvidence:
+    key: EntityKeyValue
+    matched_field_ref: str
+    matched_field_path: str
+    matched_value: RuntimeScalar
+    proof_refs: tuple[str, ...] = ()
+    source_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, EntityKeyValue):
+            raise TypeError("identity evidence requires a complete entity key")
+        if not self.matched_field_ref or not self.matched_field_path or self.matched_value is None:
+            raise ValueError("identity match evidence must be complete")
+
+
+@dataclass(frozen=True)
 class IdentityValuePayload:
     key: EntityKeyValue
     display_value: str = ""
-    matched_field_ref: str = ""
-    matched_field_path: str = ""
-    matched_value: RuntimeScalar = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.key, EntityKeyValue):
             raise TypeError("identity value requires a complete entity key")
-        match_parts_present = (
-            bool(self.matched_field_ref),
-            bool(self.matched_field_path),
-            self.matched_value is not None,
-        )
-        if any(match_parts_present) and not all(match_parts_present):
-            raise ValueError("identity match evidence must be complete")
 
     @property
     def entity_kind(self) -> str:
@@ -479,10 +485,18 @@ class FactValue:
     source_refs: tuple[str, ...] = ()
     dependencies: tuple[ValueDependency, ...] = ()
     applies_to_requested_fact_ids: tuple[str, ...] = ()
+    identity_evidence: tuple[IdentityMatchEvidence, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.dependencies, tuple):
             raise TypeError("value dependencies must be a tuple")
+        keys = ((self.payload.key,) if isinstance(self.payload, IdentityValuePayload)
+                else self.payload.keys if isinstance(self.payload, IdentitySetValuePayload) else ())
+        if not isinstance(self.identity_evidence, tuple) or any(
+            not isinstance(evidence, IdentityMatchEvidence) or evidence.key not in keys
+            for evidence in self.identity_evidence
+        ):
+            raise ValueError("identity evidence must certify this value's keys")
         canonical = tuple(
             sorted(
                 set(self.dependencies),
@@ -490,6 +504,13 @@ class FactValue:
             )
         )
         object.__setattr__(self, "dependencies", canonical)
+
+    def has_same_value_as(self, other: FactValue) -> bool:
+        if isinstance(self.payload, IdentityValuePayload) and isinstance(other.payload, IdentityValuePayload):
+            return self.payload.key == other.payload.key
+        if isinstance(self.payload, IdentitySetValuePayload) and isinstance(other.payload, IdentitySetValuePayload):
+            return self.payload.keys == other.payload.keys
+        return self.payload == other.payload
 
     @property
     def kind(self) -> ValueKind:
@@ -527,10 +548,10 @@ class FactValue:
             payload=IdentityValuePayload(
                 key=key,
                 display_value=display_value,
-                matched_field_ref=matched_field_ref,
-                matched_field_path=matched_field_path,
-                matched_value=matched_value,
             ),
+            identity_evidence=(IdentityMatchEvidence(key, matched_field_ref, matched_field_path, matched_value,
+                                                     tuple(proof_refs), tuple(source_refs)),)
+            if matched_field_ref or matched_field_path or matched_value is not None else (),
             proof_refs=tuple(proof_refs),
             source_refs=tuple(source_refs),
             dependencies=tuple(dependencies),
@@ -550,6 +571,7 @@ class FactValue:
         dependencies: tuple[ValueDependency, ...] = (),
         applies_to_requested_fact_ids: tuple[str, ...] = (),
         known_input_id: str = "",
+        identity_evidence: tuple[IdentityMatchEvidence, ...] = (),
     ) -> FactValue:
         return cls(
             id=id,
@@ -563,6 +585,7 @@ class FactValue:
                 display_value=display_value,
                 source_relation_id=source_relation_id,
             ),
+            identity_evidence=identity_evidence,
             proof_refs=tuple(proof_refs),
             source_refs=tuple(source_refs),
             dependencies=tuple(dependencies),
@@ -837,6 +860,7 @@ class ParameterDeclaration:
     required: bool = True
     allowed_values: tuple[str, ...] = ()
     semantic_control_ref: str = ""
+    fixed_value_fingerprint: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, str) or not self.id:
@@ -857,6 +881,8 @@ class ParameterDeclaration:
             )
         if len(self.input_use_refs) != len(set(self.input_use_refs)):
             raise ValueError("parameter input use refs cannot contain duplicates")
+        if not isinstance(self.fixed_value_fingerprint, str):
+            raise TypeError("fixed value fingerprint must be text")
         if not isinstance(self.required, bool):
             raise TypeError("parameter required must be bool")
         if not isinstance(self.allowed_values, tuple):

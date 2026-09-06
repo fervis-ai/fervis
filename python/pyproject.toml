@@ -90,15 +90,9 @@ include = [
   "/README.md",
   "/LICENSE",
 ]
-exclude = [
-  "/src/fervis/evaluation/goldsets",
-]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fervis"]
-exclude = [
-  "/src/fervis/evaluation/goldsets",
-]
 
 [tool.hatch.build]
 artifacts = [

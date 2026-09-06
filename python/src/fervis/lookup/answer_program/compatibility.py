@@ -31,8 +31,10 @@ from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.relation_catalog import RelationCatalog
 
 
-ANSWER_PROGRAM_COMPILER_VERSION = "fervis.answer_program.compiler@1"
-FUNCTION_SEMANTIC_VERSION = "1"
+from .versions import (
+    ANSWER_PROGRAM_COMPILER_VERSION as ANSWER_PROGRAM_COMPILER_VERSION,
+    FUNCTION_SEMANTIC_VERSION as FUNCTION_SEMANTIC_VERSION,
+)
 
 
 @dataclass(frozen=True)

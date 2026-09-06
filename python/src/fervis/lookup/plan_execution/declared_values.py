@@ -69,6 +69,17 @@ class DeclaredValue:
 
     @property
     def equality_key(self) -> tuple[str, str]:
+        if self.kind is DeclaredValueKind.DECIMAL and isinstance(self.value, Decimal):
+            sign, raw_digits, exponent = self.value.as_tuple()
+            if not isinstance(exponent, int):
+                raise RelationEngineError("declared numeric value must be finite")
+            digits = list(raw_digits)
+            if not any(digits):
+                return self.kind.value, "0"
+            while digits[-1] == 0:
+                digits.pop()
+                exponent += 1
+            return self.kind.value, f"{sign}:{''.join(map(str, digits))}:{exponent}"
         return self.kind.value, canonical_runtime_json(self.value)
 
     @property
@@ -203,10 +214,6 @@ def declared_equal(
     right: object,
     right_type: str | None,
 ) -> bool:
-    if not declared_types_compatible(left_type, right_type):
-        raise RelationEngineError(
-            "comparison operands have incompatible declared types"
-        )
     comparison_type = _comparison_type(left_type, right_type)
     return (
         declared_value(left, comparison_type).equality_key
@@ -216,6 +223,22 @@ def declared_equal(
 
 def declared_key(value: object, type_name: str | None) -> tuple[str, str]:
     return declared_value(value, type_name).equality_key
+
+
+def declared_comparison_types_compatible(left: str | None, right: str | None) -> bool:
+    """Comparability is distinct from assigning values to one declared schema."""
+    try:
+        _comparison_type(left, right)
+    except RelationEngineError:
+        return False
+    return True
+
+
+def declared_comparison_key(
+    value: object, left_type: str | None, right_type: str | None,
+) -> tuple[str, str]:
+    """Hash key using the same common declared type as binary equality."""
+    return declared_key(value, _comparison_type(left_type, right_type))
 
 
 def declared_order_key(
@@ -231,10 +254,6 @@ def declared_order_pair(
     right: object,
     right_type: str | None,
 ) -> tuple[tuple[int, Decimal | str], tuple[int, Decimal | str]]:
-    if not declared_types_compatible(left_type, right_type):
-        raise RelationEngineError(
-            "comparison operands have incompatible declared types"
-        )
     comparison_type = _comparison_type(left_type, right_type)
     return (
         declared_order_key(left, comparison_type),
@@ -261,11 +280,20 @@ def exact_positive_integer(value: object, *, maximum: int = MAX_SELECTION_LIMIT)
     numeric = _decimal(value)
     integral = numeric.to_integral_value()
     if numeric != integral or integral < 1 or integral > maximum:
-        raise ValueError("selection requires positive integer limit within supported range")
+        raise ValueError(
+            "selection requires positive integer limit within supported range"
+        )
     return int(integral)
 
 
 def _comparison_type(left: str | None, right: str | None) -> str | None:
+    kinds = {declared_kind(left), declared_kind(right)}
+    if kinds <= {DeclaredValueKind.INTEGER, DeclaredValueKind.DECIMAL}:
+        return "decimal"
+    if not declared_types_compatible(left, right):
+        raise RelationEngineError(
+            "comparison operands have incompatible declared types"
+        )
     if declared_kind(left) is not DeclaredValueKind.RUNTIME:
         return left
     if declared_kind(right) is not DeclaredValueKind.RUNTIME:

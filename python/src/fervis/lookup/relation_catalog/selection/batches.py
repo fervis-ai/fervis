@@ -19,7 +19,10 @@ def next_catalog_selection_batch(
     if max_reads_per_fact < 1:
         raise ValueError("catalog recall requires a positive batch size")
     selections = tuple(
-        _next_fact_batch(item, max_reads=max_reads_per_fact)
+        _next_fact_batch(
+            item, max_reads=max_reads_per_fact,
+            reviewed_read_ids=frozenset(catalog_selection.selected_read_ids),
+        )
         for item in catalog_selection.requested_fact_selections
     )
     selected_read_ids = _dedupe(
@@ -47,6 +50,7 @@ def combine_catalog_selection_batches(
     fact_ids = tuple(
         item.requested_fact_id for item in batches[0].requested_fact_selections
     )
+    reviewed_read_ids = frozenset(read_id for batch in batches for read_id in batch.selected_read_ids)
     selections = tuple(
         _combine_fact_batches(
             tuple(
@@ -54,7 +58,8 @@ def combine_catalog_selection_batches(
                 for batch in batches
                 for item in batch.requested_fact_selections
                 if item.requested_fact_id == fact_id
-            )
+            ),
+            reviewed_read_ids=reviewed_read_ids,
         )
         for fact_id in fact_ids
     )
@@ -75,9 +80,12 @@ def _next_fact_batch(
     selection: RequestedFactCatalogSelection,
     *,
     max_reads: int,
+    reviewed_read_ids: frozenset[str],
 ) -> RequestedFactCatalogSelection:
-    selected = selection.unselected_positive_read_ids[:max_reads]
-    remaining = selection.unselected_positive_read_ids[max_reads:]
+    # Every candidate in a read batch is assessed against every requested fact.
+    pending = tuple(ref for ref in selection.unselected_positive_read_ids if ref not in reviewed_read_ids)
+    selected = pending[:max_reads]
+    remaining = pending[max_reads:]
     rankings_by_read = {item.read_id: item for item in selection.rankings}
     return RequestedFactCatalogSelection(
         requested_fact_id=selection.requested_fact_id,
@@ -94,10 +102,14 @@ def _next_fact_batch(
 
 def _combine_fact_batches(
     selections: tuple[RequestedFactCatalogSelection, ...],
+    *,
+    reviewed_read_ids: frozenset[str],
 ) -> RequestedFactCatalogSelection:
     first = selections[0]
     selected = _dedupe(
-        read_id for item in selections for read_id in item.selected_read_ids
+        read_id for item in selections
+        for read_id in (*item.selected_read_ids, *item.unselected_positive_read_ids)
+        if read_id in reviewed_read_ids
     )
     selected_set = set(selected)
     remaining = _dedupe(

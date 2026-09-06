@@ -8,9 +8,12 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 local_profile="${FERVIS_LOCAL_GOLDSET_PROFILE:-$repo_root/.fervis/local-goldset.env}"
 fervis_load_env_file "$local_profile"
 
+fervis_load_env_file "$repo_root/.env"
 if [[ -n "${FERVIS_HOST_PROJECT_ROOT:-}" ]]; then
   fervis_load_env_file "$FERVIS_HOST_PROJECT_ROOT/.env"
 fi
-fervis_load_env_file "$repo_root/.env"
 
-exec python3 "$repo_root/scripts/experiments/run_semantic_unified_question_frame_matrix.py" "$@"
+cd "$repo_root"
+exec "$repo_root/python/.venv/bin/python" \
+  -m scripts.experiments.question_frame.matrix \
+  "$@"

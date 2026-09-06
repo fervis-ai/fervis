@@ -66,6 +66,8 @@ from tests.testkit.algorithms.semantic_query_enrichment import (
     run_semantic_query_enrichment_case,
 )
 from tests.testkit.algorithms.semantic_question_contract import (
+    run_semantic_field_capability_case,
+    run_semantic_operator_signature_case,
     run_semantic_question_contract_case,
 )
 from tests.testkit.algorithms.semantic_source_binding import (
@@ -144,6 +146,8 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ("algorithm", "questions.memory_projection"): run_questions_memory_projection_case,
     ("algorithm", "questions.projection"): run_questions_projection_case,
     ("algorithm", "semantic.kernel"): run_semantic_kernel_case,
+    ("algorithm", "semantic.field_capability"): run_semantic_field_capability_case,
+    ("algorithm", "semantic.operator_signature"): run_semantic_operator_signature_case,
     ("algorithm", "semantic.query_enrichment"): run_semantic_query_enrichment_case,
     ("algorithm", "semantic.question_contract"): run_semantic_question_contract_case,
     ("algorithm", "semantic.source_binding"): run_semantic_source_binding_case,

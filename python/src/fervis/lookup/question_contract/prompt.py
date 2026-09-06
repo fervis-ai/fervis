@@ -33,8 +33,13 @@ Definitions
 
 A set is one question-local kind of candidate instance or occurrence.
 
-A fact is one typed value observed for a set instance or through a declared
-association.
+A fact is one value observed for a set instance or through a declared
+association. Its meaning names that observed value, rather than the row or
+relationship containing it. The expression using the fact states the capability
+required of its future source field: sum and average require summable values;
+minimum and maximum require orderable values; within requires temporal values;
+Boolean conditions require Boolean values. Source Binding later verifies that
+the selected catalog field provides that capability.
 
 An identifier fact means which exact instance of a declared set is involved.
 It is semantic identity even when the supplied input is a human-readable name;
@@ -56,7 +61,7 @@ Authoring order
 Write one answer_requests item for every shown requested_fact_ref. The shown
 result kind fixes its result grain. The shown grouping, ordering, and output
 meanings fix their exact counts, order, and origins. Within each item, write
-candidate_set and grouping before other_sets and other_associations.
+candidate_set and set_graph before grouping.
 
 Requested-fact boundaries
 
@@ -64,15 +69,31 @@ Each shown requested_fact_ref is one fixed answer-request boundary.
 
 Semantic structure
 
-Use s1 for the shown candidate set. A related-instance identity grouping owns
-its identified_set declaration and its direct association declaration from s1. other_sets
-contains independently needed set refs not already owned by grouping, declared
-once as s2, s3, and so on.
-Association endpoints use those set refs. Declare each remaining independently used association once
-as a1, a2, and so on. In a fact, observed_for_ref names the set or association
-where the value is observed. other_associations contains independently needed
-associations not already owned by grouping. Set-valued expressions use set_ref. Structurally
-identical fact leaves denote one fact.
+Use s1 for the shown candidate set. In set_graph, each identity input first
+chooses null when unused by this request or declares its related association
+and entity set. Each related output declares its association and entity set.
+other_related_sets contains only relationships owned by neither fixed role.
+
+Each identity_input_relations and requested_output_relations entry starts at
+s1. At the top level of other_related_sets, the parent set is s1. Each
+related_sets item
+declares a relationship from that parent set to the item's set. Inside an item's
+nested related_sets, the parent is that item's set; each nested relationship
+starts there, never at an earlier ancestor. Every graph set writes its id,
+instance_kind, and origin. A related-identity grouping copies the referenced
+graph set's id as set_ref.
+
+Declare each non-candidate set and each association exactly once in set_graph.
+A related-identity grouping references its graph set by set_ref. The graph alone
+declares the set and the association that reaches it. Facts, qualifications,
+ordering expressions, and outputs reference declared graph terms. In a fact,
+observed_for_ref names the set or association where the value is observed.
+Set-valued expressions use set_ref.
+Structurally identical fact leaves denote one fact.
+
+A relationship used to assign qualifying rows to a shown grouping is fully
+represented by set_graph and grouping. It contributes no separate qualification
+or aggregate filter.
 
 The fixed candidate set is the set whose instances are tested by qualification
 and then grouped or aggregated. A requested group label is separate from it
@@ -89,41 +110,67 @@ that scope. The observations are qualifying rows, the supplied period is an
 input, and the scoped aggregate is a result expression.
 
 When returned entities are compared by an aggregate over related occurrences,
-use the occurrences as the qualifying set, use related_instance_identity for
-the returned entity grouping, and aggregate an occurrence-owned fact.
+use the occurrences as the qualifying set, connect the grouped entity at its
+actual depth in set_graph, reference that entity's graph set from the
+related_instance_identity grouping, and aggregate an occurrence-owned fact.
 
 Reference candidate_set when the result returns its instances. When a
 result groups exact candidate instances, use candidate_instance_identity. When
-it groups exact related instances, use related_instance_identity with one
-identified_set and association. The parser derives the Identifier fact,
-identified set, and direct association from that single declaration. The grouped
-output references the grouping entry by its group_ref. A set may also be the
-argument of count; it is the row-domain reference used by count.
+it groups exact related instances, use related_instance_identity with set_ref
+naming the entity set declared by set_graph. The
+grouped output references the grouping entry by its group_ref. A set may also
+be the argument of count; it is the row-domain reference used by count.
 
-Qualification contains every user-stated true-or-false condition that decides
-whether a candidate qualifies. Represent each shown IDENTITY_REFERENCE as its
-input_ref in an input_comparison with one Identifier fact for its denoted set.
-When that set differs from the candidate set, declare their association and
-observe the Identifier fact through that association. An aggregate's filter
-applies only to that aggregate. A Boolean output contains the requested Boolean
-expression. value_comparison compares two observed or computed values.
+Qualification is exactly the user-stated true-or-false conditions that decide
+whether a candidate qualifies. Identity inputs filling one role as alternatives
+combine with OR. Identity inputs filling different simultaneous roles combine
+with AND. instance_kind is a question-local nominal entity type. Equal
+instance_kind values mean the same entity type; different values mean different
+entity types. A fixed entity reference is represented by its input_ref. Compare
+that input_ref with an Identifier fact of the same instance_kind. Each identity
+input_comparison copies its input_ref, operand_meaning, and instance_kind. When
+it uses related_instance, write association_ref naming the declared relationship
+from the current row to the identified entity. candidate_instance identifies
+the current row itself. In a quantifier condition the current row is the
+quantified set, so the relationship must start at that set. One supplied identity
+can be compared through different relationships at different use sites; each
+comparison names its own relationship. Declare additional relationships in
+other_related_sets as needed. Each related entity output copies its fixed
+instance_kind and references a graph set of that same type.
+An aggregate's filter applies only to
+that aggregate. A Boolean output contains the requested Boolean expression.
+value_comparison compares two observed or computed values.
 
-Use forall only for every row associated with the current candidate. Use
-coverage when every candidate must have an observation for every member of a
-separate required-dimension set.
+A quantifier traverses declared associations from the current row to the
+related row. Use forall for every related row. Use coverage when every
+candidate must have an observation for every member of a separate
+required-dimension set.
+
+related_row means that one row from set_ref is connected to the current row
+through every association declared on that set's graph node. condition is
+evaluated once for that related row, or is null when those relationships alone
+are the condition.
 
 Coverage asks whether, for one candidate, every qualifying required member has
-at least one qualifying observation. required_member_condition is the Boolean
-expression for a required-member row, or null when the whole required-member
-set applies. observation_condition is the Boolean expression for an
-observation row. The candidate_set is the set evaluated by
-qualification. The declared association graph supplies one unambiguous path
-from the candidate and one from the required member to the observation set.
+at least one qualifying observation. candidate_condition applies to the
+candidate row, or is null when every candidate is eligible.
+required_member_condition applies to one required-member row, or is null when
+the whole required-member set applies. observation declares its set_ref and
+condition together; its condition applies to one observation row. The
+association graph supplies one unambiguous path from the candidate and one
+from the required member to the observation.
 
 aggregate summarizes all rows retained by qualification. filtered_aggregate
 adds one condition that applies only to that aggregate's argument rows.
-distinct_argument states whether repeated argument values count once; neither
-aggregate-local choice changes the outer candidate population.
+count returns the number of qualifying argument rows. sum returns the total of
+an observed value. distinct_argument states whether repeated argument values
+count once; neither aggregate-local choice changes the outer candidate
+population.
+
+Each ordering entry writes ordering_basis before expression. ordering_basis
+states exactly what value is compared across result rows and whether it is
+obtained by counting rows or aggregating an observed value. Then write the
+expression that computes that value.
 
 A requested proportion, ratio, share, or percentage is divide(part, whole).
 When part and whole summarize rows, give each its own
@@ -140,14 +187,27 @@ Each grouping entry writes grouping_basis before kind. grouping_basis states
 what value one qualifying row contributes to the group. Use
 candidate_instance_identity for shown qualifying_row_identity,
 related_instance_identity for shown related_entity_identity, and value for
-shown non_identity_value. A value grouping writes its expression. Grouped
+shown non_identity_value. A value grouping writes the expression fixed by the
+shown grouping_value: observed_value writes the recorded fact directly, computed_value writes per-row arithmetic, condition writes a Boolean condition, and temporal_bucket
+writes a temporal_bucket over a fact and copies the shown grain. Grouped
 outputs and ordering use group_ref for grouping values; aggregate expressions
-compute values over each group. A supplied collection may restrict qualifying
-rows; the per-row value remains the grouping value.
+compute values over each group. Grouping assigns a key to every qualifying row.
+Qualification selects the requested keys. When supplied identity inputs name
+requested groups, qualification compares the grouping identity fact with those
+input refs, using OR for alternatives. The per-row identity remains the grouping
+value.
 
-Each output names the fact, set, group, input, or expression that the user asks
-to receive. Ordering names the value that determines order. Selection states
-which ordered rows survive.
+Each result_key_meaning identifies a result row. Write its expression in
+result_key_outputs. A grouped result key returns its group_ref; an ungrouped
+result key returns a set_ref or an identifier fact with identity_path.
+
+Each requested_value_meaning is another result the answer must state. Copy its
+value_ref to output_ref in requested_value_outputs. For value_kind=value, write
+its value expression. For value_kind=related_entity, the output writes
+output_ref; its fixed requested_output_relations entry owns the returned entity
+set.
+Preserve the shown order within each output list. Ordering names the
+value that determines order. Selection states which ordered rows survive.
 
 Express a highest, lowest, first, or last result through ordering and selection.
 Qualification retains its population meaning. FirstRankWithTies keeps every row
@@ -174,6 +234,18 @@ executable operations.
 
 SEMANTIC_QUESTION_FRAME_TOOL_NAME = "submit_question_frame"
 
+_MISSING_REQUESTED_FACT_INSTRUCTION = (
+    "Return kind=missing_requested_fact when the requested factual result "
+    "itself is not identifiable. The kind of thing counted or returned is stated "
+    "by the question or supplied by prior context. A population or set named by "
+    "its business role is identifiable; its member rows are retrieved as data."
+)
+_UNRESOLVED_PRIOR_REFERENCE_INSTRUCTION = (
+    "Return kind=unresolved_prior_turn_references when the factual result is "
+    "identifiable and a required person, object, time, or value is expressed "
+    "only by a pronoun or dependent phrase whose antecedent is absent."
+)
+
 
 SEMANTIC_QUESTION_FRAME_INSTRUCTIONS = """\
 Authoring order
@@ -188,123 +260,162 @@ property values that restrict those candidates belong to supplied_values.
 
 Answer requests
 
-Write one answer_request for each independent factual result.
+Write one answer_request for each independent factual result. Values that the
+question asks the answer to state and that describe the same result row or group
+under one ordering and selection are columns of that one answer_request.
 
-Each answer request writes result_kind, qualifying_row_kind,
-grouping_meanings, and returned_candidate_identity for qualifying instances.
-answer_values declares each unknown fact or value computed to return or rank
-answer rows, once. supplied_values declares concrete values already given by
-the question.
-These two lists have disjoint ownership.
-return_request_basis and returned_result state what the answer returns.
-ordering_value_refs references values in ordering priority. Then write
-selection and universal_shape.
-qualifying_row_kind is the kind of row evaluated by qualification and
-aggregate arguments before grouping. It is the returned instance kind only
-for qualifying_instances. Identity, property, and time values that restrict
-those rows belong to supplied_values.
+A row or group request writes return_request_basis first. It states exactly
+what the answer must state, independently of relational mechanics. The result
+branch later writes projection from that basis. For one-per-candidate results,
+projection writes projection_basis, then candidate_identity=returned when the
+answer identifies each candidate row or candidate_identity=omitted when it
+states only requested related or property values. For grouped results, write
+returned_grouping_keys=all. explicitly_requested_values contains only answer
+values besides those returned grouping keys. Ordering
+and selection do not make a value part of the answer. Candidate identity is
+part of the answer when the question asks which candidates or pairs requested
+values with them. Candidate rows used only to produce one requested related or
+property value per row omit candidate identity. A result key is the candidate
+identity for one row per qualifying candidate, or the grouping tuple for one
+row per group. grouping_kind states whether each group key is an entity identity
+or a non-identity value. Each explicitly_requested_values item writes value_ref,
+then value_kind_basis, value_kind, meaning, and origin once. value_kind_basis
+states whether the requested answer states a related entity or a value.
+related_entity means the answer states which related person, organization,
+place, product, or other entity is involved. value means the answer states an
+attribute, measurement, status, time, quantity, or computed value without
+identifying an entity. A population scalar retains
+return_request_basis and its one returned meaning. Then write
+relational_shape_basis, then request. Inside request write relational_shape,
+result_grain_basis, then result. Each result branch owns its row source. Inside
+result, result_order writes ordering_request_basis, ordering, then selection.
+ordering_request_basis states whether the question asks to arrange or rank the
+result rows. ordering is no_ordering_requested when it does not, or ordered_by
+with the values that determine the requested order. When an existing grouping
+key determines order, use group_ref and copy that grouping's group_ref.
+supplied_values later
+declares each concrete non-selection operand once.
 
-result_kind describes the result rows before ordering and selection; selecting
-one winning row does not make it scalar. Use scalar when the requested result
-is one value over the whole qualifying set, qualifying_instances when the
-requested rows are candidate instances, and grouped_results when one result
-row is produced per grouping value, including when ordering compares an
-aggregate computed for each grouping value.
+population_rows names rows aggregated into one scalar. result_candidates names
+the instances that identify one-per-candidate result rows.
+grouped_observation_rows names occurrences aggregated into groups. Each field's
+instance_kind is unqualified. Concrete identities, properties, and times that
+restrict those rows are supplied values.
 
-When entities are ranked by an aggregate over related occurrences, the
-occurrences are the candidate set, the entity is a grouping meaning, and the
-result kind is grouped_results.
+result_grain_basis states what one result row represents after qualification
+and grouping. Then result selects one closed grain branch. Use
+one_value_for_population for one value over all qualifying rows,
+one_result_per_qualifying_row for one result per qualifying row, and
+one_result_per_group with grouping_meanings for one result per grouping tuple.
 
-For qualifying_instances, returned_candidate_identity states the candidate
-identity returned by each row. grouped_results uses grouping_meanings as the
-values that identify each returned row.
+A request for the first, last, or top N qualifying occurrences uses
+one_result_per_qualifying_row. When entities are ranked by an aggregate over
+related occurrences, grouped_observation_rows names those occurrences and
+result is one_result_per_group with the entity as a grouping meaning.
 
-Each answer value beyond the automatically returned qualifying-instance
-identity or grouping identity has one declaration in answer_values. Write value_ref,
-meaning, then origin.
+ordering lists meanings compared to arrange candidate or group rows before
+selection, in priority order. An ordering meaning varies across those rows; a
+shared time scope constrains them through supplied_values. Write
+ownership_basis stating whether the ordering meaning is one of projection's
+returned values. When it is, use requested_value_ref and copy value_ref.
+unreturned_ordering_meaning declares a meaning absent from projection.
+Ranking words such as first, last, highest, lowest, and top N select result
+rows.
+“Which A has the greatest B?” returns the group or candidate identity and uses
+an unreturned ordering meaning for B. “Which A has the greatest B, and what is
+B?” returns the identity and B, then orders by B's value_ref.
 
-return_request_basis states only what the answer wording asks to return. For
-row or group results, returned_result is identities when the answer asks
-“Which A ... B?” and therefore returns A while B determines ordering. It is
-identities_and_values when an added answer clause such as “and what is B?”
-asks to state declared non-key values; returned_value_refs lists those values.
-A ranking clause places its value in ordering_value_refs.
+For result kind one_value_for_population, returned_meanings contains exactly
+the one unknown value requested by the question and ordering is
+no_ordering_requested.
+Relationships used to qualify rows retain one_result_per_qualifying_row.
 
-ordering_value_refs lists the declared values that determine order, in priority
-order. Each ordering_value_ref copies value_ref from one preceding
-answer_values item. Ranking words such as first, last, highest, lowest, and
-top N select result rows.
-“Which A has the greatest B?” returns A; B orders A.
-“Which A has the greatest B, and what is B?” returns A and B.
-
-For scalar, answer_values contains exactly the one unknown value requested by
-the question, returned_result is values, and ordering_value_refs is empty.
-Relationships used to qualify candidates retain qualifying_instances.
-
-grouping_meanings is empty for scalar and qualifying_instances. For
-grouped_results, each item names one value that varies across the requested
-result rows and defines one grouping dimension. Each grouping_meaning writes
-meaning, origin, then grouping_kind. grouping_kind is qualifying_row_identity
-when the grouping value identifies the same instance described by
-qualifying_row_kind, related_entity_identity when it identifies another entity
-related to each qualifying row, and non_identity_value when it identifies no
-entity. A shared qualification or time scope is not a grouping dimension.
+For result_rows kind one_result_per_group, each grouping_meaning names one
+value that varies across result rows and defines one grouping dimension. It
+writes grouping_basis, meaning, origin, then grouping_kind. A
+non_identity_value grouping then writes grouping_value. Use observed_value for a recorded grouping value. Use computed_value for a per-row arithmetic grouping value. Use condition for a Boolean grouping condition. Use temporal_bucket with day, week,
+month, quarter, or year when rows are grouped into calendar periods.
+related_entity_identity identifies another entity related to each qualifying
+row, and non_identity_value identifies no entity. A result per qualifying row
+uses one_result_per_qualifying_row instead of grouping by that row's identity.
+A grouping dimension is a value carried by each qualifying row and
+identifies one requested result group. Shared qualifications and time scopes
+constrain the rows. An ordinal such as first two belongs to selection over
+ordered candidate rows.
 
 selection is all_results when every qualifying result is requested,
 first_rank_with_ties for a singular first, last, highest, or lowest request,
 and take_with_boundary_ties for an explicit positive number of ordered results.
-The take limit owns its positive-integer supplied value.
+supplied_values.selection_limits declares that positive integer once and writes
+the one-based answer_request_number of the request it limits.
 
-universal_shape is none when there is no universal requirement,
-every_related_row when every row of one set related to the candidate must
-satisfy a condition, and every_required_member_has_observation when every
-member of one required set must have a matching observation from a different
-set.
+relational_shape is ordinary for ordinary qualification,
+every_related_row when every related row must satisfy a condition,
+every_required_member_has_observation when each candidate is tested for whether every member of
+one required set has a matching observation from a different set. For this
+shape, result.coverage_candidates.instance_kind is the kind being tested and
+returned; required members and observations are later relational sets.
+same_related_row when one related row must participate in two or more stated
+relationships to the candidate.
 
 Each requested scalar value is one answer request. Sharing a candidate set or
 time scope does not merge scalar values. A requested row or group result is one
-answer request and may contain several columns at that result grain. A repeated
-measure over a specified key set is one grouped requested fact, not one fact per
-key.
+answer request and may contain several columns or selected rows at that result
+grain. One request owns the returned meanings, ordering, and selection for a
+bounded subset. A repeated measure over a specified key set is one grouped
+requested fact, not one fact per key.
 
 Supplied values
 
-supplied_values contains concrete values already supplied for qualification,
-grouping, computation, ordering, or selection.
+supplied_values contains only concrete operand values already given by the
+question. Candidate kinds, requested unknowns, grouping meanings, and observed
+or computed ordering meanings remain in answer_requests. A selection limit is
+declared only in supplied_values.selection_limits.
 
 A business subject or requested unknown belongs to the answer request.
-A supplied name, code, identifier, time expression, number, Boolean, explicit
-text value, collection, arithmetic operand, or result limit is a supplied
-value.
+Entity references and values used by a condition or computation each belong to
+one supplied_values.operands item. Result counts belong to selection_limits.
 
-A business modifier may define qualifying_row_kind when it names the
+A business modifier may define the result row source when it names the
 business population, or a supplied scalar when it is independently compared.
 That meaning has one owner.
 
-A supplied value is a value or expression already provided by the question for
-use in finding the answer. It may be compared, used in arithmetic, used as a
-time scope, included in a supplied collection, or used as an explicit result
-limit. Candidate-set nouns and the unknown answer are represented by the
-answer requests.
+A supplied value is a concrete operand already provided by the question for
+a comparison, arithmetic, time scope, or supplied collection. Qualifying rows
+and required sets are owned by the result row-source field or relational_shape.
+A bounded result count is declared once in selection_limits for its answer
+request. Requested unknowns are owned by the answer request.
 
 One supplied value item owns one independent operand role. Alternatives filling
 the same role share one item. A value shared by several answer requests appears
 once.
 
-For each supplied value, write meaning and denotation_basis before choosing
-exactly one of entity_reference or non_entity_value.
+After supplied_values, set
+question_input_inventory_check.all_input_like_phrases_declared=true only when
+every condition or computation operand has exactly one supplied_values.operands item and
+every bounded result count has exactly one selection_limits item.
 
-entity_reference is a supplied name, code, or identifier intended to identify
-a person, organization, place, product, or other entity. It remains an entity
-reference when its wording could match several instances; resolution handles
-that ambiguity. Write instance_kind, then value. The value contains the copied
-operand and its origin.
+supplied_values.operands contains one item for each independent supplied operand
+role. Each item writes meaning and denotation_basis, then chooses exactly one
+closed branch.
 
-non_entity_value is a supplied property, category, status, time, quantity, or
-other value that does not name or identify an entity. Its value contains the
-copied operand, its intrinsic value_type, and its origin. property_value is a
-non-entity textual property, category, or status. temporal_scope is a date,
-time, interval, or relative period that bounds observations.
+entity_reference is a supplied name, code, or identifier that denotes a
+person, organization, place, product, or other entity whose exact identity the
+question qualifies or returns. A name, code, or identifier used to locate that
+entity through a name, code, or identifier field remains an entity reference
+and requires canonical identity resolution or validation. Write instance_kind, then value. value is
+single_identity with one identity_value, or identity_alternatives with distinct
+identity_values that fill the same role. For conversation_resolution origin,
+identity_value copies the shown resolved_value_text; resolved_input_ref is copied
+only into origin.
+
+non_entity_value is a supplied category, status, time, quantity, Boolean,
+duration, or shared classification. It describes qualifying rows without
+naming, coding, or identifying an entity. Write kind, then value. kind is
+categorical_value for a category, status, or shared classification;
+temporal_scope for a date, time, interval, or relative period; number for a
+numeric operand; boolean for true or false; or duration for an elapsed amount
+with a unit. Each value contains only the copied operands and their origin.
 """
 
 
@@ -332,11 +443,32 @@ class SemanticQuestionFrameTurnPrompt(TurnPromptBase):
                 "Outcome",
                 (
                     "Return kind=question_meaning when the visible context specifies a complete factual request.",
-                    "Return kind=missing_requested_fact only when no complete factual result is identifiable.",
-                    "Return kind=unresolved_prior_turn_references only when the factual result is identifiable but required prior-turn references remain unresolved.",
+                    _MISSING_REQUESTED_FACT_INSTRUCTION,
+                    _UNRESOLVED_PRIOR_REFERENCE_INSTRUCTION,
                     "Return exactly one provider-native tool call.",
                 ),
             ),
+            builder.instruction_block('Grouping ownership', (
+                'A restriction shared by all groups remains a qualification unless the question also explicitly requests it as a grouping dimension.',
+                'Comparison operators and arithmetic operations are structural relations, not supplied text operands. Copy their operand values only; a word is an operand when the question uses it as data.',
+            )),
+            builder.instruction_block('Temporal operands', (
+                'A temporal_scope operand is one complete interval expression, including both boundaries when supplied. Copy the whole interval as one operand; its endpoints are not alternative values. Separate temporal scopes have separate supplied-value items.',
+            )),
+            builder.instruction_block('Quantified relationship', (
+                'every_required_member_has_observation requires two different related row sets: every member of an independently required set must have at least one matching row from the observation set.',
+                'An absence condition asks whether matching observations do not exist. It uses ordinary relational shape even when the search domain includes all stores or locations.',
+                'every_related_row tests a property directly on each existing related row. An amount or another field on that row is not a separate observation set. Determine the logical requirement rather than treating a broad search domain as positive coverage.',
+            )),
+            builder.instruction_block('Ordinal selection', (
+                'Use position_with_ties when the question requests one explicit ordered position, such as second, third, or position five. It retains only rows tied at that one-based position, excluding rows before that boundary.',
+                'Declare that positive integer position once in supplied_values.selection_limits, with the answer_request_number it belongs to. The selection kind distinguishes an ordinal position from a requested number of results.',
+                'Use take_with_boundary_ties for the first specified number of ordered rows, and first_rank_with_ties for a highest or lowest result without another explicit position.',
+            )),
+            builder.instruction_block('Group result grain', (
+                'A grouped result returns its grouping keys and aggregate values. An individual related entity is a grouping key or a row-level result, not an aggregate value.',
+                'When a question lists individual entities with their related entities or attributes, retain one result per qualifying row. Organizing a list by a related entity does not require aggregating away the listed entities.',
+            )),
         )
 
     def response_contract(self) -> ProviderResponseContract:
@@ -422,11 +554,19 @@ class SemanticQuestionContractTurnPrompt(TurnPromptBase):
                 "Outcome",
                 (
                     "Return kind=question_contract when the visible context specifies a complete factual request.",
-                    "Return kind=missing_requested_fact only when no complete factual result is identifiable.",
-                    "Return kind=unresolved_prior_turn_references only when the factual result is identifiable but required prior-turn references remain unresolved.",
+                    _MISSING_REQUESTED_FACT_INSTRUCTION,
+                    _UNRESOLVED_PRIOR_REFERENCE_INSTRUCTION,
                     "Return exactly one provider-native tool call.",
                 ),
             ),
+            builder.instruction_block('Operand ownership', (
+                'An input_comparison is fact OPERATOR input, in that order. The operator states how the observed fact compares with the supplied input.',
+                'Write the requested arithmetic directly. Do not add neutral, cancelling, or repeated operations. A constant uses a supplied input_ref; it is never an observed fact.',
+            )),
+            builder.instruction_block('Input references', (
+                'Every supplied input must be referenced by an input_ref in the executable semantic structure. Repeating its meaning in instance_kind or origin text does not use that input.',
+                'When a supplied value identifies a class, category, or state of the candidate population, express that restriction as a qualification using the supplied input_ref. Retain it even when the population description already mentions the same class.',
+            )),
         )
 
     def response_contract(self) -> ProviderResponseContract:
@@ -478,35 +618,77 @@ def _question_meaning_payload(
         "answer_requests": [
             {
                 "requested_fact_ref": item.requested_fact_id,
+                "return_request_basis": item.return_request_basis,
+                "relational_shape_basis": item.relational_shape_basis,
+                "result_grain_basis": item.result_grain_basis,
+                "ordering_request_basis": item.ordering_request_basis,
                 "result_kind": item.result_kind,
-                "qualifying_row_kind": _origin_payload(item.candidate_set_origin),
+                "candidate_kind": _origin_payload(item.candidate_set_origin),
                 "grouping_meanings": [
                     {
+                        "group_ref": group_ref,
                         **_origin_payload(origin),
                         "grouping_kind": grouping_kind,
+                        **(
+                            {"grouping_value": _grouping_value_payload(value_shape)}
+                            if value_shape is not None
+                            else {}
+                        ),
                     }
-                    for origin, grouping_kind in zip(
+                    for group_ref, origin, grouping_kind, value_shape in zip(
+                        item.grouping_refs,
                         item.grouping_origins,
                         item.grouping_kinds,
+                        item.grouping_value_shapes,
                         strict=True,
                     )
                 ],
-                "row_identity_meaning": (
-                    _origin_payload(item.row_identity_origin)
-                    if item.row_identity_origin is not None
-                    else None
-                ),
                 "ordering_meanings": [
-                    _origin_payload(origin) for origin in item.ordering_origins
+                    {
+                        **_origin_payload(origin),
+                        **(
+                            {"group_ref": group_ref}
+                            if group_ref is not None
+                            else {}
+                        ),
+                        **({"value_ref": value_ref} if value_ref is not None else {}),
+                    }
+                    for origin, group_ref, value_ref in zip(
+                        item.ordering_origins,
+                        item.ordering_group_refs,
+                        item.ordering_value_refs,
+                        strict=True,
+                    )
                 ],
-                "output_meanings": [
-                    _origin_payload(origin) for origin in item.output_origins
+                "result_key_meanings": [
+                    {
+                        **_origin_payload(origin),
+                        "key_kind": output_kind,
+                    }
+                    for origin, output_kind in zip(
+                        item.output_origins[: item.result_key_count],
+                        item.output_kinds[: item.result_key_count],
+                        strict=True,
+                    )
+                ],
+                "requested_value_meanings": [
+                    {
+                        "value_ref": value_ref,
+                        "value_kind": output_kind,
+                        **_origin_payload(origin),
+                    }
+                    for value_ref, origin, output_kind in zip(
+                        item.requested_value_refs,
+                        item.output_origins[item.result_key_count :],
+                        item.output_kinds[item.result_key_count :],
+                        strict=True,
+                    )
                 ],
                 "selection": {
                     "kind": item.selection_kind,
                     "limit_input_ref": item.selection_limit_input_ref,
                 },
-                "universal_shape": item.universal_shape,
+                "relational_shape": item.relational_shape,
             }
             for item in meaning.answer_requests
         ],
@@ -534,6 +716,17 @@ def _origin_payload(origin: SourceOrigin) -> dict[str, object]:
         "meaning": origin.meaning,
         "resolved_input_ref": origin.resolved_input_ref,
     }
+
+
+def _grouping_value_payload(
+    shape: tuple[str, str | None],
+) -> dict[str, str]:
+    kind, grain = shape
+    if kind in {"observed_value", "computed_value", "condition"} and grain is None:
+        return {"kind": kind}
+    if kind == "temporal_bucket" and grain is not None:
+        return {"kind": kind, "grain": grain}
+    raise ValueError("invalid grouping value shape")
 
 
 def _value_type_label(value_type: ValueType) -> object:

@@ -50,7 +50,7 @@ def _turn_summary(*, purpose: str, source: dict[str, Any]) -> dict[str, object]:
         return _read_eligibility_step_summary(source)
     if purpose == ModelTurnPurpose.PLAN_SELECTION:
         return _plan_selection_step_summary(source)
-    if purpose == ModelTurnPurpose.SOURCE_BINDING:
+    if purpose in {ModelTurnPurpose.SOURCE_REALIZATION, ModelTurnPurpose.SOURCE_BINDING}:
         return _source_binding_step_summary(source)
     return {}
 
@@ -80,7 +80,7 @@ def _authored_bases(
             for key, child in value.items()
             for item in (
                 (((*path, str(key)), child),)
-                if key in {"mapping_basis", "role_match_basis"}
+                if key in {"mapping_basis", "decision_basis"}
                 and isinstance(child, str)
                 and child.strip()
                 else _authored_bases(child, path=(*path, str(key)))

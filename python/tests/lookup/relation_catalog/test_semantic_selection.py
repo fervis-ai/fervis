@@ -229,9 +229,9 @@ def test_semantic_catalog_selection_round_robins_requirements_not_resource_names
                     "measure b",
                     "measure c",
                 ),
-                _match("fact_1:recall:output_1", "group entity"),
+                _match("fact_1:recall:group", "group entity"),
                 _match(
-                    "fact_1:recall:output_2",
+                    "fact_1:recall:count",
                     "measure a",
                     "measure b",
                     "measure c",

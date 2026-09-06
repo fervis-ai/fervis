@@ -2,6 +2,9 @@
 
 from typing_extensions import assert_never
 
+from fervis.lookup.answer_program.operations import JoinMode
+from fervis.lookup.plan_execution.expression_schema import expression_value_type
+
 from ._shared import (
     AggregateSpec,
     AggregationFunction,
@@ -39,13 +42,12 @@ from .execution_proof import ExecutionProofContext
 from fervis.lookup.answer_program.operations import JoinKey, NamedExpression
 from fervis.lookup.answer_program.expressions import (
     Expression,
-    ExpressionFunction,
+    FunctionExpression, ExpressionFunction,
     FieldRef,
-    FunctionExpression,
     expression_references,
 )
 from fervis.lookup.plan_execution.errors import VerificationError
-from fervis.lookup.plan_execution.declared_values import declared_types_compatible
+from fervis.lookup.plan_execution.declared_values import declared_types_compatible, declared_comparison_types_compatible
 
 
 def _operation_relation_contract(
@@ -53,6 +55,8 @@ def _operation_relation_contract(
     contracts: dict[str, RelationContract],
     *,
     proof_context: ExecutionProofContext,
+    scalar_types: dict[str, str],
+    node_output_types: dict[str, dict[str, str]],
 ) -> RelationContract:
     spec = operation.spec
     if isinstance(spec, FilterSpec):
@@ -70,7 +74,7 @@ def _operation_relation_contract(
             operation.id,
             spec,
             contracts,
-            proof_context=proof_context,
+            proof_context=proof_context, scalar_types=scalar_types, node_output_types=node_output_types,
         )
     if isinstance(spec, ProjectToKeySpec):
         return _project_to_key_contract(spec, contracts)
@@ -203,6 +207,8 @@ def _project_contract(
     contracts: dict[str, RelationContract],
     *,
     proof_context: ExecutionProofContext,
+    scalar_types: dict[str, str],
+    node_output_types: dict[str, dict[str, str]],
 ) -> RelationContract:
     source = _contract(contracts, spec.input_relation)
     fields: dict[str, frozenset[FieldBindingRole]] = {}
@@ -229,8 +235,10 @@ def _project_contract(
             fields[output.output_field] = frozenset(
                 {FieldBindingRole.OUTPUT, FieldBindingRole.PREDICATE}
             )
+            if isinstance(expression, FunctionExpression) and expression.function is ExpressionFunction.ROW_NUMBER:
+                fields[output.output_field] |= frozenset({FieldBindingRole.IDENTITY})
             field_proofs[output.output_field] = dependency
-            field_types[output.output_field] = _derived_expression_type(expression)
+            field_types[output.output_field] = expression_value_type(expression, field_types=source.field_types, scalar_types=scalar_types, node_output_types=node_output_types)
     return RelationContract(
         fields=fields,
         grain_keys=_project_contract_grain(source, spec.outputs),
@@ -242,32 +250,24 @@ def _project_contract(
     )
 
 
-def _derived_expression_type(expression: Expression) -> str:
-    if (
-        isinstance(expression, FunctionExpression)
-        and expression.function is ExpressionFunction.TEMPORAL_BUCKET
-    ):
-        return "date"
-    return ""
-
-
 def _project_to_key_contract(
     spec: ProjectToKeySpec,
     contracts: dict[str, RelationContract],
 ) -> RelationContract:
     source = _contract(contracts, spec.input_relation)
+    selected_fields = (*spec.key_fields, *spec.carry_fields)
     fields: dict[str, frozenset[FieldBindingRole]] = {}
     field_proofs: dict[str, ProofLineage] = {}
-    for key_field in spec.key_fields:
+    for key_field in selected_fields:
         fields[key_field] = _field_roles(source, key_field, "project_to_key")
         field_proofs[key_field] = _field_proof(source, key_field, "project_to_key")
-    projections = {field: field for field in spec.key_fields}
+    projections = {field: field for field in selected_fields}
     return RelationContract(
         fields=fields,
         grain_keys=spec.key_fields,
         field_proofs=field_proofs,
         field_types={
-            field: source.field_types.get(field, "") for field in spec.key_fields
+            field: source.field_types.get(field, "") for field in selected_fields
         },
         entity_keys=_project_entity_keys(source, projections),
         row_proof=source.row_proof,
@@ -315,7 +315,7 @@ def _join_contract(
             )
         ),
         semantic_guarantees=_combine_semantic_guarantees(
-            (left, right), disjoin=False
+            (left,) if spec.mode is JoinMode.LEFT else (left, right), disjoin=False
         ),
     )
 
@@ -333,7 +333,7 @@ def _join_dependency_proof(
         raise VerificationError("join keys lack declared identity authority")
     proof = ProofLineage()
     for key in join_keys:
-        if not declared_types_compatible(
+        if not declared_comparison_types_compatible(
             left.field_types.get(key.left), right.field_types.get(key.right)
         ):
             raise VerificationError("join keys have incompatible declared types")
@@ -678,6 +678,8 @@ def _aggregate_contract(
             if aggregation.filter is not None
             else ProofLineage()
         )
+        for field in aggregation.grain_fields:
+            filter_proof = filter_proof.merge(_field_proof(source, field, "aggregate grain"))
         fields[aggregation.output_field] = frozenset(
             {FieldBindingRole.OUTPUT, FieldBindingRole.PREDICATE}
         )

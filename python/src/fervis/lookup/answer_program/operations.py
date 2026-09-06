@@ -7,8 +7,8 @@ from fervis.types.enums import StrEnum
 from typing import TypeAlias
 from typing_extensions import assert_never
 
-from fervis.lookup.answer_program.expressions import Expression, expression_input_id
-from fervis.lookup.answer_program.values import ConstantRef, ParameterRef
+from fervis.lookup.answer_program.expressions import Expression, ExpressionReferences, expression_input_id, expression_references
+from fervis.lookup.answer_program.values import ConstantRef, ParameterRef, NodeOutputRef
 
 
 class OperationKind(StrEnum):
@@ -37,6 +37,8 @@ class AggregationFunction(StrEnum):
     MIN = "min"
     MAX = "max"
     AVG = "avg"
+    BOOL_ANY = "bool_any"
+    BOOL_ALL = "bool_all"
 
 
 class RelationRole(StrEnum):
@@ -86,6 +88,7 @@ class AggregationSpec:
     input_field: str = ""
     filter: Expression | None = None
     distinct_argument: bool = False
+    grain_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -107,7 +110,13 @@ class ProjectSpec:
 class ProjectToKeySpec:
     input_relation: str
     key_fields: tuple[str, ...]
+    carry_fields: tuple[str, ...] = ()
     kind: OperationKind = field(default=OperationKind.PROJECT_TO_KEY, init=False)
+
+
+class JoinMode(StrEnum):
+    INNER = "inner"
+    LEFT = "left"
 
 
 @dataclass(frozen=True)
@@ -115,6 +124,7 @@ class JoinSpec:
     left: str
     right: str
     join_keys: tuple[JoinKey, ...]
+    mode: JoinMode = JoinMode.INNER
     kind: OperationKind = field(default=OperationKind.JOIN, init=False)
 
 
@@ -185,7 +195,20 @@ class Take:
     limit: Expression
 
 
-OrderSelection: TypeAlias = KeepAll | Take
+@dataclass(frozen=True)
+class AtPosition:
+    position: Expression
+
+
+OrderSelection: TypeAlias = KeepAll | Take | AtPosition
+
+
+def order_selection_expression(selection: OrderSelection) -> Expression | None:
+    if isinstance(selection, Take):
+        return selection.limit
+    if isinstance(selection, AtPosition):
+        return selection.position
+    return None
 
 
 @dataclass(frozen=True)
@@ -274,6 +297,30 @@ def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
     if isinstance(spec, ComputeSpec):
         return ()
     assert_never(spec)
+
+
+def operation_expression_references(spec: OperationSpec) -> tuple[ExpressionReferences, ...]:
+    expressions: tuple[Expression, ...]
+    if isinstance(spec, ComputeSpec):
+        expressions = (spec.expression,)
+    elif isinstance(spec, FilterSpec):
+        expressions = (spec.condition,)
+    elif isinstance(spec, ProjectSpec):
+        expressions = tuple(output.expression for output in spec.outputs)
+    elif isinstance(spec, UniversalConditionSpec):
+        expressions = (spec.condition,)
+    elif isinstance(spec, AggregateSpec):
+        expressions = tuple(item.filter for item in spec.aggregations if item.filter is not None)
+    elif isinstance(spec, OrderSpec):
+        expression = order_selection_expression(spec.selection)
+        expressions = () if expression is None else (expression,)
+    else:
+        expressions = ()
+    return tuple(expression_references(expression) for expression in expressions)
+
+
+def operation_node_output_refs(spec: OperationSpec) -> tuple[NodeOutputRef, ...]:
+    return tuple(dict.fromkeys(ref for references in operation_expression_references(spec) for ref in references.outputs))
 
 
 def operation_scalar_output_ids(spec: OperationSpec) -> tuple[str, ...]:

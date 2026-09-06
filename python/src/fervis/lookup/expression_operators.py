@@ -15,10 +15,14 @@ from fervis.lookup.semantic_types import (
     DecimalType,
     IntegerType,
     IdentifierType,
+    NumericType,
+    OrderableType,
     RatioMeasure,
+    TemporalPointType,
     TemporalScopeType,
     TextType,
     UnitlessMeasure,
+    UnspecifiedScalarType,
     ValueType,
     is_numeric,
     normalized_numeric_type,
@@ -124,6 +128,24 @@ def infer_operator_result(
     return _infer_arithmetic_result(operator, operands)
 
 
+def infer_aggregate_result(function: str, operand: ValueType) -> ValueType:
+    """Return an aggregate result after validating its operand capability."""
+
+    if isinstance(operand, CollectionType):
+        raise ValueError("aggregate argument must be row-level scalar")
+    if function == "count":
+        return IntegerType()
+    if function in {"sum", "average"}:
+        if not is_numeric(operand):
+            raise ValueError(f"{function} requires numeric argument")
+        return operand
+    if function in {"minimum", "maximum"}:
+        if not _is_orderable(operand):
+            raise ValueError(f"{function} requires orderable argument")
+        return operand
+    raise ValueError(f"unsupported aggregate function {function}")
+
+
 def _validate_nonarithmetic_operands(
     operator: ExpressionUnaryOperator | ExpressionBinaryOperator,
     operands: tuple[ValueType, ...],
@@ -157,7 +179,7 @@ def _validate_nonarithmetic_operands(
         if not (
             _numeric_types_compatible(left, right)
             or left == right
-            and isinstance(left, (DateType, DateTimeType))
+            and _is_orderable(left)
         ):
             raise ValueError("ordering comparison requires compatible operands")
         return
@@ -177,27 +199,50 @@ def _validate_nonarithmetic_operands(
             raise ValueError("contains requires text or compatible collection")
         return
     if operator is ExpressionBinaryOperator.WITHIN and not (
-        isinstance(left, (DateType, DateTimeType))
+        isinstance(left, (DateType, DateTimeType, TemporalPointType))
         and isinstance(right, TemporalScopeType)
     ):
         raise ValueError("within requires temporal value and temporal scope")
 
 
 def _equality_compatible(left: ValueType, right: ValueType) -> bool:
-    return _numeric_types_compatible(left, right) or left == right or (
+    return (
+        isinstance(left, UnspecifiedScalarType)
+        or isinstance(right, UnspecifiedScalarType)
+        or _numeric_types_compatible(left, right)
+        or left == right
+        or (
         isinstance(left, IdentifierType)
         and isinstance(right, TextType)
         or isinstance(right, IdentifierType)
         and isinstance(left, TextType)
+        )
     )
 
 
 def _numeric_types_compatible(left: ValueType, right: ValueType) -> bool:
     if not (is_numeric(left) and is_numeric(right)):
         return False
-    if isinstance(left, IntegerType) or isinstance(right, IntegerType):
+    if isinstance(left, (IntegerType, NumericType)) or isinstance(right, (IntegerType, NumericType)):
         return True
     return left == right
+
+
+def _is_orderable(value_type: ValueType) -> bool:
+    return isinstance(
+        value_type,
+        (
+            DateType,
+            DateTimeType,
+            DecimalType,
+            IntegerType,
+            NumericType,
+            OrderableType,
+            TemporalPointType,
+            TextType,
+            UnspecifiedScalarType,
+        ),
+    )
 
 
 def _infer_arithmetic_result(
@@ -206,6 +251,8 @@ def _infer_arithmetic_result(
 ) -> ValueType:
     if not all(is_numeric(item) for item in operands):
         raise ValueError(f"{operator.value} requires numeric operands")
+    if any(isinstance(item, NumericType) for item in operands):
+        return NumericType()
     if operator is ExpressionUnaryOperator.NEGATE:
         return operands[0]
     left, right = operands
@@ -248,6 +295,7 @@ __all__ = [
     "ExpressionUnaryOperator",
     "OperatorKind",
     "OperatorSignature",
+    "infer_aggregate_result",
     "infer_operator_result",
     "operator_signature",
 ]

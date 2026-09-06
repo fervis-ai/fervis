@@ -1,14 +1,14 @@
 id: finite_choice_allows_explicit_normal_instance_override
-description: An explicit user request includes a finite-choice state even when that state has a normally excluded role.
+description: An explicit user request includes a finite-choice state even when that
+  state has a normally excluded role.
 migrates:
-  - python/tests/conformance/cases/algorithms/source_binding/finite_choice_allows_explicit_normal_instance_override.yaml
+- python/tests/conformance/cases/algorithms/source_binding/finite_choice_allows_explicit_normal_instance_override.yaml
 kind: algorithm
 algorithm: semantic.source_binding
 input:
   mode: subject_choice_membership
-  choice_included: true
-  matched_excluded_role: CANCELED_OR_VOIDED
   explicit_user_override_applies: true
+  baseline_included: false
 expect:
   result_contains:
     included: true

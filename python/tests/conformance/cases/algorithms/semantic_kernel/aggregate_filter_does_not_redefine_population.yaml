@@ -3,62 +3,125 @@ description: A filtered aggregate proves its own Boolean condition without chang
 kind: algorithm
 algorithm: semantic.question_contract
 input:
-  question_context_texts: ["What percentage of April 2026 amount was approved?"]
+  question_context_texts:
+  - What percentage of April 2026 amount was approved?
   frame_payload:
     decision_basis: The request is one ratio over one time-qualified population.
     outcome:
       kind: question_meaning
       answer_requests:
-        - result_kind: scalar
-          qualifying_row_kind: {meaning: observations, origin: {kind: question}}
-          grouping_meanings: []
-          return_request_basis: Return the approved share of April amount.
-          returned_result: {kind: values}
-          answer_values:
-            - {value_ref: v1, meaning: approved share of April amount, origin: {kind: question}}
-          returned_value_refs: [v1]
-          ordering_value_refs: []
-          selection: {kind: all_results}
-          universal_shape: none
+      - return_request_basis: Return the approved share of April amount.
+        relational_shape_basis: The requested relational shape is ordinary.
+        request:
+          relational_shape: ordinary
+          result_grain_basis: The requested result grain is one_value_for_population.
+          result:
+            kind: one_value_for_population
+            population_rows:
+              instance_kind: observations
+              origin:
+                kind: question
+            returned_meanings:
+            - meaning_ref: r1
+              meaning: approved share of April amount
+              origin:
+                kind: question
+            result_order:
+              ordering_request_basis: The question requests no ordering.
+              ordering:
+                kind: no_ordering_requested
+              selection:
+                kind: all_results
       supplied_values:
+        selection_limits: []
+        operands:
         - meaning: the reporting period
           denotation_basis: April 2026 is a period applied to observations.
           non_entity_value:
-            value: {operands: [April 2026], value_type: {kind: temporal_scope}, origin: {kind: question}}
+            kind: temporal_scope
+            value:
+              operands:
+              - April 2026
+              origin:
+                kind: question
+      question_input_inventory_check:
+        all_input_like_phrases_declared: true
   payload:
     decision_basis: The request is one ratio over one time-qualified population.
     outcome:
       kind: question_contract
       answer_requests:
-        - requested_fact_ref: fact_1
-          origin: {source: question_context, meaning: approved share of April amount, resolved_input_ref: null}
-          other_sets: []
-          other_associations: []
-          candidate_set: {instance_interpretation: normal_business_instance}
-          qualification:
-            kind: within
-            value: {kind: fact, observed_for_ref: s1, value_type: {kind: date}, origin: {source: question_context, meaning: April 2026 occurrence date, resolved_input_ref: null}}
-            scope: {kind: input_ref, input_ref: i1}
-          grouping: []
-          ordering: []
-          selection: null
-          distinct_by: []
-          outputs:
-            - expression:
-                kind: divide
-                left:
-                  kind: filtered_aggregate
-                  function: sum
-                  argument: &amount_fact {kind: fact, observed_for_ref: s1, value_type: {kind: decimal, measure: {kind: unitless}}, origin: {source: question_context, meaning: amount, resolved_input_ref: null}}
-                  filter: {kind: fact, observed_for_ref: s1, value_type: {kind: boolean}, origin: {source: question_context, meaning: approved, resolved_input_ref: null}}
-                  distinct_argument: false
-                right: {kind: aggregate, function: sum, argument: *amount_fact, distinct_argument: false}
+      - requested_fact_ref: fact_1
+        origin:
+          source: question_context
+          meaning: approved share of April amount
+          resolved_input_ref: null
+        candidate_set:
+          instance_kind: observations
+          instance_interpretation: normal_business_instance
+        set_graph:
+          identity_input_relations: {}
+          requested_output_relations: {}
+          other_related_sets: []
+        qualification:
+          kind: within
+          value:
+            kind: fact
+            observed_for_ref: s1
+            origin:
+              source: question_context
+              meaning: April 2026 occurrence date
+              resolved_input_ref: null
+          scope:
+            kind: input_ref
+            input_ref: i1
+        grouping: []
+        ordering: []
+        selection: null
+        distinct_by: []
+        outputs:
+          result_key_outputs: []
+          requested_value_outputs:
+          - output_ref: r1
+            expression:
+              kind: divide
+              left:
+                kind: filtered_aggregate
+                function: sum
+                argument: &id001
+                  kind: fact
+                  observed_for_ref: s1
+                  origin:
+                    source: question_context
+                    meaning: amount
+                    resolved_input_ref: null
+                filter:
+                  kind: fact
+                  observed_for_ref: s1
+                  origin:
+                    source: question_context
+                    meaning: approved
+                    resolved_input_ref: null
+                distinct_argument: false
+              right:
+                kind: aggregate
+                function: sum
+                argument: *id001
+                distinct_argument: false
 expect:
   result_contains:
-    input_refs: [i1]
+    input_refs:
+    - i1
     requested_facts:
-      - id: fact_1
-        result_grain: singleton
-        population_atoms: ["fact_1:expression:e1"]
-        scoped_boolean_requirements:
-          - {atom: "fact_1:fact:f2", use_site: aggregate_filter, owner_expression_ref: "fact_1:expression:e2"}
+    - id: fact_1
+      fact_value_kinds:
+        f1: temporal
+        f2: boolean
+        f3: number
+      result_grain: singleton
+      population_atoms:
+      - fact_1:expression:e1
+      scoped_boolean_requirements:
+      - atom: fact_1:fact:f2
+        use_site: aggregate_filter
+        owner_expression_ref: fact_1:expression:e2

@@ -12,6 +12,9 @@ from fervis.lookup.relation_catalog.row_sources import (
     RowSourceField,
     RowSourceIdentityEvidence,
     RowSourceParam,
+    RowSourceValueType,
+    RowSourceRelationEvidence,
+    row_source_relation_evidence,
 )
 from fervis.lookup.relation_catalog.parameter_values import (
     CatalogScalarParameterValue,
@@ -28,13 +31,7 @@ class SourceChoiceSurfaceKind(StrEnum):
     RETURNED_FIELD = "RETURNED_FIELD"
 
 
-@dataclass(frozen=True)
-class SourceRelationEvidence:
-    evidence_ref: str
-    left_source_ref: str
-    right_source_ref: str
-    left_field_refs: tuple[str, ...]
-    right_field_refs: tuple[str, ...]
+SourceRelationEvidence = RowSourceRelationEvidence
 
 
 @dataclass(frozen=True)
@@ -45,16 +42,38 @@ class SourceChoiceValue:
     surface_kind: SourceChoiceSurfaceKind
     value: CatalogScalarParameterValue
     label: str
+    declared_type: RowSourceValueType
+
+    @property
+    def boolean_value(self) -> bool | None:
+        if self.declared_type is not RowSourceValueType.BOOLEAN:
+            return None
+        from fervis.lookup.plan_execution.declared_values import parse_declared_value
+        value = parse_declared_value(self.value, "boolean")
+        assert isinstance(value, bool)
+        return value
 
 
 @dataclass(frozen=True)
 class SourceChoiceSurface:
     surface_ref: str
     source_ref: str
+    target_ref: str
     kind: SourceChoiceSurfaceKind
     label: str
     description: str
     values: tuple[SourceChoiceValue, ...]
+    declared_entity_kind: str = ""
+
+
+@dataclass(frozen=True)
+class SourceFieldBinding:
+    source_ref: str
+    field: RowSourceField
+
+    @property
+    def ref(self) -> str:
+        return f"source_field:{self.source_ref}:{self.field.id}"
 
 
 @dataclass(frozen=True)
@@ -90,6 +109,17 @@ class AvailableSourceCatalog:
     contract_snapshot: SourceContractSnapshot
     sources: tuple[RowSource, ...]
     relation_evidence: tuple[SourceRelationEvidence, ...]
+
+    @property
+    def field_bindings(self) -> tuple[SourceFieldBinding, ...]:
+        return tuple(SourceFieldBinding(source.id, field)
+                     for source in self.sources for field in source.fields)
+
+    def field_binding(self, ref: str) -> SourceFieldBinding:
+        for binding in self.field_bindings:
+            if binding.ref == ref:
+                return binding
+        raise ValueError("field binding references an unknown source field")
 
     def source(self, source_ref: str) -> RowSource:
         for source in self.sources:
@@ -140,7 +170,7 @@ class AvailableSourceCatalog:
             _field_choice_surface(source, field)
             for source in self.sources
             for field in source.fields
-            if field.choices
+            if field.finite_choices
         )
 
     @property
@@ -154,6 +184,13 @@ class AvailableSourceCatalog:
             if surface.surface_ref == surface_ref:
                 return surface
         raise KeyError(surface_ref)
+
+    def choice_surface_at(
+        self, source_ref: str, target_ref: str, kind: SourceChoiceSurfaceKind,
+    ) -> SourceChoiceSurface | None:
+        return next((surface for surface in self.choice_surfaces
+                     if surface.source_ref == source_ref
+                     and surface.target_ref == target_ref and surface.kind is kind), None)
 
     def choice_value(self, value_ref: str) -> SourceChoiceValue:
         for value in self.choice_values:
@@ -178,20 +215,23 @@ def _parameter_choice_surface(
     source: RowSource,
     param: RowSourceParam,
 ) -> SourceChoiceSurface:
+    surface_ref = f"source_surface:{source.id}:parameter:{param.id}"
     values = tuple(
         SourceChoiceValue(
             value_ref=(f"source_choice:{source.id}:parameter:{param.id}:{position}"),
             source_ref=source.id,
-            surface_ref=param.param_ref,
+            surface_ref=surface_ref,
             surface_kind=SourceChoiceSurfaceKind.REQUEST_PARAMETER,
             value=value,
             label=(param.choice_labels or {}).get(str(value), str(value)),
+            declared_type=param.type,
         )
         for position, value in enumerate(param.choices)
     )
     return SourceChoiceSurface(
-        surface_ref=param.param_ref,
+        surface_ref=surface_ref,
         source_ref=source.id,
+        target_ref=param.param_ref,
         kind=SourceChoiceSurfaceKind.REQUEST_PARAMETER,
         label=param.name,
         description=param.description,
@@ -203,24 +243,28 @@ def _field_choice_surface(
     source: RowSource,
     field: RowSourceField,
 ) -> SourceChoiceSurface:
+    surface_ref = f"source_surface:{source.id}:field:{field.id}"
     values = tuple(
         SourceChoiceValue(
             value_ref=f"source_choice:{source.id}:field:{field.id}:{position}",
             source_ref=source.id,
-            surface_ref=field.field_ref,
+            surface_ref=surface_ref,
             surface_kind=SourceChoiceSurfaceKind.RETURNED_FIELD,
             value=value,
             label=str(value),
+            declared_type=field.type,
         )
-        for position, value in enumerate(field.choices)
+        for position, value in enumerate(field.finite_choices)
     )
     return SourceChoiceSurface(
-        surface_ref=field.field_ref,
+        surface_ref=surface_ref,
         source_ref=source.id,
+        target_ref=field.field_ref,
         kind=SourceChoiceSurfaceKind.RETURNED_FIELD,
         label=field.label,
         description=field.description,
         values=values,
+        declared_entity_kind=field.declared_entity_kind,
     )
 
 
@@ -255,7 +299,7 @@ def build_available_source_catalog(
     sources = tuple(
         source for source in row_sources.sources if source.id in retained_refs
     )
-    relations = _relation_evidence(sources)
+    relations = row_source_relation_evidence(sources)
     snapshot_payload = {
         "sources": [asdict(source) for source in sources],
         "relation_evidence": [asdict(item) for item in relations],
@@ -302,50 +346,6 @@ def _retained_row_source_refs(
 
 def _row_path_depth(source: RowSource) -> int:
     return len(tuple(part for part in source.row_path.split(".") if part))
-
-
-def _relation_evidence(
-    sources: tuple[RowSource, ...],
-) -> tuple[SourceRelationEvidence, ...]:
-    evidence: list[SourceRelationEvidence] = []
-    for left in sources:
-        for reference in left.entity_references:
-            local_by_component = {
-                component.target_component_id: component.local_field_id
-                for component in reference.components
-            }
-            for right in sources:
-                if right.id == left.id:
-                    continue
-                for key in right.candidate_keys:
-                    if (
-                        key.entity_kind != reference.target_entity_kind
-                        or key.id != reference.target_key_id
-                    ):
-                        continue
-                    right_by_component = {
-                        component.id: component.field_id for component in key.components
-                    }
-                    if set(local_by_component) != set(right_by_component):
-                        continue
-                    component_ids = tuple(sorted(local_by_component))
-                    evidence_ref = (
-                        f"source_relation:{left.id}:{reference.id}:{right.id}:{key.id}"
-                    )
-                    evidence.append(
-                        SourceRelationEvidence(
-                            evidence_ref=evidence_ref,
-                            left_source_ref=left.id,
-                            right_source_ref=right.id,
-                            left_field_refs=tuple(
-                                local_by_component[item] for item in component_ids
-                            ),
-                            right_field_refs=tuple(
-                                right_by_component[item] for item in component_ids
-                            ),
-                        )
-                    )
-    return tuple(sorted(evidence, key=lambda item: item.evidence_ref))
 
 
 __all__ = [

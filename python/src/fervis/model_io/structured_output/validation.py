@@ -57,6 +57,12 @@ def validate_tool_arguments(
             output=output,
             arguments=arguments,
             tool_specs=tool_specs,
+            error_context={
+                "argument_path": list(exc.absolute_path),
+                "schema_path": list(exc.absolute_schema_path),
+                "validator": exc.validator,
+                "message": exc.message,
+            },
         ) from exc
 
 
@@ -176,6 +182,8 @@ def _schema_accepts_null(schema: Any) -> bool:
     if not isinstance(schema, dict):
         return False
     schema_type = schema.get("type")
+    if schema_type is None and None in schema.get("enum", ()):
+        return True
     if schema_type == "null":
         return True
     if isinstance(schema_type, list) and "null" in schema_type:

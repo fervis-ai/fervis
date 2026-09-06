@@ -1,14 +1,14 @@
 id: finite_choice_rejects_normal_instance_override_without_evidence
-description: A model inclusion decision cannot override a normally excluded role without an explicit user override.
+description: A model inclusion decision cannot override a normally excluded role without
+  an explicit user override.
 migrates:
-  - python/tests/conformance/cases/algorithms/source_binding/finite_choice_rejects_normal_instance_override_without_evidence.yaml
+- python/tests/conformance/cases/algorithms/source_binding/finite_choice_rejects_normal_instance_override_without_evidence.yaml
 kind: algorithm
 algorithm: semantic.source_binding
 input:
   mode: subject_choice_membership
-  choice_included: true
-  matched_excluded_role: SUPERSEDED_DELETED_OR_NON_CURRENT_ARTIFACT
   explicit_user_override_applies: false
+  baseline_included: false
 expect:
   result_contains:
     included: false

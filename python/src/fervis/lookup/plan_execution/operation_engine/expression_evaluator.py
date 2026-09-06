@@ -49,10 +49,12 @@ class EvaluatedExpression:
 @dataclass(frozen=True)
 class ExpressionEnvironment:
     row: Row | None = None
+    row_number: int | None = None
     field_types: Mapping[str, str] | None = None
     scalars: Mapping[str, RuntimeValue] | None = None
     scalar_types: Mapping[str, str] | None = None
     node_outputs: Mapping[str, Mapping[str, RuntimeValue]] | None = None
+    node_output_types: Mapping[str, Mapping[str, str]] | None = None
     environment_values: Mapping[str, RuntimeValue] | None = None
     environment_types: Mapping[str, str] | None = None
 
@@ -79,7 +81,7 @@ def evaluate_expression(
         environment=lambda item: _environment(item, environment=environment),
         unary=_unary,
         binary=_binary,
-        function=_function,
+        function=lambda node, arguments: _function(node, arguments, environment=environment),
     )
 
 
@@ -90,7 +92,7 @@ def evaluate_condition(
 ) -> bool:
     """Evaluate one Boolean expression and reject non-Boolean results."""
 
-    return _boolean(evaluate_expression(expression, environment=environment))
+    return _boolean(evaluate_expression(expression, environment=environment)) is True
 
 
 def evaluated_condition_fact(
@@ -146,7 +148,7 @@ def _output(
     produced = (environment.node_outputs or {}).get(expression.node_id)
     if produced is None or expression.output_id not in produced:
         raise RelationEngineError(f"unknown scalar input {expression.output_id}")
-    return EvaluatedExpression(value=produced[expression.output_id], value_type="decimal")
+    return EvaluatedExpression(value=produced[expression.output_id], value_type=(environment.node_output_types or {}).get(expression.node_id, {}).get(expression.output_id, ""))
 
 
 def _environment(
@@ -171,10 +173,13 @@ def _unary(
 ) -> EvaluatedExpression:
     signature = operator_signature(expression.operator)
     if signature.kind is OperatorKind.ARITHMETIC:
+        if operand.value is None:
+            return EvaluatedExpression(value=None, value_type="decimal")
         value = declared_number(operand.value, operand.value_type or "decimal")
         return EvaluatedExpression(value=-value, value_type="decimal")
     if signature.kind is OperatorKind.BOOLEAN:
-        return EvaluatedExpression(value=not _boolean(operand), value_type="boolean")
+        truth = _boolean(operand)
+        return EvaluatedExpression(value=None if truth is None else not truth, value_type="boolean")
     if expression.operator is ExpressionUnaryOperator.IS_NULL:
         return EvaluatedExpression(value=operand.value is None, value_type="boolean")
     if expression.operator is ExpressionUnaryOperator.NOT_NULL:
@@ -192,9 +197,11 @@ def _binary(
     if signature.kind is OperatorKind.ARITHMETIC:
         return _arithmetic(operator, left, right)
     if signature.kind is OperatorKind.BOOLEAN and operator is ExpressionBinaryOperator.AND:
-        value = _boolean(left) and _boolean(right)
+        left_truth, right_truth = _boolean(left), _boolean(right)
+        value = False if left_truth is False or right_truth is False else None if left_truth is None or right_truth is None else True
     elif signature.kind is OperatorKind.BOOLEAN and operator is ExpressionBinaryOperator.OR:
-        value = _boolean(left) or _boolean(right)
+        left_truth, right_truth = _boolean(left), _boolean(right)
+        value = True if left_truth is True or right_truth is True else None if left_truth is None or right_truth is None else False
     elif signature.kind in {OperatorKind.COMPARISON, OperatorKind.MEMBERSHIP}:
         value = _comparison(operator, left, right)
     else:
@@ -207,6 +214,8 @@ def _arithmetic(
     left: EvaluatedExpression,
     right: EvaluatedExpression,
 ) -> EvaluatedExpression:
+    if left.value is None or right.value is None:
+        return EvaluatedExpression(value=None, value_type="decimal")
     left_value = declared_number(left.value, left.value_type or "decimal")
     right_value = declared_number(right.value, right.value_type or "decimal")
     if operator is ExpressionBinaryOperator.ADD:
@@ -225,7 +234,9 @@ def _arithmetic(
     return EvaluatedExpression(value=value, value_type="decimal")
 
 
-def _boolean(value: EvaluatedExpression) -> bool:
+def _boolean(value: EvaluatedExpression) -> bool | None:
+    if value.value is None and value.value_type in {"", "boolean"}:
+        return None
     if not isinstance(value.value, bool):
         raise RelationEngineError("boolean expression requires boolean operand")
     return value.value
@@ -235,9 +246,9 @@ def _comparison(
     operator: ExpressionBinaryOperator,
     left: EvaluatedExpression,
     right: EvaluatedExpression,
-) -> bool:
+) -> bool | None:
     if left.value is None or right.value is None:
-        return False
+        return None
     if operator is ExpressionBinaryOperator.EQUALS:
         return declared_equal(left.value, left.value_type, right.value, right.value_type)
     if operator is ExpressionBinaryOperator.NOT_EQUALS:
@@ -299,7 +310,12 @@ def _contains(left: RuntimeValue, right: RuntimeValue, right_type: str | None) -
 def _function(
     expression: FunctionExpression,
     arguments: tuple[EvaluatedExpression, ...],
+    *, environment: ExpressionEnvironment,
 ) -> EvaluatedExpression:
+    if expression.function is ExpressionFunction.ROW_NUMBER:
+        if environment.row_number is None:
+            raise RelationEngineError("row number requires a relation projection")
+        return EvaluatedExpression(environment.row_number, "integer")
     if expression.function is ExpressionFunction.TEMPORAL_BUCKET:
         return _temporal_bucket(arguments)
     assert_never(expression.function)
@@ -322,6 +338,8 @@ def _temporal_bucket(
         timezone = ZoneInfo(raw_timezone.value)
     except ZoneInfoNotFoundError as exc:
         raise RelationEngineError("temporal bucket timezone is invalid") from exc
+    if raw_value.value is None:
+        return EvaluatedExpression(value=None, value_type="date")
     parsed = parse_declared_value(raw_value.value, raw_value.value_type)
     if isinstance(parsed, datetime):
         local = (

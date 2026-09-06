@@ -2,16 +2,14 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
-from jsonschema import ValidationError, validate
+from jsonschema import ValidationError
 
 from fervis.lookup.available_sources import (
     AvailableSourceCatalog,
     SourceContractSnapshot,
 )
-from fervis.lookup.plan_selection.semantic import (
+from fervis.lookup.source_binding.model import (
     CandidateSourceStrategy,
-    SourceAlignment,
-    SourceAlignmentAssessment,
     SourceStrategyBranch,
 )
 from fervis.lookup.question_contract.analysis import analyze_requested_fact
@@ -39,13 +37,10 @@ from fervis.lookup.semantic_types import (
     SourceOrigin,
     SourceOriginKind,
 )
-from fervis.lookup.source_binding.parser import compile_source_binding_plan
+from tests.lookup.source_binding._fixtures import compile_binding_fixture, validate_binding_fixture
 from fervis.lookup.source_binding.model import (
     SemanticSourceBindingRequest,
     SourceMechanicKind,
-)
-from fervis.lookup.source_binding.schema import (
-    build_semantic_source_binding_schema,
 )
 
 
@@ -103,18 +98,7 @@ def test_direct_boolean_requirement_owns_matching_truth_choice_application() -> 
     )
     request = SemanticSourceBindingRequest(
         index=index,
-        strategy=CandidateSourceStrategy(
-            requested_fact_id=fact.id,
-            source_assessments=(
-                SourceAlignmentAssessment(
-                    source_ref=source.id,
-                    basis="The source returns sales and supports canceled filtering.",
-                    alignment=SourceAlignment.DIRECT,
-                ),
-            ),
-            strategy_basis="One direct source.",
-            branches=(branch,),
-        ),
+        strategy=CandidateSourceStrategy(requested_fact_id=fact.id, branches=(branch,)),
         source_catalog=AvailableSourceCatalog(
             contract_snapshot=SourceContractSnapshot.from_content("{}"),
             sources=(source,),
@@ -132,10 +116,9 @@ def test_direct_boolean_requirement_owns_matching_truth_choice_application() -> 
         "set_bindings": {
             set_ref: [
                 {
-                    "branch_id": branch.branch_id,
-                    "mapping_basis": "Sale rows realize the requested sale set.",
-                    "source_ref": source.id,
-                    "identity_ref": None,
+                    'branch_id': branch.branch_id,
+                    'mapping_basis': "Sale rows realize the requested sale set.",
+                    'rows_ref': source.id
                 }
             ]
         },
@@ -146,7 +129,7 @@ def test_direct_boolean_requirement_owns_matching_truth_choice_application() -> 
                     "application_basis": (
                         "The true choice realizes the canceled-sale requirement."
                     ),
-                    "surface_ref": "source_sales.is_canceled",
+                    "surface_ref": "source_surface:source_sales:parameter:is_canceled",
                     "selected_choice_values": ["true"],
                 }
             }
@@ -159,36 +142,22 @@ def test_direct_boolean_requirement_owns_matching_truth_choice_application() -> 
                 {
                     "branch_id": branch.branch_id,
                     "finite_choice_reviews": {
-                        "source_sales.is_canceled": {
+                        "source_surface:source_sales:parameter:is_canceled": {
                             "surface_mapping_basis": (
                                 "The parameter controls canceled sale membership."
                             ),
                             "choice_reviews": {
-                                "false": {
-                                    "choice_domain_meaning": (
-                                        "The sale is not canceled."
-                                    ),
-                                    "role_match_basis": (
-                                        "A non-canceled sale is an ordinary sale."
-                                    ),
-                                    "matched_excluded_role": "NONE",
-                                    "choice_inclusion_basis": (
-                                        "Ordinary sales include non-canceled sales."
-                                    ),
-                                    "choice_inclusion": "INCLUDE",
-                                },
-                                "true": {
-                                    "choice_domain_meaning": "The sale is canceled.",
-                                    "role_match_basis": (
-                                        "Canceled matches CANCELED_OR_VOIDED."
-                                    ),
-                                    "matched_excluded_role": "CANCELED_OR_VOIDED",
-                                    "choice_inclusion_basis": (
-                                        "Canceled sales are outside the ordinary "
-                                        "sale population."
-                                    ),
-                                    "choice_inclusion": "EXCLUDE",
-                                },
+                                "false": {"selected_by_requirements": [],
+                                             "choice_domain_meaning": "The sale is not canceled.",
+                                             "decision_basis": "Ordinary sales include non-canceled sales.",
+                                             "baseline_decision": "INCLUDE",
+                                         },
+                                "true": {"selected_by_requirements": [],
+                                            "choice_domain_meaning": "The sale is canceled.",
+                                            "decision_basis": "Canceled sales are outside the ordinary "
+                                        "sale population.",
+                                            "baseline_decision": "EXCLUDE",
+                                        },
                             },
                         }
                     },
@@ -197,8 +166,8 @@ def test_direct_boolean_requirement_owns_matching_truth_choice_application() -> 
         },
     }
 
-    validate(payload, build_semantic_source_binding_schema(request))
-    plan = compile_source_binding_plan(payload, request=request)
+    validate_binding_fixture(payload, request=request)
+    plan = compile_binding_fixture(payload, request=request)
 
     [application] = plan.invocation_applications
     assert application.owner_ref == requirement.requirement_ref
@@ -238,12 +207,13 @@ def test_direct_boolean_requirement_owns_matching_truth_choice_application() -> 
         false_choice,
         branch_id=branch.branch_id,
     ) == (negative_requirement.requirement_ref,)
+    # Polarity is part of the declared semantic mapping, not inferred from flag truth.
     assert (
         negative_request.choice_value_requirement_refs(
             true_choice,
             branch_id=branch.branch_id,
         )
-        == ()
+        == (negative_requirement.requirement_ref,)
     )
 
     categorical_source = replace(
@@ -277,18 +247,18 @@ def test_direct_boolean_requirement_owns_matching_truth_choice_application() -> 
         for choice in categorical_surface.values
     )
 
-    opposite_payload = deepcopy(payload)
-    opposite_payload["finite_choice_applications"][branch.branch_id][
+    unknown_choice_payload = deepcopy(payload)
+    unknown_choice_payload["finite_choice_applications"][branch.branch_id][
         requirement.requirement_ref
-    ]["selected_choice_values"] = ["false"]
+    ]["selected_choice_values"] = ["unknown_choice"]
 
     with pytest.raises(ValidationError):
-        validate(opposite_payload, build_semantic_source_binding_schema(request))
+        validate_binding_fixture(unknown_choice_payload, request=request)
     with pytest.raises(
         ValueError,
         match="finite-choice application selects an incompatible choice",
     ):
-        compile_source_binding_plan(opposite_payload, request=request)
+        compile_binding_fixture(unknown_choice_payload, request=request)
 
 
 def test_source_required_choice_cannot_override_an_excluded_subject_state() -> None:
@@ -301,35 +271,69 @@ def test_source_required_choice_cannot_override_an_excluded_subject_state() -> N
         set_ref=set_ref,
         selected_choice="deleted",
         choice_reviews={
-            "active": {
-                "choice_domain_meaning": "Active rows are current sales.",
-                "role_match_basis": "Active matches no excluded role.",
-                "matched_excluded_role": "NONE",
-                "choice_inclusion_basis": (
-                    "Active sales belong to the ordinary population."
-                ),
-                "choice_inclusion": "INCLUDE",
-            },
-            "deleted": {
-                "choice_domain_meaning": "Deleted rows are non-current sales.",
-                "role_match_basis": "Deleted is a non-current artifact.",
-                "matched_excluded_role": (
-                    "SUPERSEDED_DELETED_OR_NON_CURRENT_ARTIFACT"
-                ),
-                "choice_inclusion_basis": (
-                    "Deleted sales do not belong to the ordinary population."
-                ),
-                "choice_inclusion": "EXCLUDE",
-            },
+            "active": {"selected_by_requirements": [],
+                          "choice_domain_meaning": "Active rows are current sales.",
+                          "decision_basis": "Active sales belong to the ordinary population.",
+                          "baseline_decision": "INCLUDE",
+                      },
+            "deleted": {"selected_by_requirements": [],
+                           "choice_domain_meaning": "Deleted rows are non-current sales.",
+                           "decision_basis": "Deleted sales do not belong to the ordinary population.",
+                           "baseline_decision": "EXCLUDE",
+                       },
         },
     )
 
-    validate(payload, build_semantic_source_binding_schema(request))
+    validate_binding_fixture(payload, request=request)
     with pytest.raises(
         ValueError,
         match="source-required choice selects an excluded subject state",
     ):
-        compile_source_binding_plan(payload, request=request)
+        compile_binding_fixture(payload, request=request)
+
+
+def test_baseline_decision_is_one_closed_membership_claim():
+    request, branch_id, set_ref = _source_required_choice_request(choices=("active", "deleted"))
+    reviews = {
+        value: {"selected_by_requirements": [], "choice_domain_meaning": value, "decision_basis": "One baseline membership decision.",
+                "baseline_decision": "INCLUDE" if value == "active" else "EXCLUDE"}
+        for value in ("active", "deleted")
+    }
+    payload = _source_required_choice_payload(request, branch_id=branch_id, set_ref=set_ref,
+                                              selected_choice="active", choice_reviews=reviews)
+    validate_binding_fixture(payload, request=request)
+    reviews["active"]["baseline_decision"] = "INCLUDE_AND_EXCLUDE"
+    with pytest.raises(ValidationError):
+        validate_binding_fixture(payload, request=request)
+    with pytest.raises(ValueError):
+        compile_binding_fixture(payload, request=request)
+
+
+def test_raw_subject_owns_overrides_for_defaults_that_can_hide_records():
+    request, branch_id, set_ref = _source_required_choice_request(choices=("active", "all_persisted"))
+    [source] = request.source_catalog.sources
+    [param] = source.params
+    source = replace(source, params=(replace(param, required=False, default="active"),))
+    request = replace(request, source_catalog=replace(request.source_catalog, sources=(source,)))
+    assert not any(ref.startswith("subject_scope:") for ref in request.invocation_application_owner_refs)
+    fact = replace(request.index.requested_fact, subject=replace(
+        request.index.requested_fact.subject, instance_interpretation=InstanceInterpretation.RAW_DATA_RECORD,
+    ))
+    request = replace(request, index=analyze_requested_fact(fact, inputs={}, input_denotations={}))
+    owners = [ref for ref in request.invocation_application_owner_refs if ref.startswith("subject_scope:")]
+    assert len(owners) == 1
+    [surface] = request.source_catalog.choice_surfaces
+    payload = _source_required_choice_payload(request, branch_id=branch_id, set_ref=set_ref,
+                                              selected_choice="all_persisted", choice_reviews={})
+    application = next(iter(payload["finite_choice_applications"][branch_id].values()))
+    payload["finite_choice_applications"][branch_id] = {owners[0]: application}
+    payload["subject_binding"]["branch_realizations"][0]["finite_choice_reviews"] = {}
+    validate_binding_fixture(payload, request=request)
+    plan = compile_binding_fixture(payload, request=request)
+    [applied] = plan.invocation_applications
+    assert applied.owner_ref == owners[0]
+    assert applied.target_applications[0].target_ref == param.param_ref
+    assert request.source_catalog.choice_value(applied.value_ref).value == "all_persisted"
 
 
 def test_source_required_presentation_choice_does_not_change_subject_membership() -> (
@@ -344,23 +348,17 @@ def test_source_required_presentation_choice_does_not_change_subject_membership(
         set_ref=set_ref,
         selected_choice="summary",
         choice_reviews={
-            choice: {
-                "choice_domain_meaning": (
-                    f"{choice.title()} changes response presentation only."
-                ),
-                "role_match_basis": "Presentation matches no excluded role.",
-                "matched_excluded_role": "NONE",
-                "choice_inclusion_basis": (
-                    "Presentation does not alter subject membership."
-                ),
-                "choice_inclusion": "INCLUDE",
-            }
+            choice: {"selected_by_requirements": [],
+                        "choice_domain_meaning": f"{choice.title()} changes response presentation only.",
+                        "decision_basis": "Presentation does not alter subject membership.",
+                        "baseline_decision": "INCLUDE",
+                    }
             for choice in ("summary", "detailed")
         },
     )
 
-    validate(payload, build_semantic_source_binding_schema(request))
-    plan = compile_source_binding_plan(payload, request=request)
+    validate_binding_fixture(payload, request=request)
+    plan = compile_binding_fixture(payload, request=request)
 
     [surface] = plan.subject_binding.branch_realizations[0].surface_reviews
     assert not any(review.explicit_user_override_applies for review in surface.choice_reviews)
@@ -418,25 +416,14 @@ def _source_required_choice_request(
     branch_id = "fact_1:source_branch:1"
     request = SemanticSourceBindingRequest(
         index=index,
-        strategy=CandidateSourceStrategy(
-            requested_fact_id=fact.id,
-            source_assessments=(
-                SourceAlignmentAssessment(
-                    source_ref=source.id,
-                    basis="The source returns sale occurrences.",
-                    alignment=SourceAlignment.DIRECT,
-                ),
-            ),
-            strategy_basis="One direct source.",
-            branches=(
+        strategy=CandidateSourceStrategy(requested_fact_id=fact.id, branches=(
                 SourceStrategyBranch(
                     branch_id=branch_id,
                     source_refs=(source.id,),
                     relation_evidence_refs=(),
                     qualification_clause_refs=(),
                 ),
-            ),
-        ),
+            )),
         source_catalog=AvailableSourceCatalog(
             contract_snapshot=SourceContractSnapshot.from_content("{}"),
             sources=(source,),
@@ -462,15 +449,14 @@ def _source_required_choice_payload(
 ) -> dict[str, object]:
     [source] = request.source_catalog.sources
     [surface] = request.source_catalog.choice_surfaces
-    owner_ref = f"source_required:{surface.surface_ref}"
+    owner_ref = f"source_required:{surface.target_ref}"
     return {
         "set_bindings": {
             set_ref: [
                 {
-                    "branch_id": branch_id,
-                    "mapping_basis": "Sale rows realize the requested set.",
-                    "source_ref": source.id,
-                    "identity_ref": None,
+                    'branch_id': branch_id,
+                    'mapping_basis': "Sale rows realize the requested set.",
+                    'rows_ref': source.id
                 }
             ]
         },

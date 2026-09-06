@@ -2,50 +2,37 @@
 
 from __future__ import annotations
 
+
+from fervis.model_io.structured_output.schema import without_unreferenced_definitions
+
 from fervis.lookup.question_contract import (
     AssociationTerm,
-    FactTerm,
     SetTerm,
 )
-from fervis.lookup.question_contract import RawDataRecord
 from fervis.lookup.source_binding import provider_contract as output
+from fervis.lookup.source_binding.association_choices import association_choices, association_endpoints
 from fervis.lookup.source_binding.model import (
     InvocationProjectionOption,
     SemanticSourceBindingRequest,
 )
-from fervis.lookup.source_binding.subject_obligations import (
-    NormalInstanceExcludedStateRole,
-)
-from fervis.lookup.semantic_types import IdentifierType
 
 
-def build_semantic_source_binding_schema(
+def build_semantic_source_realization_schema(
     request: SemanticSourceBindingRequest,
 ) -> dict[str, object]:
     branch_ids = tuple(item.branch_id for item in request.strategy.branches)
     source_refs = tuple(source.id for source in request.source_catalog.sources)
-    relation_refs = tuple(
-        item.evidence_ref for item in request.source_catalog.relation_evidence
-    )
-    identity_refs = tuple(
-        item.identity_ref for item in request.source_catalog.identity_evidence
-    )
     set_refs = tuple(
         ref.token
         for ref in request.index.source_requirement_refs
         if isinstance(request.index.term_by_ref.get(ref), SetTerm)
-    )
-    fact_refs = tuple(
-        ref.token
-        for ref in request.index.source_requirement_refs
-        if isinstance(request.index.term_by_ref.get(ref), FactTerm)
     )
     association_refs = tuple(
         ref.token
         for ref in request.index.association_requirement_refs
         if isinstance(request.index.term_by_ref.get(ref), AssociationTerm)
     )
-    return output.SemanticSourceBindingOutput.schema(
+    return output.SourceRealizationOutput.schema(
         {
             "set_bindings": _closed_object(
                 {
@@ -55,32 +42,25 @@ def build_semantic_source_binding_schema(
                             {
                                 "branch_id": {"enum": list(branch_ids)},
                                 "mapping_basis": _text(),
-                                "source_ref": {"enum": list(source_refs)},
-                                "identity_ref": _nullable_enum(identity_refs),
+                                "rows_ref": {
+                                    "enum": list(request.row_references_for_set(ref))
+                                },
                             }
                         ),
                     )
                     for ref in set_refs
+                    if ref not in {endpoint for edge in association_refs for endpoint in association_endpoints(request, edge)}
                 }
-            ),
-            "resolved_input_applications": (
-                _resolved_input_applications_schema(request)
-            ),
-            "finite_choice_applications": _finite_choice_applications_schema(
-                request
             ),
             "fact_bindings": _closed_object(
                 {
-                    ref: _optional_realizations(
-                        branch_ids,
-                        _fact_realization_schema(
-                            request,
-                            fact_ref=ref,
-                            branch_ids=branch_ids,
-                            source_refs=source_refs,
-                        ),
+                    ref: _fact_realizations_schema(
+                        request,
+                        fact_ref=ref,
+                        branch_ids=branch_ids,
+                        source_refs=source_refs,
                     )
-                    for ref in fact_refs
+                    for ref in request.model_authored_fact_refs
                 }
             ),
             "association_bindings": _closed_object(
@@ -88,34 +68,84 @@ def build_semantic_source_binding_schema(
                     ref: _exact_realizations(
                         branch_ids,
                         _association_realization_schema(
+                            request=request,
+                            association_ref=ref,
                             branch_ids=branch_ids,
-                            source_refs=source_refs,
-                            relation_refs=relation_refs,
                         ),
                     )
                     for ref in association_refs
                 }
             ),
-            "subject_binding": _subject_binding_schema(
-                request,
-                branch_ids=branch_ids,
-            ),
         }
     )
 
 
+def build_semantic_source_binding_schema(
+    request: SemanticSourceBindingRequest,
+) -> dict[str, object]:
+    """Bind inputs and population controls to an already realized source graph."""
+    schema = output.SemanticSourceBindingOutput.schema(
+        {
+            "resolved_input_applications": _resolved_input_applications_schema(request),
+            "finite_choice_applications": _finite_choice_applications_schema(request),
+            "choice_requirement_applications": _choice_requirement_applications_schema(
+                request
+            ),
+        }
+    )
+    return without_unreferenced_definitions(schema)
+
+
 def _association_realization_schema(
     *,
+    request: SemanticSourceBindingRequest,
+    association_ref: str,
     branch_ids: tuple[str, ...],
-    source_refs: tuple[str, ...],
-    relation_refs: tuple[str, ...],
 ) -> dict[str, object]:
-    return output.AssociationRealizationOutput.schema(
-        {
+    groups: dict[tuple[str, str, str | None], list[str]] = {}
+    for choice in association_choices(request, association_ref):
+        groups.setdefault((choice.from_rows_ref, choice.realization_ref,
+                           choice.reference_from_set_ref), []).append(choice.to_rows_ref)
+    variants = []
+    for (left, evidence, orientation), rights in groups.items():
+        variant = output.AssociationRealizationOutput.schema({
             "branch_id": {"enum": list(branch_ids)},
             "mapping_basis": _text(),
-            "realization_ref": {"enum": [*relation_refs, *source_refs]},
+            "from_rows_ref": {"enum": [left]},
+            "to_rows_ref": {"enum": list(dict.fromkeys(rights))},
+            "realization_ref": {"enum": [evidence]},
+            "reference_from_set_ref": {"enum": [orientation]},
+        })
+        if orientation is not None:
+            variant["required"] = ["branch_id", "mapping_basis", "from_rows_ref", "to_rows_ref", "realization_ref", "reference_from_set_ref"]
+        variants.append(variant)
+    if not variants:
+        raise ValueError("association has no structurally compatible row realization")
+    return variants[0] if len(variants) == 1 else {"oneOf": variants}
+
+
+def _fact_realizations_schema(
+    request: SemanticSourceBindingRequest,
+    *,
+    fact_ref: str,
+    branch_ids: tuple[str, ...],
+    source_refs: tuple[str, ...],
+) -> dict[str, object]:
+    observed = fact_ref in {item.token for item in request.index.observed_fact_refs}
+    if not request.returned_field_refs_for_fact(fact_ref):
+        if observed:
+            raise ValueError("observed fact has no returned-field realization")
+        return {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 0,
+            "items": _closed_object({}),
         }
+    return (_exact_realizations if observed else _optional_realizations)(
+        branch_ids,
+        _fact_realization_schema(
+            request, fact_ref=fact_ref, branch_ids=branch_ids, source_refs=source_refs
+        ),
     )
 
 
@@ -126,22 +156,11 @@ def _fact_realization_schema(
     branch_ids: tuple[str, ...],
     source_refs: tuple[str, ...],
 ) -> dict[str, object]:
-    semantic_ref = next(
-        ref
-        for ref in request.index.inferred_type_by_ref
-        if getattr(ref, "token", None) == fact_ref
-    )
-    is_identity = isinstance(
-        request.index.inferred_type_by_ref[semantic_ref], IdentifierType
-    )
     field_refs_for_sources = request.returned_field_refs_for_fact(fact_ref)
     common = {
         "branch_id": {"enum": list(branch_ids)},
         "mapping_basis": _text(),
-        "source_ref": {"enum": list(source_refs)},
     }
-    if is_identity:
-        return output.IdentifierFactRealizationOutput.schema(common)
     return output.ReturnedFactRealizationOutput.schema(
         {
             **common,
@@ -185,6 +204,9 @@ def _branch_resolved_input_applications_schema(
             branch_id=branch_id,
         )
     ]
+    # Multiple response row paths can expose the same endpoint parameter.
+    # The authored value/target projection is still one legal choice.
+    variants = list({repr(variant): variant for variant in variants}.values())
     item_schema = (
         variants[0]
         if len(variants) == 1
@@ -224,7 +246,17 @@ def _branch_finite_choice_applications_schema(
 ) -> dict[str, object]:
     return _closed_object(
         {
-            owner_ref: _finite_choice_owner_application_schema(options)
+            owner_ref: (
+                {
+                    "anyOf": [
+                        _finite_choice_owner_application_schema(options),
+                        {"type": "null"},
+                    ]
+                }
+                if owner_ref
+                in {item.requirement_ref for item in request.index.boolean_requirements}
+                else _finite_choice_owner_application_schema(options)
+            )
             for owner_ref in request.invocation_application_owner_refs
             if (
                 options := request.finite_choice_options_for_owner(
@@ -255,106 +287,44 @@ def _finite_choice_owner_application_schema(options) -> dict[str, object]:
     return variants[0] if len(variants) == 1 else {"oneOf": variants}
 
 
-def _subject_binding_schema(
-    request: SemanticSourceBindingRequest,
-    *,
-    branch_ids: tuple[str, ...],
-) -> dict[str, object]:
-    subject_ref = request.index.subject_obligation.subject_set_ref.token
-    raw_records = isinstance(request.index.subject_obligation, RawDataRecord)
-    return output.SubjectObligationBindingOutput.schema(
+def _choice_requirement_applications_schema(request: SemanticSourceBindingRequest):
+    from fervis.lookup.source_binding.membership import requirement_choice_surfaces
+
+    return _closed_object(
         {
-            "subject_ref": {"enum": [subject_ref]},
-            "branch_realizations": {
-                "type": "array",
-                "minItems": len(branch_ids),
-                "maxItems": len(branch_ids),
-                "items": {
-                    "oneOf": [
-                        _subject_branch_schema(
-                            request,
-                            branch_id=branch_id,
-                            raw_records=raw_records,
-                        )
-                        for branch_id in branch_ids
-                    ]
-                },
-            },
-        }
-    )
-
-
-def _subject_branch_schema(
-    request: SemanticSourceBindingRequest,
-    *,
-    branch_id: str,
-    raw_records: bool,
-) -> dict[str, object]:
-    branch = next(
-        item for item in request.strategy.branches if item.branch_id == branch_id
-    )
-    surfaces = tuple(
-        surface
-        for source_ref in branch.source_refs
-        for surface in request.source_catalog.choice_surfaces
-        if surface.source_ref == source_ref
-    )
-    return output.SubjectObligationRealizationOutput.schema(
-        {
-            "branch_id": {"enum": [branch_id]},
-            "finite_choice_reviews": _closed_object(
-                {}
-                if raw_records
-                else {
-                    surface.surface_ref: _subject_surface_review_schema(
-                        request,
-                        branch_id=branch_id,
-                        surface=surface,
-                    )
-                    for surface in surfaces
-                }
-            ),
-        }
-    )
-
-
-def _subject_surface_review_schema(
-    request: SemanticSourceBindingRequest,
-    *,
-    branch_id: str,
-    surface,
-) -> dict[str, object]:
-    role_values = [
-        "NONE",
-        *(item.value for item in NormalInstanceExcludedStateRole),
-    ]
-    common = {
-        "choice_domain_meaning": _text(),
-        "role_match_basis": _text(),
-        "matched_excluded_role": {"enum": role_values},
-        "choice_inclusion_basis": _text(),
-        "choice_inclusion": {"enum": ["INCLUDE", "EXCLUDE"]},
-    }
-    return output.SubjectSurfaceReviewOutput.schema(
-        {
-            "surface_mapping_basis": _text(),
-            "choice_reviews": _closed_object(
+            branch.branch_id: _closed_object(
                 {
-                    choice.value: _subject_choice_review_schema(
-                        common=common,
+                    surface.surface_ref: _closed_object(
+                        {
+                            choice.value: output.ChoiceRequirementApplicationOutput.schema(
+                                {
+                                    "mapping_basis": _text(),
+                                    "selected_by_requirements": {
+                                        "type": "array",
+                                        "uniqueItems": True,
+                                        "maxItems": len(refs),
+                                        "items": {"enum": list(refs)}
+                                        if refs
+                                        else {"type": "string"},
+                                    },
+                                }
+                            )
+                            for choice in surface.values
+                            for refs in (
+                                request.explicit_subject_requirement_refs(
+                                    choice, branch_id=branch.branch_id
+                                ),
+                            )
+                        }
                     )
-                    for choice in surface.values
+                    for surface in requirement_choice_surfaces(
+                        request, branch.branch_id
+                    )
                 }
-            ),
+            )
+            for branch in request.strategy.branches
         }
     )
-
-
-def _subject_choice_review_schema(
-    *,
-    common: dict[str, object],
-) -> dict[str, object]:
-    return output.SubjectChoiceReviewOutput.schema(common)
 
 
 def _exact_realizations(
@@ -410,4 +380,7 @@ def _text() -> dict[str, object]:
     return {"type": "string", "minLength": 1}
 
 
-__all__ = ["build_semantic_source_binding_schema"]
+__all__ = [
+    "build_semantic_source_binding_schema",
+    "build_semantic_source_realization_schema",
+]

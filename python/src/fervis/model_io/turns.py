@@ -11,5 +11,6 @@ class ModelTurnPurpose(StrEnum):
     GROUNDING = "grounding"
     READ_ELIGIBILITY = "read_eligibility"
     PLAN_SELECTION = "plan_selection"
+    SOURCE_REALIZATION = "source_realization"
     SOURCE_BINDING = "source_binding"
     ANSWER_SYNTHESIS = "answer_synthesis"

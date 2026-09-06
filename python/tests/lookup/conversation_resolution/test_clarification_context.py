@@ -61,9 +61,10 @@ def test_grounding_prose_becomes_one_active_clarification_context_source() -> No
     )
     schema = invocation.tool_specs[0].input_schema
     outcome_schema = schema["properties"]["outcome"]["oneOf"][0]
-    source_variants = outcome_schema["properties"]["clauses"]["items"][
-        "properties"
-    ]["values"]["items"]["properties"]["sources"]["items"]["oneOf"]
+    clause_schema = outcome_schema["properties"]["clauses"]["items"]["oneOf"][0]
+    source_variants = clause_schema["properties"]["values"]["items"]["properties"][
+        "sources"
+    ]["items"]["oneOf"]
     context_anchor_variants = tuple(
         variant
         for variant in source_variants
@@ -106,11 +107,15 @@ def test_active_clarification_anchor_compiles_without_memory_activation() -> Non
         "outcome": {
             "kind": "resolved",
             "resolution_basis": "The response supplies the requested area.",
-            "contextualized_question": "How many stores are in Nairobi?",
             "clauses": [
                 {
                     "current_clause_text": "Area: Nairobi",
                     "occurrence": 1,
+                    "request_shape_basis": (
+                        "The active clarification supplies the suspended store "
+                        "count request."
+                    ),
+                    "request_shape_source": ("active_clarification_supplies_request"),
                     "resolved_text": "How many stores are in Nairobi?",
                     "retained_frame_parts": [],
                     "values": [
@@ -170,9 +175,7 @@ def test_active_clarification_anchor_compiles_without_memory_activation() -> Non
         ],
     }
     assert "integrated_question" not in str(prompt_payload)
-    assert compiled.clarification_lineage_refs == (
-        "clarification_response:response_1",
-    )
+    assert compiled.clarification_lineage_refs == ("clarification_response:response_1",)
 
 
 def test_consecutive_clarifications_compile_as_one_ordered_chain() -> None:
@@ -211,11 +214,15 @@ def test_consecutive_clarifications_compile_as_one_ordered_chain() -> None:
         "outcome": {
             "kind": "resolved",
             "resolution_basis": "The two responses identify the requested area.",
-            "contextualized_question": "How many stores are in the Nairobi area?",
             "clauses": [
                 {
                     "current_clause_text": "Area",
                     "occurrence": 1,
+                    "request_shape_basis": (
+                        "The active clarification chain supplies the suspended "
+                        "store count request."
+                    ),
+                    "request_shape_source": ("active_clarification_supplies_request"),
                     "resolved_text": "How many stores are in the Nairobi area?",
                     "retained_frame_parts": [],
                     "values": [
@@ -267,9 +274,7 @@ def test_consecutive_clarifications_compile_as_one_ordered_chain() -> None:
             },
             {
                 "response_id": "response_2",
-                "clarification_questions": [
-                    "Which kind of place should I use?"
-                ],
+                "clarification_questions": ["Which kind of place should I use?"],
                 "answer": "Area",
             },
         ],
@@ -278,3 +283,83 @@ def test_consecutive_clarifications_compile_as_one_ordered_chain() -> None:
         "clarification_response:response_1",
         "clarification_response:response_2",
     )
+
+
+def test_clarification_request_shape_is_context_even_when_values_are_current():
+    response = ConversationResolutionResponse(
+        source=ClarificationResponseSource(
+            response_id="response_1",
+            clarification_id="clarification_1",
+            exact_user_text="BBS Mall",
+        ),
+        annotation=ClarificationAnnotation(
+            suspended_question_text="How much did that store make yesterday?",
+            clarification_question_text="Which store?",
+        ),
+    )
+    request = ConversationResolutionRequest(
+        question="BBS Mall",
+        conversation_context={},
+        clarification_responses=(response,),
+    )
+    sources = conversation_resolution_context_sources(request)
+    question = "How much did BBS Mall make yesterday?"
+    payload = {
+        "kind": "conversation_resolution",
+        "current_question_text": "BBS Mall",
+        "outcome": {
+            "kind": "resolved",
+            "resolution_basis": "The answer fills the store in the active request.",
+            "clauses": [
+                {
+                    "request_shape_source": "active_clarification_supplies_request",
+                    "request_shape_basis": "The active question supplies the request.",
+                    "current_clause_text": "BBS Mall",
+                    "occurrence": 1,
+                    "resolved_text": question,
+                    "retained_frame_parts": [],
+                    "values": [
+                        {
+                            "value_id": "store",
+                            "resolved_text": "BBS Mall",
+                            "frame_parameter": {"kind": "none"},
+                            "sources": [
+                                {
+                                    "kind": "current_span",
+                                    "text": "BBS Mall",
+                                    "occurrence": 1,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    resolution = parse_conversation_resolution(
+        tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
+        payload=payload,
+        current_question=request.question,
+        context_sources=sources,
+    ).outcome
+    assert resolution.uses_prior_context
+    compiled = compile_conversation_resolution(
+        resolution,
+        memory_projection=ConversationMemoryCardProjection(
+            context_sources=(), context_frames=(), private_cards={}
+        ),
+        context_sources=sources,
+    )
+    assert compiled.uses_prior_context
+    assert (
+        compiled.active_clarification.original_question
+        == response.annotation.suspended_question_text
+    )
+    import pytest
+
+    with pytest.raises(ValueError, match="active clarification"):
+        parse_conversation_resolution(
+            tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
+            payload=payload,
+            current_question=request.question,
+        )

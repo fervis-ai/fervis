@@ -228,6 +228,8 @@ def _time_granularity(resolved: dict[str, object]) -> str:
     intent = resolved.get(Field.INTENT)
     if not isinstance(intent, dict):
         return ""
+    if intent.get("kind") in {"range", "open_range"}:
+        return "day"
     anchor = intent.get("anchor_period")
     return str(
         intent.get("precision")

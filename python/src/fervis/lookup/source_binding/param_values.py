@@ -106,14 +106,14 @@ def fact_value_parameter_projection(
     if isinstance(projected, tuple) and type_name not in {"array", "list"}:
         return tuple(
             parse_catalog_parameter_value(
-                _parameter_wire_value(item),
+                _parameter_wire_value(item, type_name=type_name),
                 type_name=type_name,
                 choices=choices,
             )
             for item in projected
         )
     return parse_catalog_parameter_value(
-        _parameter_wire_value(projected),
+        _parameter_wire_value(projected, type_name=type_name),
         type_name=type_name,
         choices=choices,
     )
@@ -186,7 +186,11 @@ def compatible_identity_parameter_component_ids(
     return tuple(accepted)
 
 
-def _parameter_wire_value(value: RuntimeValue) -> object:
+def _parameter_wire_value(value: RuntimeValue, *, type_name: str = "") -> object:
+    if isinstance(value, Decimal) and type_name == "integer":
+        if not value.is_finite() or value != value.to_integral_value():
+            raise ValueError("integer parameter requires an exact integral value")
+        return int(value)
     if isinstance(value, Decimal | UUID):
         return str(value)
     if isinstance(value, datetime | date | time):

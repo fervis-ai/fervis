@@ -16,8 +16,8 @@ end-to-end cases. A production change is admissible only after all three agree:
 `scripts/run-model-step-stability.py` accepts either:
 
 - `--index`: an `index.json` captured by `fervis debug prompts`, plus `--step`;
-- `--boundary-file`: a standalone boundary produced by a builder in
-  `scripts/experiments/`.
+- `--boundary-file`: an isolated Question Frame or Question Contract invocation
+  produced through the production prompt class.
 
 A boundary contains the exact system prompt, user prompt, tool specifications,
 provider, model key, and assertion context for one model turn. Replaying it does
@@ -49,7 +49,8 @@ scripts/run-local-model-step-stability.sh \
   --step <model-turn-purpose> \
   --runs 10 \
   --workers 1 \
-  --assertion-file scripts/experiments/<boundary>_assertion.py \
+  --assertion-file scripts/experiments/<model_step>/assertion.py \
+  --assertion-context /tmp/<model-step>-expectations.json \
   --output-jsonl /tmp/<boundary>-results.jsonl \
   --label <experiment-name>
 ```
@@ -59,20 +60,12 @@ Keep `--workers 1` for diagnosis unless concurrency is itself under test. Serial
 calls make provider behavior, rate limits, and result ordering easier to
 attribute.
 
-## Standalone boundary wrappers
+## Isolated entry boundaries
 
-The checked-in wrappers build a production-equivalent standalone boundary and
-run the shared harness. Examples include:
-
-```bash
-scripts/run-local-semantic-query-enrichment-stability.sh --runs 10
-scripts/run-local-semantic-grounding-stability.sh --runs 10
-scripts/run-local-semantic-read-eligibility-stability.sh --runs 10
-scripts/run-local-semantic-plan-selection-stability.sh --runs 10
-scripts/run-local-semantic-source-binding-stability.sh --runs 10
-```
-
-Question Contract has a unified-frame matrix wrapper:
+Question Frame and Question Contract can build an exact production invocation
+without replaying an upstream model decision. Their adapters accept the
+production prompt class as a dependency and serialize the invocation it
+produces. The Question Frame matrix wrapper is:
 
 ```bash
 scripts/run-local-semantic-unified-question-frame-stability.sh \
@@ -80,9 +73,9 @@ scripts/run-local-semantic-unified-question-frame-stability.sh \
   --max-failures 5
 ```
 
-Builders must call the same production prompt, schema, and projection code as
-the real step. Hardcoded semantic hints, reduced catalogs, or hand-authored
-fields absent from production invalidate the experiment.
+Query Enrichment, Grounding, Read Eligibility, Source Realization, and Source
+Binding must use a turn captured from a real run. Synthetic request builders for
+those steps duplicate upstream projection and are not valid evidence.
 
 Use one run per case for broad fault discovery. Stop after five failures when
 the matrix still has structural defects; additional repetitions spend provider
@@ -92,25 +85,27 @@ promotion gate.
 
 ## One controlled change
 
-Use a patch file to change one variable while preserving the captured boundary:
+For Question Frame or Question Contract, define a temporary class implementing
+the production prompt interface and inject it into the boundary adapter:
 
-```json
-{
-  "prompt_replacements": [
-    {
-      "old": "exact existing text",
-      "new": "replacement text",
-      "expected_count": 1
-    }
-  ]
-}
+```python
+boundary = build_boundary_payload(
+    question=question,
+    expected_request_count=1,
+    prompt_type=ExperimentalQuestionFramePrompt,
+)
 ```
 
-The harness also supports `system_prompt_replacements`, `tool_spec_patches`, and
-`schema_patches`. Repeat `--patch-file` to layer independent patches only when
-the earlier layer has already been measured. If several prompt edits have not
-stabilized the result, investigate the contract or presented evidence instead
-of adding more prose.
+The injected class uses the production request, invocation assembly, model
+adapter, and assertion path. It owns only the proposed prompt/schema change.
+Keep it outside production until the gate passes, then promote the exact tested
+implementation and delete the experiment class.
+
+Captured later-stage turns may use one in-memory patch to falsify a narrowly
+stated hypothesis. A serialized patch is diagnostic evidence, not a parallel
+contract and not sufficient promotion evidence. Do not commit patch variants.
+If several prompt edits have not stabilized the result, investigate the
+contract or presented evidence instead of adding more prose.
 
 ## Controls
 
@@ -152,7 +147,8 @@ Classify failures before changing code:
 - provider failure: no model output was generated;
 - schema failure: output was generated but violated the strict contract;
 - semantic failure: output passed the schema but failed the assertion;
-- harness failure: the standalone boundary differs from production.
+- harness failure: the captured invocation or injected boundary differs from
+  production.
 
 Never count provider or harness failures as evidence about model behavior.
 
@@ -196,12 +192,29 @@ the final gate because a later correction can regress an earlier case.
 
 ## Repository rules
 
-Keep one reusable builder and assertion per model boundary. Case files contain
-data; builders own production-equivalent projection; assertions own semantic
-acceptance. Do not duplicate prompt construction, schema construction, catalog
-meaning, or parser logic in experiments.
+Keep one semantic assertion per model step. Question Frame and Question Contract
+also own one thin production-invocation adapter. Later steps replay captured
+production invocations. Assertion-context files contain expected outcomes only.
+
+Experiments never own prompt construction, schema construction, catalog
+projection, upstream contract parsing, or a second implementation of production
+logic. Temporary injected prompt classes implement the production interface and
+are deleted after their result is accepted or rejected.
 
 Experiment artifacts may be retained for evidence, but production code must not
 import them. Once a change is promoted, record the command, controls, score, raw
 artifact location, focused tests, and live run IDs in the relevant memo or
 review.
+
+
+For lower-priority evaluation runs, the production OpenAI Responses adapter accepts
+`FERVIS_OPENAI_SERVICE_TIER=flex`. The default remains the project/provider default
+when this variable is unset. Flex can take longer; set
+`FERVIS_PROVIDER_TIMEOUT_SECONDS=900` for those runs. There is no automatic
+fallback to standard processing. Returned Flex usage is priced at half of the
+standard models.dev rates; explicitly configured effective prices are preserved.
+The reported service tier is retained in usage metadata. Token-cache discounts
+are not yet included, so these estimates remain conservative.
+
+References: [Flex processing](https://developers.openai.com/api/docs/guides/flex-processing)
+and [Batch pricing policy](https://developers.openai.com/api/docs/guides/batch).

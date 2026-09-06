@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from fervis.host_api.contracts.response_envelope import TOTAL_COUNT_FIELD
 from fervis.host_api.contracts.endpoint import (
     CandidateKeyAuthorityContract,
@@ -288,7 +290,9 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
             path="data",
             cardinality=RowCardinality.MANY,
         )
-    for field in contract.response_fields:
+    for field in sorted(contract.response_fields, key=lambda item: (
+        _catalog_path(contract, str(item.path or "")).count("."), str(item.path or "")
+    )):
         path = _catalog_path(contract, str(field.path or ""))
         if not path:
             continue
@@ -316,7 +320,11 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
                 cardinality=RowCardinality.MANY,
                 parent_path=_parent_row_path(parent),
             )
-    return tuple(paths[key] for key in sorted(paths))
+    # Object containers can be flattened into an ancestor row. Parent links
+    # refer to that declared row, not to an undeclared lexical container.
+    return tuple(replace(paths[key], parent_path=_field_row_path(
+        _parent_row_path(paths[key].path), paths
+    )) for key in sorted(paths))
 
 
 def _field_has_descendants(contract: EndpointContract, field_path: str) -> bool:

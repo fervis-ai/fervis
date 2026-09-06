@@ -17,6 +17,11 @@ def _public_values(values: Iterable[ContractValue]) -> list[ContractValue]:
     return list(values)
 
 
+class ParameterSemantics(StrEnum):
+    OPAQUE_QUERY_PARAM = "opaque_query_param"
+    RESPONSE_SHAPE = "response_shape"
+
+
 class FrameworkKind(StrEnum):
     DJANGO_DRF = "django_drf"
     FASTAPI = "fastapi"

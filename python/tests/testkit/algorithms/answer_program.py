@@ -53,6 +53,7 @@ from fervis.lookup.answer_program.values import (
     BindingProvenanceKind,
     BindingSet,
     ConstantRef,
+    EnvironmentRef,
     FactValue,
     LiteralType,
     ParameterBinding,
@@ -61,12 +62,19 @@ from fervis.lookup.answer_program.values import (
     ParameterRole,
     ParameterValueType,
 )
-from fervis.lookup.answer_program.expressions import BinaryExpression, FieldRef
+from fervis.lookup.answer_program.expressions import (
+    BinaryExpression,
+    ExpressionFunction,
+    FieldRef,
+    FunctionExpression,
+)
 from fervis.lookup.expression_operators import ExpressionBinaryOperator
 from fervis.lookup.answer_program.operations import (
     FilterSpec,
+    NamedExpression,
     Operation,
     OrderSpec,
+    ProjectSpec,
     SortDirection,
     SortKey,
     Take,
@@ -412,6 +420,15 @@ def run_answer_program_projected_operation_inputs_case(
             right=ParameterRef(parameter_id="period", component="end"),
         ),
     )
+    grain = ConstantRef(
+        constant_id="temporal_grain",
+        version_ref="fixture-v1",
+        value=FactValue.literal(
+            id="temporal_grain",
+            literal_type=LiteralType.STRING,
+            value="day",
+        ),
+    )
     _operations, inputs = _instantiate_operations(
         AnswerProgram(
             parameters=(parameter,),
@@ -420,6 +437,26 @@ def run_answer_program_projected_operation_inputs_case(
                     id="filter_period",
                     spec=FilterSpec(input_relation="rows", condition=condition),
                     output_relation="filtered_rows",
+                ),
+                Operation(
+                    id="project_day",
+                    spec=ProjectSpec(
+                        input_relation="filtered_rows",
+                        outputs=(
+                            NamedExpression(
+                                output_field="day",
+                                expression=FunctionExpression(
+                                    function=ExpressionFunction.TEMPORAL_BUCKET,
+                                    arguments=(
+                                        FieldRef("occurred_at"),
+                                        grain,
+                                        EnvironmentRef("timezone"),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    output_relation="projected_rows",
                 ),
             ),
         ),
@@ -445,7 +482,12 @@ def run_answer_program_projected_operation_inputs_case(
         payload,
         actual={
             "inputs": [
-                {"input_id": item.input_id, "value": item.value} for item in inputs
+                {
+                    "operation_id": item.operation_id,
+                    "input_id": item.input_id,
+                    "value": item.value,
+                }
+                for item in inputs
             ]
         },
     )

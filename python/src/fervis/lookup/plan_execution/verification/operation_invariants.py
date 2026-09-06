@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fervis.lookup.answer_program.operations import JoinMode
+
 from typing_extensions import assert_never
 
 from fervis.lookup.plan_execution.errors import VerificationError
@@ -20,6 +22,7 @@ from fervis.lookup.answer_program.operations import (
     KeepAll,
     OrderSpec,
     Take,
+    AtPosition,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
@@ -54,8 +57,10 @@ def verify_operation(operation: Operation) -> None:
         _require_input(spec.input_relation, "project_to_key")
         if not spec.key_fields:
             raise VerificationError("project_to_key requires key fields")
-        _require_unique_fields(spec.key_fields, "project_to_key")
+        _require_unique_fields((*spec.key_fields, *spec.carry_fields), "project_to_key")
     elif isinstance(spec, JoinSpec):
+        if not isinstance(spec.mode, JoinMode):
+            raise VerificationError("join requires a declared join mode")
         _require_binary_join(spec.left, spec.right, spec.join_keys, "join")
     elif isinstance(spec, UnionSpec):
         if len(spec.inputs) < 2:
@@ -181,11 +186,11 @@ def _require_order(spec: OrderSpec) -> None:
     if not spec.order_by:
         raise VerificationError("order requires ordering keys")
     _require_sort_keys(spec.order_by, "order")
-    if not isinstance(spec.selection, (KeepAll, Take)):
+    if not isinstance(spec.selection, (KeepAll, Take, AtPosition)):
         raise VerificationError("order requires a selection")
     if (
-        isinstance(spec.selection, Take)
-        and not expression_references(spec.selection.limit).leaves
+        isinstance(spec.selection, (Take, AtPosition))
+        and not expression_references((spec.selection.limit if isinstance(spec.selection, Take) else spec.selection.position)).leaves
     ):
         raise VerificationError("order take limit requires an expression")
 
@@ -216,10 +221,11 @@ def _require_aggregations(spec: AggregateSpec) -> None:
             raise VerificationError("aggregate requires input field")
         if not isinstance(aggregation.distinct_argument, bool):
             raise VerificationError("aggregate distinct flag must be boolean")
-        if aggregation.distinct_argument and not aggregation.input_field:
+        if aggregation.distinct_argument and not aggregation.input_field and not aggregation.grain_fields:
             raise VerificationError(
                 "distinct row count requires an explicit argument field"
             )
+        _require_unique_fields(aggregation.grain_fields, "aggregate observation grain")
         if aggregation.filter is not None:
             _require_condition(aggregation.filter, "aggregate filter")
         output_fields.append(aggregation.output_field)

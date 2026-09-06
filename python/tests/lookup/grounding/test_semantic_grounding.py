@@ -223,6 +223,10 @@ def test_primary_key_grounding_exposes_only_identity_validation_routes() -> None
         InputBindingPurpose.IDENTITY_VALIDATION,
         InputBindingPurpose.REFERENCE_GROUNDING,
     }
+    assert {option.id for option in options} == {
+        "route.identity_validation.staff.get_staff_detail.primary_key",
+        "route.reference_grounding.staff.list_staff_list.primary_key",
+    }
     expected_set_ref = FactLocalRef("fact_1", FactLocalKind.SET, "s1")
     input_term = InputTerm(
         id="input_1",
@@ -619,4 +623,23 @@ def _binding(option: InputBindingOption) -> CompatibleIdentityRoute:
         identifier_kind=IdentifierKind.DESCRIPTIVE,
         lookup_request_param_refs=(f"{option.id}.query",),
         returned_identity_verification_field_paths=("data.id",),
+    )
+
+@pytest.mark.parametrize(('operand', 'expected'), [('10%', '0.1'), ('500', '500'), ('12.50', '12.5'), ('-2.5%', '-0.025')])
+def test_abstract_numeric_inputs_receive_canonical_scalar_values(operand, expected):
+    from fervis.lookup.semantic_types import NumericType
+    term = InputTerm('number', SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, operand), operand, NumericType())
+    values = deterministic_scalar_values(
+        (GroundingPartition('number', ('use:number',), NumericType(), None, 'numeric operand'),),
+        inputs={'number': term},
+    )
+    assert len(values) == 1
+    assert values[0].typed_value.payload.value == expected
+
+@pytest.mark.parametrize('shape', ['range', 'open_range'])
+def test_explicit_date_interval_has_calendar_day_precision(shape):
+    intent = dict(time_shape=shape, unit='none', mode='none', year=2026, month=3, day=1, year_policy='none', relative_offset=0, named_value=0, count=0, direction='none', end_year=2026 if shape=='range' else 0, end_month=3 if shape=='range' else 0, end_day=31 if shape=='range' else 0, end_year_policy='none')
+    test_semantic_time_resolution_preserves_business_period_intent(
+        'March 1 through March 31, 2026' if shape=='range' else 'since March 1, 2026',
+        '2026-09-05', intent, ('2026-03-01', '2026-03-31' if shape=='range' else '2026-09-05'),
     )

@@ -30,6 +30,11 @@ from fervis.lookup.answer_program.expressions import (
 
 
 def _verify_answer_uses_evidence_input(answer: AnswerProgram) -> None:
+    projected_relations = {
+        output.relation_id for output in answer.result_projection.relation_outputs
+    }
+    if projected_relations.intersection(relation.id for relation in answer.relations):
+        return
     if any(_operation_input_refs(operation) for operation in answer.operations):
         return
     if any(_operation_scalar_inputs(operation) for operation in answer.operations):
@@ -92,7 +97,7 @@ def _operation_field_outputs(operations: tuple[Operation, ...]) -> set[str]:
         elif isinstance(spec, ProjectSpec):
             outputs.update(output.output_field for output in spec.outputs)
         elif isinstance(spec, ProjectToKeySpec):
-            outputs.update(spec.key_fields)
+            outputs.update((*spec.key_fields, *spec.carry_fields))
     return outputs
 
 
@@ -292,7 +297,10 @@ def _verify_operation_field_references(
             for field in spec.group_by:
                 _field_roles(source, field, "aggregate")
             for aggregation in spec.aggregations:
-                if aggregation.function != AggregationFunction.COUNT:
+                if aggregation.grain_fields:
+                    _verify_role_relation_fields(contract=source, fields=aggregation.grain_fields,
+                        expected_role=FieldBindingRole.IDENTITY, role="aggregate observation grain")
+                if aggregation.input_field:
                     _field_roles(source, aggregation.input_field, "aggregate")
                 if aggregation.filter is not None:
                     _verify_condition_fields(

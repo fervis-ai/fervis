@@ -15,6 +15,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     SetTerm,
     analyze_requested_fact,
+    semantic_value_type,
 )
 from fervis.lookup.question_contract.model import (
     Aggregate,
@@ -24,7 +25,7 @@ from fervis.lookup.question_contract.model import (
     RequestedOutput,
     TakeWithBoundaryTies,
 )
-from fervis.lookup.semantic_types import IdentifierType, ValueType, value_type_kind
+from fervis.lookup.semantic_types import ValueType, value_type_kind
 from fervis.memory.artifacts import FactArtifact, FactOutcome
 
 from .model import (
@@ -170,7 +171,11 @@ def _semantic_frame_projection(
             kind=ConversationFramePartKind.ORDERING,
             text=ordering.origin.meaning,
             source_ref=ordering.expression_ref,
-            value_type=value_type_kind(types_by_local_ref[ordering.expression_ref]),
+            value_type=_frame_value_type(
+                ordering.expression_ref,
+                types_by_local_ref=types_by_local_ref,
+                values=values,
+            ),
         )
         for index, ordering in enumerate(fact.ordering, start=1)
     )
@@ -181,7 +186,13 @@ def _semantic_frame_projection(
             text=_selection_text(fact),
         )
     )
-    parts.extend(_canonical_output_identity_parts(fact, values=values))
+    parts.extend(
+        _canonical_output_identity_parts(
+            fact,
+            types_by_local_ref=types_by_local_ref,
+            values=values,
+        )
+    )
     parts.extend(input_parts)
     return _SemanticFrameProjection(
         parts=tuple(parts),
@@ -218,7 +229,11 @@ def _requested_output_part(
         kind=ConversationFramePartKind.REQUESTED_OUTPUT,
         text=text,
         source_ref=output.id,
-        value_type=value_type_kind(types_by_local_ref[output.expression_ref]),
+        value_type=_frame_value_type(
+            output.expression_ref,
+            types_by_local_ref=types_by_local_ref,
+            values=values,
+        ),
     )
 
 
@@ -236,19 +251,28 @@ def _value_part(
         kind=kind,
         text=item.origin.meaning,
         source_ref=ref,
-        value_type=value_type_kind(types_by_local_ref[ref]),
+        value_type=_frame_value_type(
+            ref,
+            types_by_local_ref=types_by_local_ref,
+            values=values,
+        ),
     )
 
 
 def _canonical_output_identity_parts(
     fact: RequestedFact,
     *,
+    types_by_local_ref: dict[str, ValueType],
     values: Mapping[str, SetTerm | AssociationTerm | FactTerm | ExpressionNode],
 ) -> tuple[ConversationFramePart, ...]:
     output: list[ConversationFramePart] = []
     for index, requested_output in enumerate(fact.outputs, start=1):
-        item = values.get(requested_output.expression_ref)
-        if not isinstance(item, FactTerm) or not isinstance(item.value_type, IdentifierType):
+        value_type = _frame_value_type(
+            requested_output.expression_ref,
+            types_by_local_ref=types_by_local_ref,
+            values=values,
+        )
+        if value_type != "identifier":
             continue
         output.append(
             ConversationFramePart(
@@ -256,10 +280,24 @@ def _canonical_output_identity_parts(
                 kind=ConversationFramePartKind.CANONICAL_OUTPUT_IDENTITY,
                 text=requested_output.origin.meaning,
                 source_ref=requested_output.id,
-                value_type=value_type_kind(item.value_type),
+                value_type=value_type,
             )
         )
     return tuple(output)
+
+
+def _frame_value_type(
+    ref: str,
+    *,
+    types_by_local_ref: Mapping[str, ValueType],
+    values: Mapping[str, SetTerm | AssociationTerm | FactTerm | ExpressionNode],
+) -> str:
+    return value_type_kind(
+        semantic_value_type(
+            values[ref],
+            inferred_type=types_by_local_ref.get(ref),
+        )
+    )
 
 
 def _input_parts(

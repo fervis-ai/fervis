@@ -84,6 +84,7 @@ class SemanticQueryEnrichmentRequest:
     recall_buckets: tuple[SemanticRecallBucket, ...]
     reference_tasks: tuple[ReferenceInputRecallTask, ...]
     resource_names: tuple[str, ...]
+    requirements: tuple[SemanticRecallRequirement, ...] = ()
 
     def __post_init__(self) -> None:
         bucket_refs = tuple(item.bucket_ref for item in self.recall_buckets)
@@ -99,9 +100,7 @@ class SemanticQueryEnrichmentRequest:
     def resource_name_groups(self) -> tuple[tuple[str, ...], ...]:
         return tuple(
             self.resource_names[offset : offset + RESOURCE_NAME_GROUP_SIZE]
-            for offset in range(
-                0, len(self.resource_names), RESOURCE_NAME_GROUP_SIZE
-            )
+            for offset in range(0, len(self.resource_names), RESOURCE_NAME_GROUP_SIZE)
         )
 
 
@@ -165,9 +164,7 @@ def semantic_recall_buckets(
         for ref in (
             {ordering_ref}
             if ordering_ref in index.source_requirement_refs
-            else index.transitive_dependencies_by_ref.get(
-                ordering_ref, frozenset()
-            )
+            else index.transitive_dependencies_by_ref.get(ordering_ref, frozenset())
         )
         if isinstance(ref, FactLocalRef) and ref in index.source_requirement_refs
     )
@@ -180,8 +177,7 @@ def semantic_recall_buckets(
         output_refs = frozenset(
             ref
             for ref in output.dependencies
-            if isinstance(ref, FactLocalRef)
-            and ref in index.source_requirement_refs
+            if isinstance(ref, FactLocalRef) and ref in index.source_requirement_refs
         )
         buckets.append(
             SemanticRecallBucket(
@@ -214,8 +210,7 @@ def _population_requirement_refs(
             for ref in index.transitive_dependencies_by_ref.get(
                 expression_ref, frozenset()
             )
-            if isinstance(ref, FactLocalRef)
-            and ref in index.source_requirement_refs
+            if isinstance(ref, FactLocalRef) and ref in index.source_requirement_refs
         )
     return index.source_support_closure(frozenset(refs))
 
@@ -253,10 +248,14 @@ def validate_semantic_query_enrichment_result(
 ) -> SemanticQueryEnrichmentResult:
     required_refs = tuple(item.bucket_ref for item in recall_buckets)
     actual_refs = tuple(item.bucket_ref for item in result.recall_bucket_matches)
-    if len(set(actual_refs)) != len(actual_refs) or set(actual_refs) != set(required_refs):
+    if len(set(actual_refs)) != len(actual_refs) or set(actual_refs) != set(
+        required_refs
+    ):
         raise ValueError("query enrichment must cover every recall bucket once")
     use_refs = tuple(item.input_use_ref for item in reference_tasks)
-    actual_uses = tuple(item.input_use_ref for item in result.input_resource_search_terms)
+    actual_uses = tuple(
+        item.input_use_ref for item in result.input_resource_search_terms
+    )
     if len(set(actual_uses)) != len(actual_uses) or set(actual_uses) != set(use_refs):
         raise ValueError("query enrichment must cover every reference input use once")
     allowed_resources = frozenset(resource_names)
@@ -266,9 +265,7 @@ def validate_semantic_query_enrichment_result(
             for name in (*item.exhaustive_resource_names, *item.matching_resource_names)
         ):
             raise ValueError("query enrichment invented a resource name")
-        if not set(item.matching_resource_names) <= set(
-            item.exhaustive_resource_names
-        ):
+        if not set(item.matching_resource_names) <= set(item.exhaustive_resource_names):
             raise ValueError(
                 "matching resource names must come from exhaustive resource names"
             )

@@ -1,21 +1,28 @@
 id: catalog_selection_preserves_requirement_coverage
-description: A bounded semantic catalog shortlist preserves a complete source explicitly recalled for every requirement.
+description: A bounded semantic catalog shortlist preserves a read recalled across requirements when exact single-requirement reads would otherwise fill the budget.
 kind: algorithm
 algorithm: semantic.query_enrichment
 input:
   mode: select_catalog
-  max_reads_per_fact: 2
+  max_reads_per_fact: 5
   catalog:
     reads:
-      - {id: exact_population, endpoint_name: list_alpha, resource_names: [alpha]}
-      - {id: exact_value_one, endpoint_name: list_beta, resource_names: [beta]}
-      - {id: exact_value_two, endpoint_name: list_gamma, resource_names: [gamma]}
-      - {id: complete_source, endpoint_name: list_combined, resource_names: [alpha beta gamma]}
+      - {id: exact_population_one, endpoint_name: list_alpha, resource_names: [alpha]}
+      - {id: exact_population_two, endpoint_name: list_beta, resource_names: [beta]}
+      - {id: exact_population_three, endpoint_name: list_gamma, resource_names: [gamma]}
+      - {id: exact_identity, endpoint_name: list_delta, resource_names: [delta]}
+      - {id: exact_measure_one, endpoint_name: list_epsilon, resource_names: [epsilon]}
+      - {id: exact_measure_two, endpoint_name: list_zeta, resource_names: [zeta]}
+      - id: shared_source
+        endpoint_name: list_payout
+        resource_names: [payout]
+        fields:
+          - {ref: shared_source.data.staff_id, path: data.staff_id, label: staff identifier, type: string}
   resource_matches:
-    - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [alpha beta gamma, alpha], matching_resource_names: [alpha]}
-    - {bucket_ref: "fact_1:recall:output_1", exhaustive_resource_names: [alpha beta gamma, beta], matching_resource_names: [beta]}
-    - {bucket_ref: "fact_1:recall:output_2", exhaustive_resource_names: [alpha beta gamma, gamma], matching_resource_names: [gamma]}
+    - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [alpha, beta, gamma, payout], matching_resource_names: [alpha]}
+    - {bucket_ref: "fact_1:recall:output_1", exhaustive_resource_names: [delta], matching_resource_names: [delta]}
+    - {bucket_ref: "fact_1:recall:output_2", exhaustive_resource_names: [epsilon, zeta, staff payout], matching_resource_names: [epsilon]}
 expect:
   result_contains:
     selected_read_membership:
-      complete_source: true
+      shared_source: true

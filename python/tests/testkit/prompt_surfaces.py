@@ -23,6 +23,7 @@ PROMPT_SURFACE_CONTRACTS = {
             "Callable Parameters",
             "Outcome",
             "Output",
+            "Context value authority",
         ),
     },
     "semantic_grounding": {
@@ -31,13 +32,6 @@ PROMPT_SURFACE_CONTRACTS = {
             "Time resolution",
             "Identity meaning",
             "Resolver mechanics",
-            "Output",
-        ),
-    },
-    "semantic_plan_selection": {
-        "path": LOOKUP_ROOT / "plan_selection" / "semantic_prompt.py",
-        "instruction_headings": (
-            "Source alignment",
             "Output",
         ),
     },
@@ -55,8 +49,15 @@ PROMPT_SURFACE_CONTRACTS = {
         "path": LOOKUP_ROOT / "question_contract" / "prompt.py",
         "instruction_headings": (
             "Outcome",
+            "Grouping ownership",
+            "Temporal operands",
+            "Quantified relationship",
+            "Ordinal selection",
+            "Group result grain",
             "Origins",
             "Outcome",
+            "Operand ownership",
+            "Input references",
         ),
     },
     "semantic_read_eligibility": {
@@ -70,10 +71,10 @@ PROMPT_SURFACE_CONTRACTS = {
     "semantic_source_binding": {
         "path": LOOKUP_ROOT / "source_binding" / "prompt.py",
         "instruction_headings": (
-            "Semantic bindings",
+            "Source realization",
             "Resolved input application",
             "Finite-choice requirement application",
-            "Subject obligation",
+            "Choice requirement correspondence",
             "Output",
         ),
     },

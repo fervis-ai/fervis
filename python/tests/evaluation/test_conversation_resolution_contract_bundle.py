@@ -121,15 +121,19 @@ class _ConversationResolutionModelPort:
                                 "The prior rows supply the referent omitted by the "
                                 "current question."
                             ),
-                            "contextualized_question": (
-                                "What quantities were in the prior rows?"
-                            ),
                             "clauses": [
                                 {
                                     "current_clause_text": (
                                         "What quantities were those?"
                                     ),
                                     "occurrence": 1,
+                                    "request_shape_basis": (
+                                        "The current clause asks for quantities; "
+                                        "prior context resolves only those."
+                                    ),
+                                    "request_shape_source": (
+                                        "current_clause_supplies_request"
+                                    ),
                                     "resolved_text": (
                                         "What quantities were in the prior rows?"
                                     ),

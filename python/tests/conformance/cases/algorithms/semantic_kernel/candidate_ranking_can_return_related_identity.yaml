@@ -1,0 +1,188 @@
+id: candidate_ranking_can_return_related_identity
+description: Ordered candidate rows can return a related entity identity without changing
+  the candidate grain.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts:
+  - Which work locations were associated with Nadia Wanjiku's first two shifts?
+  frame_payload:
+    decision_basis: The answer returns the workplace for each of Nadia Wanjiku's first
+      two shift occurrences.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+      - return_request_basis: Return the workplace identity for each selected shift.
+        relational_shape_basis: The requested relational shape is ordinary.
+        request:
+          relational_shape: ordinary
+          result_grain_basis: The requested result grain is one_result_per_qualifying_row.
+          result:
+            kind: one_result_per_qualifying_row
+            result_candidates:
+              instance_kind: shift occurrences
+              origin:
+                kind: question
+            projection:
+              projection_basis: Return the workplace identity without the shift identity.
+              candidate_identity: omitted
+              explicitly_requested_values:
+              - value_ref: v1
+                value_kind_basis: The answer identifies the work location related
+                  to each selected shift.
+                value_kind: related_entity
+                meaning: workplace identity
+                origin:
+                  kind: question
+            result_order:
+              ordering_request_basis: The declared ordering values determine result
+                order.
+              ordering:
+                kind: ordered_by
+                values:
+                - ownership_basis: Shift start time orders the shifts but is not returned.
+                  kind: unreturned_ordering_meaning
+                  meaning: shift start time
+                  origin:
+                    kind: question
+              selection:
+                kind: take_with_boundary_ties
+      supplied_values:
+        operands:
+        - meaning: the staff member whose shifts qualify
+          denotation_basis: Nadia Wanjiku is a supplied name for one staff member.
+          entity_reference:
+            instance_kind: staff member
+            value:
+              kind: single_identity
+              identity_value: Nadia Wanjiku
+              origin:
+                kind: question
+        selection_limits:
+        - answer_request_number: 1
+          meaning: requested number of shifts
+          denotation_basis: Two supplies the requested result limit.
+          non_entity_value:
+            value:
+              operands:
+              - '2'
+              value_type:
+                kind: integer
+              origin:
+                kind: question
+      question_input_inventory_check:
+        all_input_like_phrases_declared: true
+  payload:
+    decision_basis: Select Nadia Wanjiku's shifts in start-time order and return each
+      shift's related workplace identity.
+    outcome:
+      kind: question_contract
+      answer_requests:
+      - requested_fact_ref: fact_1
+        origin:
+          source: question_context
+          meaning: Nadia Wanjiku's first two shift workplaces
+          resolved_input_ref: null
+        candidate_set:
+          instance_kind: shift occurrences
+          instance_interpretation: normal_business_instance
+        set_graph:
+          identity_input_relations:
+            i2:
+              association:
+                id: a1
+                origin:
+                  source: question_context
+                  meaning: shift belongs to staff member
+                  resolved_input_ref: null
+              set:
+                id: s2
+                instance_kind: staff member
+                origin:
+                  source: question_context
+                  meaning: staff members
+                  resolved_input_ref: null
+              related_sets: []
+          requested_output_relations:
+            v1:
+              association:
+                id: a2
+                origin:
+                  source: question_context
+                  meaning: shift occurred at workplace
+                  resolved_input_ref: null
+              set:
+                id: s3
+                instance_kind: workplace identity
+                origin:
+                  source: question_context
+                  meaning: workplaces
+                  resolved_input_ref: null
+              related_sets: []
+          other_related_sets: []
+        qualification:
+          kind: input_comparison
+          input:
+            kind: input_ref
+            input_ref: i2
+            operand_meaning: the staff member whose shifts qualify
+            instance_kind: staff member
+          operator: equals
+          fact:
+            kind: fact
+            identity_path:
+              kind: related_instance
+              association_ref: a1
+            origin:
+              source: question_context
+              meaning: shift staff identity
+              resolved_input_ref: null
+        grouping: []
+        ordering:
+        - ordering_basis: Compare shifts by their observed start time.
+          expression:
+            kind: fact
+            observed_for_ref: s1
+            origin:
+              source: question_context
+              meaning: shift start time
+              resolved_input_ref: null
+          direction: ascending
+        selection:
+          kind: take_with_boundary_ties
+          limit:
+            kind: input_ref
+            input_ref: i1
+        distinct_by: []
+        outputs:
+          result_key_outputs: []
+          requested_value_outputs:
+          - output_ref: v1
+            instance_kind: workplace identity
+expect:
+  result_contains:
+    input_refs:
+    - i1
+    - i2
+    requested_facts:
+    - id: fact_1
+      result_grain: subject_rows
+      fact_value_kinds:
+        f3: orderable
+      input_use_refs:
+      - i2
+      identity_input_refs:
+      - i2
+      ordering_refs:
+      - fact_1:fact:f3
+      output_refs:
+      - fact_1:output:output_1
+      source_requirement_refs:
+      - fact_1:association:a1
+      - fact_1:association:a2
+      - fact_1:fact:f1
+      - fact_1:fact:f2
+      - fact_1:fact:f3
+      - fact_1:set:s1
+      - fact_1:set:s2
+      - fact_1:set:s3

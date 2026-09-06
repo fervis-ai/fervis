@@ -87,6 +87,18 @@ def test_callable_frame_reuses_shape_and_rebinds_only_changed_argument() -> None
     assert current_input.id == "place"
     assert current_input.operand == "Pivot Mall"
     assert current_input.origin.meaning == "Pivot Mall"
+    [current_denotation] = prepared.changed_input_denotations
+    assert current_denotation.input_ref == "place"
+    assert current_denotation.operand_meaning == "Pivot Mall"
+    assert "Acacia Mall" not in current_denotation.denotation_basis
+    assert current_denotation.denoted_instance_kind == "mall"
+    assert prepared.changed_input_origins == {
+        "place": SourceOrigin(
+            SourceOriginKind.CONVERSATION_RESOLUTION,
+            "Pivot Mall",
+            resolved_input_ref="place",
+        )
+    }
 
     current_value = FactValue.identity(
         id="grounded_place",
@@ -351,3 +363,11 @@ def _resolution() -> CompiledConversationResolution:
         used_source_card_ids=("prior_card",),
         used_memory_ids=("prior_request",),
     )
+
+
+def test_question_contract_input_text_uses_resolved_literal_value_once() -> None:
+    resolution = _resolution()
+
+    assert resolution.question_contract_input_text_by_ref() == {
+        "conversation.place_2": "Pivot Mall"
+    }

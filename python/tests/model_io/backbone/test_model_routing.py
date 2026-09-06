@@ -263,7 +263,7 @@ def test_openai_compatible_specs_use_expected_runtime_config(
         OPENAI_RESPONSES_PROVIDER_CONFIG.base_url,
         OPENAI_RESPONSES_PROVIDER_CONFIG.api_key_env_var,
         OPENAI_RESPONSES_PROVIDER_CONFIG.reasoning_effort,
-    ) == (0.0, "https://api.openai.com/v1", "OPENAI_API_KEY", "low")
+    ) == (0.0, "https://api.openai.com/v1", "OPENAI_API_KEY", "medium")
 
 
 def test_openai_uses_max_completion_tokens_parameter(

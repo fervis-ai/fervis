@@ -40,11 +40,7 @@ def run_semantic_source_binding_case(payload: dict[str, Any]) -> list[str]:
             boolean_requirement_refs=frozenset(
                 str(value) for value in request["boolean_requirement_refs"]
             ),
-            matched_excluded_role=(
-                str(request["matched_excluded_role"])
-                if request.get("matched_excluded_role") is not None
-                else None
-            ),
+            baseline_included=bool(request["baseline_included"]),
         )
         return subset_mismatches(
             actual={"explicit_user_override_applies": override_applies},
@@ -53,12 +49,7 @@ def run_semantic_source_binding_case(payload: dict[str, Any]) -> list[str]:
     if mode != "subject_choice_membership":
         return [f"unsupported semantic Source Binding mode: {mode}"]
     membership = derive_subject_choice_membership(
-        choice_included=bool(request["choice_included"]),
-        matched_excluded_role=(
-            str(request["matched_excluded_role"])
-            if request.get("matched_excluded_role") is not None
-            else None
-        ),
+        baseline_included=bool(request["baseline_included"]),
         explicit_user_override_applies=bool(request["explicit_user_override_applies"]),
     )
     return subset_mismatches(

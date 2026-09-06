@@ -19,8 +19,9 @@ from .model import (
     RowSourceIdentityEvidence,
     RowSourceKind,
     RowSourceParam,
-    RowSourceParamSemantics,
+    RowSourceRelationEvidence,
     RowSourceValueType,
+    row_source_relation_evidence,
 )
 from fervis.lookup.relation_catalog.model import RowCardinality
 
@@ -73,7 +74,10 @@ def __getattr__(name: str):
         from . import source_groups
 
         return getattr(source_groups, name)
-    if name == "row_source_type_supports_semantic_type":
+    if name in {
+        "row_source_type_supports_semantic_type",
+        "semantic_type_for_row_source_type",
+    }:
         from . import semantic_types
 
         return getattr(semantic_types, name)
@@ -99,7 +103,7 @@ __all__ = (
     "RowSourceIdentityEvidence",
     "RowSourceKind",
     "RowSourceParam",
-    "RowSourceParamSemantics",
+    "RowSourceRelationEvidence",
     "RowSourceValueType",
     "RowCardinality",
     "api_row_source_id",
@@ -122,7 +126,9 @@ __all__ = (
     "row_source_ids_for_read_ids",
     "row_source_param_evidence_ref",
     "row_source_param_prompt_payload",
+    "row_source_relation_evidence",
     "row_source_prompt_payload",
     "row_source_type_supports_semantic_type",
+    "semantic_type_for_row_source_type",
     "row_sources_for_read_id",
 )

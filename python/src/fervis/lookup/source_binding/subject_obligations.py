@@ -39,16 +39,11 @@ class SubjectChoiceMembership:
 
 def derive_subject_choice_membership(
     *,
-    choice_included: bool,
-    matched_excluded_role: str | None,
+    baseline_included: bool,
     explicit_user_override_applies: bool,
 ) -> SubjectChoiceMembership:
     return SubjectChoiceMembership(
-        included=(
-            explicit_user_override_applies
-            if matched_excluded_role is not None
-            else choice_included
-        ),
+        included=baseline_included or explicit_user_override_applies,
         explicit_user_override_applies=explicit_user_override_applies,
     )
 
@@ -57,11 +52,11 @@ def explicit_override_from_application_owners(
     *,
     application_owner_refs: tuple[str | None, ...],
     boolean_requirement_refs: frozenset[str],
-    matched_excluded_role: str | None,
+    baseline_included: bool,
 ) -> bool:
     """Whether an exact Boolean requirement selects an excluded choice."""
 
-    return matched_excluded_role is not None and any(
+    return not baseline_included and any(
         owner_ref in boolean_requirement_refs
         for owner_ref in application_owner_refs
     )
@@ -87,8 +82,8 @@ NORMAL_INSTANCE_EXCLUDED_STATE_ROLES: tuple[
     NormalInstanceExcludedStateRoleDefinition(
         role=NormalInstanceExcludedStateRole.FAILED_OR_REJECTED_BEFORE_EFFECT,
         definition=(
-            "The entity failed, was rejected, was declined, or did not become "
-            "effective in normal business operations."
+            "A terminal failed, rejected, or declined attempt that did not become "
+            "an effective instance of the requested subject."
         ),
     ),
     NormalInstanceExcludedStateRoleDefinition(

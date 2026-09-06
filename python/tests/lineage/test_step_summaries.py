@@ -222,22 +222,22 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
                     "kind": "question_meaning",
                     "answer_requests": [
                         {
-                            "result_kind": "scalar",
-                            "qualifying_row_kind": {
+                            "qualifying_rows": {
                                 "meaning": "sales",
                                 "origin": {
                                     "kind": "question",
                                     "resolved_input_ref": None,
                                 },
                             },
-                            "grouping_meanings": [],
+                            "result_rows": {
+                                "kind": "one_value_for_population"
+                            },
                             "return_request_basis": (
                                 "The question asks for the number of sales."
                             ),
-                            "returned_result": {"kind": "values"},
-                            "answer_values": [
+                            "returned_meanings": [
                                 {
-                                    "value_ref": "v1",
+                                    "meaning_ref": "r1",
                                     "meaning": "sale count",
                                     "origin": {
                                         "kind": "question",
@@ -245,10 +245,9 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
                                     },
                                 }
                             ],
-                            "returned_value_refs": ["v1"],
-                            "ordering_value_refs": [],
+                            "ordering": [],
                             "selection": {"kind": "all_results", "limit": None},
-                            "universal_shape": "none",
+                            "relational_shape": "ordinary",
                         },
                     ],
                     "supplied_values": [

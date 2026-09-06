@@ -133,9 +133,7 @@ class InputBindingOption:
 
     @property
     def purpose(self) -> InputBindingPurpose:
-        if self.candidate.identity_validation_request_parameters:
-            return InputBindingPurpose.IDENTITY_VALIDATION
-        return InputBindingPurpose.REFERENCE_GROUNDING
+        return _binding_purpose(self.candidate)
 
 
 def reference_binding_options(
@@ -179,15 +177,26 @@ def reference_binding_options(
             )
             options.append(
                 InputBindingOption(
-                    id=(
-                        f"bind_{_symbol(input_id)}_{_symbol(source.id)}_"
-                        f"{_symbol(key.entity_kind)}_{_symbol(key.id)}"
+                    id=".".join(
+                        (
+                            "route",
+                            _binding_purpose(candidate).value,
+                            _symbol(key.entity_kind),
+                            _symbol(source.read_id),
+                            _symbol(key.id),
+                        )
                     ),
                     known_input_id=input_id,
                     candidate=candidate,
                 )
             )
     return tuple(options)
+
+
+def _binding_purpose(candidate: ResolverCandidate) -> InputBindingPurpose:
+    if candidate.identity_validation_request_parameters:
+        return InputBindingPurpose.IDENTITY_VALIDATION
+    return InputBindingPurpose.REFERENCE_GROUNDING
 
 
 def _symbol(value: str) -> str:

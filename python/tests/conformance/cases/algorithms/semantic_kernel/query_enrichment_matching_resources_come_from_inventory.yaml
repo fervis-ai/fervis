@@ -1,5 +1,5 @@
 id: query_enrichment_matching_resources_come_from_inventory
-description: Query Enrichment rejects a matching resource that was not first included in the exhaustive recall inventory.
+description: A matching resource is retained in the exhaustive recall inventory when the model omits the redundant copy.
 kind: algorithm
 algorithm: semantic.query_enrichment
 input:
@@ -12,4 +12,6 @@ input:
       - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [Event], matching_resource_names: [Event, Operator]}
     input_resource_search_terms: []
 expect:
-  result_contains: {status: rejected}
+  result_contains:
+    recall_bucket_matches:
+      - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [Event, Operator], matching_resource_names: [Event, Operator]}

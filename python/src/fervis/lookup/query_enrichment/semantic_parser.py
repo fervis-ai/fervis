@@ -23,7 +23,12 @@ def parse_semantic_query_enrichment(
             RecallBucketMatch(
                 bucket_ref=item.bucket_ref,
                 exhaustive_resource_names=tuple(
-                    dict.fromkeys(item.exhaustive_resource_names)
+                    dict.fromkeys(
+                        (
+                            *item.exhaustive_resource_names,
+                            *item.matching_resource_names,
+                        )
+                    )
                 ),
                 matching_resource_names=tuple(
                     dict.fromkeys(item.matching_resource_names)

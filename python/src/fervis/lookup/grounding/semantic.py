@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Mapping
 
@@ -16,6 +16,8 @@ from fervis.lookup.semantic_types import (
     CollectionType,
     DecimalType,
     IntegerType,
+    NumericType,
+    input_operand_matches_value_type,
     PercentageMeasure,
     TemporalScopeType,
     TextType,
@@ -376,11 +378,11 @@ def deterministic_scalar_values(
     return tuple(output)
 
 
-def validate_canonical_input_ledger(
+def build_canonical_input_ledger(
     values: tuple[CanonicalInputValue, ...],
     *,
     required_use_refs: tuple[str, ...],
-) -> None:
+) -> tuple[CanonicalInputValue, ...]:
     actual = tuple(use_ref for value in values for use_ref in value.use_refs)
     if len(actual) != len(set(actual)):
         raise ValueError("canonical input ledger repeats an input use")
@@ -388,6 +390,33 @@ def validate_canonical_input_ledger(
         raise ValueError("canonical input ledger does not cover every input use")
     if any(not value.certification_refs for value in values):
         raise ValueError("canonical input value lacks certification")
+
+    ledger: dict[str, CanonicalInputValue] = {}
+    for value in values:
+        previous = ledger.get(value.canonical_value_id)
+        if previous is None:
+            ledger[value.canonical_value_id] = value
+            continue
+        if (previous.input_ref != value.input_ref
+                or previous.typed_value.known_input_id != value.typed_value.known_input_id
+                or not previous.typed_value.has_same_value_as(value.typed_value)):
+            raise ValueError("canonical value ID has conflicting input values")
+        typed = previous.typed_value
+        other = value.typed_value
+        ledger[value.canonical_value_id] = replace(
+            previous,
+            use_refs=(*previous.use_refs, *value.use_refs),
+            certification_refs=tuple(dict.fromkeys((*previous.certification_refs, *value.certification_refs))),
+            typed_value=replace(
+                typed,
+                identity_evidence=tuple(dict.fromkeys((*typed.identity_evidence, *other.identity_evidence))),
+                proof_refs=tuple(dict.fromkeys((*typed.proof_refs, *other.proof_refs))),
+                source_refs=tuple(dict.fromkeys((*typed.source_refs, *other.source_refs))),
+                dependencies=tuple(dict.fromkeys((*typed.dependencies, *other.dependencies))),
+                applies_to_requested_fact_ids=tuple(dict.fromkeys((*typed.applies_to_requested_fact_ids, *other.applies_to_requested_fact_ids))),
+            ),
+        )
+    return tuple(ledger.values())
 
 
 def _deterministic_scalar_value(
@@ -415,13 +444,15 @@ def _deterministic_scalar_value(
         except ValueError:
             return None
         literal_type = LiteralType.NUMBER
-    elif isinstance(value_type, DecimalType):
+    elif isinstance(value_type, (DecimalType, NumericType)):
+        if not input_operand_matches_value_type(text, value_type):
+            return None
         normalized = text.removesuffix("%").strip()
         try:
             number = Decimal(normalized)
         except InvalidOperation:
             return None
-        if isinstance(value_type.measure, PercentageMeasure):
+        if text.endswith("%") or (isinstance(value_type, DecimalType) and isinstance(value_type.measure, PercentageMeasure)):
             number /= Decimal(100)
         literal_type = LiteralType.NUMBER
         value = format(number, "f")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fervis.host_api.contracts import ParameterSemantics
+
 from dataclasses import dataclass
 from typing import cast
 
@@ -19,7 +21,6 @@ from fervis.lookup.relation_catalog.row_sources import (
     RowSource,
     RowSourceField,
     RowSourceParam,
-    RowSourceParamSemantics,
     RowSourceValueType,
 )
 from fervis.lookup.turn_prompts.projections.response_shape import (
@@ -98,7 +99,7 @@ class ResolverOptionSurface:
         return tuple(
             parameter
             for parameter in self.request_parameters
-            if parameter.semantics is not RowSourceParamSemantics.RESPONSE_SHAPE
+            if parameter.semantics is not ParameterSemantics.RESPONSE_SHAPE
         )
 
     def compiled_request_value(
@@ -269,7 +270,7 @@ def _with_row_source_parameter_overlay(
         payload["default_source"] = parameter.default_source
     else:
         payload.pop("default_source", None)
-    if parameter.semantics is not RowSourceParamSemantics.OPAQUE_QUERY_PARAM:
+    if parameter.semantics is not ParameterSemantics.OPAQUE_QUERY_PARAM:
         payload["semantics"] = parameter.semantics.value
     else:
         payload.pop("semantics", None)

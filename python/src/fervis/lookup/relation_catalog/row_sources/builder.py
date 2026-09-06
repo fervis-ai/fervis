@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from fervis.host_api.contracts import ParameterSemantics
+
 from itertools import product
+from dataclasses import replace
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -35,7 +38,6 @@ from .field_paths import (
     _opaque_id,
     _param_ids,
     _read_catalog_facts,
-    _read_description,
     _relative_field_path,
     _symbol,
 )
@@ -57,7 +59,6 @@ from .model import (
     RowSourceField,
     RowSourceKind,
     RowSourceParam,
-    RowSourceParamSemantics,
     RowSourceValueType,
     row_source_value_type,
 )
@@ -85,11 +86,28 @@ def build_api_row_source_catalog(catalog: RelationCatalog) -> RowSourceCatalog:
 
     return RowSourceCatalog(
         sources=tuple(
-            source
+            _with_declared_entity_kind(source)
             for read in catalog.reads
             for source in _api_row_sources(read, catalog=catalog)
         )
     )
+
+
+def _with_declared_entity_kind(source: RowSource) -> RowSource:
+    kinds = {key.entity_kind for key in source.candidate_keys}
+    if len(kinds) != 1:
+        return source
+    kind, = kinds
+    field_id = "metadata:entity_kind"
+    if any(field.id == field_id for field in source.fields):
+        raise ValueError("source field collides with declared entity metadata")
+    return replace(source, fields=(*source.fields, RowSourceField(
+        id=field_id, field_ref=f"source_metadata:{source.id}:entity_kind",
+        label="Declared entity class of this row", type=RowSourceValueType.STRING,
+        allowed_roles=(FieldBindingRole.OUTPUT, FieldBindingRole.PREDICATE),
+        choices=(kind,), declared_entity_kind=kind,
+        description="Fixed row-class value supplied by the source's declared candidate-key entity kind.",
+    )))
 
 
 def row_source_ids_for_read_ids(
@@ -593,15 +611,15 @@ def _param_semantics(
     param: CatalogParam,
     *,
     response_shape_param_refs: frozenset[str],
-) -> RowSourceParamSemantics:
+) -> ParameterSemantics:
     if param.ref in response_shape_param_refs:
-        return RowSourceParamSemantics.RESPONSE_SHAPE
+        return ParameterSemantics.RESPONSE_SHAPE
     if param.semantics:
         try:
-            return RowSourceParamSemantics(param.semantics)
+            return ParameterSemantics(param.semantics)
         except ValueError as exc:
             raise ValueError(f"{param.ref} has unsupported param semantics") from exc
-    return RowSourceParamSemantics.OPAQUE_QUERY_PARAM
+    return ParameterSemantics.OPAQUE_QUERY_PARAM
 
 
 def _source_default_variants(
@@ -633,7 +651,7 @@ def _source_variant_param(param: CatalogParam) -> bool:
         param.required
         and param.default is None
         and bool(param.choices)
-        and param.semantics == RowSourceParamSemantics.RESPONSE_SHAPE.value
+        and param.semantics == ParameterSemantics.RESPONSE_SHAPE.value
     )
 
 
@@ -684,7 +702,7 @@ def _source_description(
     params: tuple[CatalogParam, ...],
     defaults: Mapping[str, CatalogParameterValue],
 ) -> str:
-    description = _read_description(read)
+    description = read.description
     default_label = _defaults_label(params, defaults=defaults)
     if not default_label:
         return description
@@ -755,7 +773,7 @@ def _memory_row_source(relation: "RelationRows") -> RowSource:
                 id=field_id,
                 field_ref=field_id,
                 label=field_id,
-                type=RowSourceValueType.UNKNOWN,
+                type=row_source_value_type((relation.field_types or {}).get(field_id, "unknown")),
                 allowed_roles=_memory_roles(field_id, relation=relation),
             )
             for field_id in field_ids
@@ -809,6 +827,7 @@ def _memory_field_ids(relation: "RelationRows") -> tuple[str, ...]:
     output: list[str] = []
     for field_id in (
         *relation.grain_keys,
+        *(relation.field_types or {}),
         *(key for row in relation.rows for key in row),
     ):
         field = str(field_id)

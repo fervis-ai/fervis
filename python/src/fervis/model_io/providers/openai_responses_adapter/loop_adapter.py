@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,6 +49,7 @@ class OpenAIResponsesRequestPayload:
     tool_specs: list[dict[str, Any]]
     json_object_arguments_by_tool: dict[str, tuple[str, ...]]
     system_prompt: str
+    service_tier: str | None
 
 
 class OpenAIResponsesLoopRuntime(ConfiguredChatLoopRuntime):
@@ -78,12 +80,23 @@ class OpenAIResponsesLoopRuntime(ConfiguredChatLoopRuntime):
                 request.tool_specs
             ),
             system_prompt=request.system_prompt,
+            service_tier=_configured_service_tier(),
         )
+
+
+def _configured_service_tier() -> str | None:
+    value = os.getenv("FERVIS_OPENAI_SERVICE_TIER", "").strip().lower()
+    if not value:
+        return None
+    if value not in {"auto", "default", "flex"}:
+        raise ProviderExecutionError(error_class="ProviderConfigurationError", reason="FERVIS_OPENAI_SERVICE_TIER is invalid")
+    return value
 
 
 def _openai_responses_request_worker(
     payload: OpenAIResponsesRequestPayload, result_queue: Any
 ) -> None:
+    token_usage: dict[str, Any] = {}
     try:
         client = openai_compatible_client(
             api_key=payload.api_key,
@@ -94,23 +107,27 @@ def _openai_responses_request_worker(
         response = client.responses.create(**_response_kwargs(payload))
         usage = getattr(response, "usage", None)
         output_details = getattr(usage, "output_tokens_details", None)
-        result_queue.put(
-            {
-                "ok": True,
-                "answer": _answer_from_response(
-                    response,
-                    output_mode=payload.output_mode,
-                    json_object_arguments=payload.json_object_arguments_by_tool,
-                ),
-                "inputTokens": int(getattr(usage, "input_tokens", 0) or 0),
-                "outputTokens": int(getattr(usage, "output_tokens", 0) or 0),
-                "thinkingTokens": int(
-                    getattr(output_details, "reasoning_tokens", 0) or 0
-                ),
-            }
+        thinking_tokens = int(getattr(output_details, "reasoning_tokens", 0) or 0)
+        # Responses includes reasoning in output_tokens. Fervis prices its
+        # output and thinking counters separately, so they must be disjoint.
+        token_usage = {
+            "inputTokens": int(getattr(usage, "input_tokens", 0) or 0),
+            "outputTokens": int(getattr(usage, "output_tokens", 0) or 0) - thinking_tokens,
+            "thinkingTokens": thinking_tokens,
+        }
+        service_tier = getattr(response, "service_tier", None)
+        if service_tier:
+            token_usage["usageDetails"] = {"serviceTier": str(service_tier)}
+        answer = _answer_from_response(
+            response, output_mode=payload.output_mode,
+            json_object_arguments=payload.json_object_arguments_by_tool,
         )
+        result_queue.put({"ok": True, "answer": answer, **token_usage})
     except BaseException as exc:
-        result_queue.put(provider_error_payload(exc))
+        failure = provider_error_payload(exc)
+        if token_usage:
+            failure["usage"] = token_usage
+        result_queue.put(failure)
 
 
 def _response_kwargs(payload: OpenAIResponsesRequestPayload) -> dict[str, Any]:
@@ -126,6 +143,8 @@ def _response_kwargs(payload: OpenAIResponsesRequestPayload) -> dict[str, Any]:
         "max_output_tokens": payload.max_output_tokens,
         "reasoning": {"effort": payload.reasoning_effort},
     }
+    if payload.service_tier is not None:
+        kwargs["service_tier"] = payload.service_tier
     if payload.output_mode == ProviderOutputMode.TOOL_CALL:
         kwargs.update(
             {
@@ -159,6 +178,14 @@ def _answer_from_response(
     output_mode: ProviderOutputMode,
     json_object_arguments: dict[str, tuple[str, ...]],
 ) -> str:
+    status = getattr(response, "status", None)
+    if status == "incomplete":
+        reason = str(getattr(getattr(response, "incomplete_details", None), "reason", "unknown"))
+        raise ProviderExecutionError(
+            error_class=("ProviderOutputLimitExceeded" if reason == "max_output_tokens" else "ProviderIncompleteResponse"),
+            reason=f"OpenAI response incomplete: {reason}",
+            context={"status": status, "reason": reason},
+        )
     if output_mode != ProviderOutputMode.TOOL_CALL:
         return strip_json_fence(str(getattr(response, "output_text", "") or ""))
     tool_calls = [

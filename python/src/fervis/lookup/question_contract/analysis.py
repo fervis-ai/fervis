@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping, TypeAlias
 
-from fervis.lookup.expression_operators import infer_operator_result
+from fervis.lookup.expression_operators import (
+    infer_aggregate_result,
+    infer_operator_result,
+)
 from fervis.lookup.qualification import (
     BooleanRequirement,
     BooleanRequirementUseSite,
@@ -14,7 +17,6 @@ from fervis.lookup.qualification import (
     QualificationDNF,
     boolean_requirements,
     normalize_qualification,
-    relative_dnf,
 )
 from fervis.lookup.question_contract.model import (
     Aggregate,
@@ -35,21 +37,22 @@ from fervis.lookup.question_contract.model import (
     NullCheck,
     Ordering,
     Quantify,
+    RelatedRow,
     RequestedFact,
     ResultSelection,
     SetTerm,
     TakeWithBoundaryTies,
+    PositionWithTies,
     TemporalBucket,
 )
 from fervis.lookup.semantic_types import (
     BooleanType,
-    CollectionType,
     DateTimeType,
     DateType,
     IdentifierType,
     IntegerType,
+    TemporalPointType,
     ValueType,
-    is_numeric,
 )
 
 
@@ -166,6 +169,61 @@ class RequestedFactSemanticIndex:
     selection: ResultSelection
     result_grain: ResultGrain
 
+    def output_qualification(self, output_id: str) -> QualificationDNF:
+        """Require subject filtering only for outputs evaluated over that subject."""
+        from fervis.lookup.question_contract.domains import value_population_dependencies
+
+        output = next(item for item in self.requested_fact.outputs if item.id == output_id)
+        ref = self.fact_local_ref_by_local_id.get(output.expression_ref, output.expression_ref)
+        if (isinstance(self.result_grain, Singleton)
+                and self.subject_obligation.subject_set_ref.token not in value_population_dependencies(self, ref)):
+            return QualificationDNF.true(self.requested_fact_id)
+        return self.qualification
+
+    @property
+    def observed_fact_refs(self) -> frozenset[FactLocalRef]:
+        """Facts whose values must be read to produce, group, or order results.
+
+        Qualification-only facts may instead be satisfied by an authorized
+        parameter application. Observed values cannot be replaced by a filter.
+        """
+
+        roots = (
+            *tuple(item.value_ref for item in self.output_requirements),
+            *self.grouping_refs,
+            *self.ordering_refs,
+        )
+        return frozenset().union(*(self.value_fact_refs(ref) for ref in roots))
+
+    def value_fact_refs(self, ref: SemanticValueRef) -> frozenset[FactLocalRef]:
+        """Raw value dependencies, excluding separately owned scoped predicates."""
+        if isinstance(ref, str):
+            return frozenset()
+        if ref.kind is FactLocalKind.FACT:
+            return frozenset((ref,))
+        node = self.expression_by_ref.get(ref)
+        if isinstance(node, (Quantify, RelatedRow, Coverage)):
+            return frozenset()
+        dependencies = (
+            (self.fact_local_ref_by_local_id[node.argument_ref],)
+            if isinstance(node, Aggregate)
+            else self.direct_dependencies_by_ref.get(ref, ())
+        )
+        return frozenset().union(
+            *(self.value_fact_refs(child) for child in dependencies)
+        )
+
+    def value_type(self, ref: SemanticValueRef) -> ValueType:
+        if isinstance(ref, str):
+            return self.input_by_ref[ref].value_type
+        value = self.term_by_ref.get(ref) or self.expression_by_ref.get(ref)
+        if value is None:
+            raise KeyError(ref)
+        return semantic_value_type(
+            value,
+            inferred_type=self.inferred_type_by_ref.get(ref),
+        )
+
     @property
     def term_requirement_refs(self) -> frozenset[FactLocalRef]:
         """Source-backed set and fact terms, excluding associations."""
@@ -198,6 +256,16 @@ class RequestedFactSemanticIndex:
         subject_ref = self.subject_obligation.subject_set_ref
         for ref in tuple(expanded):
             if ref.kind is FactLocalKind.SET and ref != subject_ref:
+                related_row_refs = tuple(
+                    self.fact_local_ref_by_local_id[item]
+                    for expression in self.expression_by_ref.values()
+                    if isinstance(expression, RelatedRow)
+                    and expression.set_ref == ref.local_id
+                    for item in expression.association_refs
+                )
+                if related_row_refs:
+                    expanded.update(related_row_refs)
+                    continue
                 expanded.update(
                     _unique_association_path_refs(
                         subject_ref,
@@ -218,6 +286,15 @@ def analyze_requested_fact(
     local_refs = _local_refs(requested_fact)
     terms = _terms(requested_fact, local_refs=local_refs)
     expressions = _expressions(requested_fact, local_refs=local_refs)
+    subject_ref = _required_local_ref(
+        requested_fact.subject.set_ref,
+        local_refs=local_refs,
+        kind=FactLocalKind.SET,
+    )
+    grouping_refs = tuple(
+        _required_local_scalar_ref(item, local_refs=local_refs)
+        for item in requested_fact.grouping_refs
+    )
     inferred_types: dict[SemanticValueRef, ValueType] = {
         input_id: item.value_type for input_id, item in inputs.items()
     }
@@ -267,13 +344,10 @@ def analyze_requested_fact(
             domains=domains,
             local_refs=local_refs,
             terms=terms,
+            subject_ref=subject_ref,
+            grouping_refs=grouping_refs,
         )
 
-    subject_ref = _required_local_ref(
-        requested_fact.subject.set_ref,
-        local_refs=local_refs,
-        kind=FactLocalKind.SET,
-    )
     qualification_ref = (
         None
         if requested_fact.qualification_ref is None
@@ -287,23 +361,11 @@ def analyze_requested_fact(
         domains[qualification_ref], subject_ref=subject_ref, terms=terms
     ):
         raise ValueError("qualification is not evaluated for the subject")
-    grouping_refs = tuple(
-        _required_local_scalar_ref(item, local_refs=local_refs)
-        for item in requested_fact.grouping_refs
-    )
     if grouping_refs:
-        grouping_domain = _combine_domains(
-            tuple(domains[item] for item in grouping_refs), terms=terms
+        _validate_grouping_domains(
+            tuple(domains[item] for item in grouping_refs), subject_ref=subject_ref,
+            terms=terms, local_refs=local_refs,
         )
-        if isinstance(grouping_domain, (ConstantDomain, ResultDomain)):
-            raise ValueError("grouping requires row-level values")
-    _apply_aggregate_domains(
-        requested_fact,
-        local_refs=local_refs,
-        grouping_refs=grouping_refs,
-        direct=direct,
-        domains=domains,
-    )
     result_grain = _result_grain(
         requested_fact,
         subject_ref=subject_ref,
@@ -365,6 +427,7 @@ def analyze_requested_fact(
         transitive=transitive,
         terms=terms,
         expressions=expressions,
+        domains=domains,
     )
     association_refs = frozenset(
         ref for ref in source_refs if ref.kind is FactLocalKind.ASSOCIATION
@@ -401,6 +464,52 @@ def analyze_requested_fact(
         selection=requested_fact.selection,
         result_grain=result_grain,
     )
+
+
+def infer_expression_types(
+    index: RequestedFactSemanticIndex,
+    *,
+    fact_type_by_ref: Mapping[FactLocalRef, ValueType],
+) -> Mapping[SemanticValueRef, ValueType]:
+    """Revalidate one expression graph with concrete bound fact types."""
+
+    inferred_types: dict[SemanticValueRef, ValueType] = {
+        input_ref: item.value_type for input_ref, item in index.input_by_ref.items()
+    }
+    for ref, term in index.term_by_ref.items():
+        if isinstance(term, FactTerm):
+            inferred_types[ref] = fact_type_by_ref.get(ref, term.value_type)
+    for node in index.requested_fact.expressions:
+        node_ref = index.fact_local_ref_by_local_id[node.id]
+        dependencies = tuple(
+            _value_ref(
+                value_ref,
+                local_refs=index.fact_local_ref_by_local_id,
+                inputs=index.input_by_ref,
+            )
+            for value_ref in _node_dependency_ids(node)
+        )
+        inferred_types[node_ref] = _infer_node_type(
+            node,
+            dependencies=dependencies,
+            inferred_types=inferred_types,
+            terms=index.term_by_ref,
+        )
+    return MappingProxyType(inferred_types)
+
+
+def semantic_value_type(
+    value: SetTerm | AssociationTerm | FactTerm | ExpressionNode,
+    *,
+    inferred_type: ValueType | None,
+) -> ValueType:
+    """Return the canonical semantic type for a declared value."""
+
+    if isinstance(value, SetTerm):
+        return IdentifierType(value.id)
+    if inferred_type is None:
+        raise ValueError("semantic value lacks an inferred type")
+    return inferred_type
 
 
 def _local_refs(requested_fact: RequestedFact) -> dict[str, FactLocalRef]:
@@ -481,6 +590,8 @@ def _node_dependency_ids(node: ExpressionNode) -> tuple[str, ...]:
         )
     if isinstance(node, Quantify):
         return (node.condition_ref,)
+    if isinstance(node, RelatedRow):
+        return () if node.condition_ref is None else (node.condition_ref,)
     if isinstance(node, Coverage):
         return (
             ()
@@ -541,7 +652,7 @@ def _infer_node_type(
         )
     if isinstance(node, TemporalBucket):
         argument_type = inferred_types[dependencies[0]]
-        if not isinstance(argument_type, (DateType, DateTimeType)):
+        if not isinstance(argument_type, (DateType, DateTimeType, TemporalPointType)):
             raise ValueError("temporal bucket requires Date or DateTime")
         return argument_type
     if isinstance(node, Aggregate):
@@ -556,16 +667,11 @@ def _infer_node_type(
             if node.distinct_argument:
                 raise ValueError("count(SetTerm) cannot use distinct_argument")
             return IntegerType()
-        argument_type = inferred_types[argument]
-        if isinstance(argument_type, CollectionType):
-            raise ValueError("aggregate argument must be row-level scalar")
-        if node.function.value == "count":
-            return IntegerType()
-        if node.function.value in {"sum", "average"} and not is_numeric(argument_type):
-            raise ValueError(f"{node.function.value} requires numeric argument")
-        return argument_type
-    if isinstance(node, Quantify | Coverage):
-        if not isinstance(inferred_types[dependencies[0]], BooleanType):
+        return infer_aggregate_result(node.function.value, inferred_types[argument])
+    if isinstance(node, Quantify | Coverage | RelatedRow):
+        if dependencies and not isinstance(
+            inferred_types[dependencies[0]], BooleanType
+        ):
             raise ValueError("relational condition must be Boolean")
         return BooleanType()
     raise TypeError(f"unsupported semantic expression {type(node).__name__}")
@@ -578,7 +684,19 @@ def _infer_node_domain(
     domains: Mapping[SemanticValueRef, EvaluationDomain],
     local_refs: Mapping[str, FactLocalRef],
     terms: Mapping[FactLocalRef, SetTerm | AssociationTerm | FactTerm],
+    subject_ref: FactLocalRef,
+    grouping_refs: tuple[FactLocalRef, ...],
 ) -> EvaluationDomain:
+    if isinstance(node, BooleanComposition) and node.operator in {
+        BooleanCompositionOperator.AND,
+        BooleanCompositionOperator.OR,
+    }:
+        shared_source = _shared_source_boolean_domain(
+            tuple(domains[item] for item in dependencies),
+            terms=terms,
+        )
+        if shared_source is not None:
+            return shared_source
     if isinstance(node, Aggregate):
         if node.filter_ref is not None:
             filter_domain = domains[dependencies[1]]
@@ -595,7 +713,15 @@ def _infer_node_domain(
                     raise ValueError("aggregate filter has an incompatible row domain")
             else:
                 _combine_domains((domains[argument_ref], filter_domain), terms=terms)
-        return ResultDomain()
+        if not grouping_refs and _aggregate_is_correlated_to_subject(
+            dependencies[0],
+            subject_ref=subject_ref,
+            local_refs=local_refs,
+            domains=domains,
+            terms=terms,
+        ):
+            return RowDomain(subject_ref)
+        return AggregateDomain(grouping_refs)
     if isinstance(node, Quantify):
         over_ref = _required_local_ref(
             node.over_set_ref, local_refs=local_refs, kind=FactLocalKind.SET
@@ -606,12 +732,17 @@ def _infer_node_domain(
             terms=terms,
             destination=over_ref,
         )
-        if not _domain_belongs_to_subject(
-            domains[dependencies[0]], subject_ref=over_ref, terms=terms
+        condition_domain = domains[dependencies[0]]
+        correlated = isinstance(condition_domain, AssociationExpandedDomain) and (
+            {ref.local_id for ref in condition_domain.path_refs}
+            <= set(node.association_refs)
+        )
+        if not correlated and not _domain_belongs_to_subject(
+            condition_domain, subject_ref=over_ref, terms=terms
         ):
             raise ValueError("quantifier condition has the wrong row domain")
         return (
-            RowDomain(over_ref)
+            AggregateDomain(())
             if not node.association_refs
             else RowDomain(
                 _path_source(
@@ -622,6 +753,38 @@ def _infer_node_domain(
                 )
             )
         )
+    if isinstance(node, RelatedRow):
+        related = _required_local_ref(
+            node.set_ref, local_refs=local_refs, kind=FactLocalKind.SET
+        )
+        if len(node.association_refs) < 2:
+            raise ValueError("related row requires at least two associations")
+        association_terms = tuple(
+            terms[
+                _required_local_ref(
+                    ref,
+                    local_refs=local_refs,
+                    kind=FactLocalKind.ASSOCIATION,
+                )
+            ]
+            for ref in node.association_refs
+        )
+        if any(not isinstance(item, AssociationTerm) for item in association_terms):
+            raise ValueError("related row references a non-association")
+        sources = {
+            item.from_set_ref
+            for item in association_terms
+            if isinstance(item, AssociationTerm) and item.to_set_ref == related.local_id
+        }
+        if len(sources) != 1 or len(association_terms) != len(node.association_refs):
+            raise ValueError(
+                "related-row associations must connect one source to one related set"
+            )
+        if dependencies and not _domain_belongs_to_subject(
+            domains[dependencies[0]], subject_ref=related, terms=terms
+        ):
+            raise ValueError("related-row condition has the wrong row domain")
+        return RowDomain(local_refs[next(iter(sources))])
     if isinstance(node, Coverage):
         candidate = _required_local_ref(
             node.candidate_set_ref, local_refs=local_refs, kind=FactLocalKind.SET
@@ -668,6 +831,68 @@ def _infer_node_domain(
     return _combine_domains(tuple(domains[item] for item in dependencies), terms=terms)
 
 
+def _shared_source_boolean_domain(
+    domains: tuple[EvaluationDomain, ...],
+    *,
+    terms: Mapping[FactLocalRef, SetTerm | AssociationTerm | FactTerm],
+) -> RowDomain | None:
+    expanded = tuple(
+        item for item in domains if isinstance(item, AssociationExpandedDomain)
+    )
+    if len(set(expanded)) < 2:
+        return None
+    first_associations = tuple(terms[item.path_refs[0]] for item in expanded)
+    if any(not isinstance(item, AssociationTerm) for item in first_associations):
+        return None
+    source_refs = {
+        item.from_set_ref
+        for item in first_associations
+        if isinstance(item, AssociationTerm)
+    }
+    if len(source_refs) != 1:
+        return None
+    source_ref = next(iter(source_refs))
+    source_local_ref = next(
+        (
+            ref
+            for ref, term in terms.items()
+            if isinstance(term, SetTerm) and term.id == source_ref
+        ),
+        None,
+    )
+    if source_local_ref is None:
+        raise ValueError("association source set is undeclared")
+    rows = tuple(item for item in domains if isinstance(item, RowDomain))
+    if any(item.owner_ref != source_local_ref for item in rows):
+        return None
+    return RowDomain(source_local_ref)
+
+
+def _validate_grouping_domains(
+    domains: tuple[EvaluationDomain, ...],
+    *,
+    subject_ref: FactLocalRef,
+    terms: Mapping[FactLocalRef, SetTerm | AssociationTerm | FactTerm],
+    local_refs: Mapping[str, FactLocalRef],
+) -> None:
+    """A grouping tuple combines connected row keys, not scalar operands."""
+    varying = tuple(item for item in domains if not isinstance(item, ConstantDomain))
+    if not varying or any(not isinstance(item, (RowDomain, AssociationExpandedDomain)) for item in varying):
+        raise ValueError("grouping requires row-level values")
+    for domain in varying:
+        if isinstance(domain, RowDomain):
+            owner = domain.owner_ref
+        else:
+            assert isinstance(domain, AssociationExpandedDomain)
+            association = terms[domain.path_refs[0]]
+            assert isinstance(association, AssociationTerm)
+            owner = local_refs[association.from_set_ref]
+        if owner != subject_ref and not _unique_association_path_refs(
+            subject_ref, destination=owner, terms=terms, local_refs=local_refs,
+        ):
+            raise ValueError("grouping has an unrelated row domain")
+
+
 def _combine_domains(
     domains: tuple[EvaluationDomain, ...],
     *,
@@ -687,11 +912,25 @@ def _combine_domains(
     rows = tuple(item for item in nonconstant if isinstance(item, RowDomain))
     if len(set(expanded)) == 1 and rows:
         expansion = expanded[0]
-        first_association = terms[expansion.path_refs[0]]
-        if isinstance(first_association, AssociationTerm) and all(
-            row.owner_ref.local_id == first_association.from_set_ref for row in rows
-        ):
+        members = {
+            member
+            for ref in expansion.path_refs
+            for term in (terms[ref],)
+            if isinstance(term, AssociationTerm)
+            for member in (term.from_set_ref, term.to_set_ref)
+        }
+        if all(row.owner_ref.local_id in members for row in rows):
             return expansion
+    if not expanded and len({row.owner_ref for row in rows}) == 2:
+        owners = {row.owner_ref.local_id for row in rows}
+        connections = tuple(
+            ref
+            for ref, term in terms.items()
+            if isinstance(term, AssociationTerm)
+            and {term.from_set_ref, term.to_set_ref} == owners
+        )
+        if len(connections) == 1:
+            return AssociationExpandedDomain(connections)
     raise ValueError("expression mixes unrelated evaluation domains")
 
 
@@ -783,13 +1022,13 @@ def _validate_result_surfaces(
             ref, result_grain=result_grain, grouping_refs=grouping_refs, domains=domains
         )
     if (
-        isinstance(requested_fact.selection, (FirstRankWithTies, TakeWithBoundaryTies))
+        isinstance(requested_fact.selection, (FirstRankWithTies, TakeWithBoundaryTies, PositionWithTies))
         and not requested_fact.ordering
     ):
         raise ValueError("bounded selection requires ordering")
     if isinstance(result_grain, Singleton) and requested_fact.ordering:
         raise ValueError("scalar result cannot be ordered")
-    if isinstance(requested_fact.selection, TakeWithBoundaryTies):
+    if isinstance(requested_fact.selection, (TakeWithBoundaryTies, PositionWithTies)):
         input_term = inputs.get(requested_fact.selection.limit_input_ref)
         if input_term is None or not isinstance(input_term.value_type, IntegerType):
             raise ValueError("take limit must reference an integer input")
@@ -800,11 +1039,6 @@ def _validate_result_surfaces(
             item.expression_ref for item in requested_fact.outputs
         ):
             raise ValueError("distinct_by must equal the complete output tuple")
-        if any(
-            item.expression_ref not in requested_fact.distinct_by
-            for item in requested_fact.ordering
-        ):
-            raise ValueError("distinct ordering must reference a projected value")
     del inferred_types
 
 
@@ -827,28 +1061,39 @@ def _validate_result_ref(
         raise ValueError("row result contains a whole-population aggregate")
 
 
-def _apply_aggregate_domains(
-    requested_fact: RequestedFact,
+def _aggregate_is_correlated_to_subject(
+    argument_ref: SemanticValueRef,
     *,
+    subject_ref: FactLocalRef,
     local_refs: Mapping[str, FactLocalRef],
-    grouping_refs: tuple[FactLocalRef, ...],
-    direct: Mapping[FactLocalRef, frozenset[SemanticValueRef]],
-    domains: dict[SemanticValueRef, EvaluationDomain],
-) -> None:
-    aggregate_domain = AggregateDomain(grouping_refs)
-    for node in requested_fact.expressions:
-        node_ref = local_refs[node.id]
-        if isinstance(node, Aggregate):
-            domains[node_ref] = aggregate_domain
-            continue
-        dependency_domains = tuple(domains[item] for item in direct[node_ref])
-        if any(isinstance(item, AggregateDomain) for item in dependency_domains):
-            if any(
-                not isinstance(item, (AggregateDomain, ConstantDomain))
-                for item in dependency_domains
-            ):
-                raise ValueError("expression mixes aggregate and row domains")
-            domains[node_ref] = aggregate_domain
+    domains: Mapping[SemanticValueRef, EvaluationDomain],
+    terms: Mapping[FactLocalRef, SetTerm | AssociationTerm | FactTerm],
+) -> bool:
+    if isinstance(argument_ref, str):
+        return False
+    if argument_ref.kind is FactLocalKind.SET:
+        argument_set_ref = argument_ref
+    else:
+        domain = domains[argument_ref]
+        if isinstance(domain, AssociationExpandedDomain):
+            return _domain_belongs_to_subject(
+                domain,
+                subject_ref=subject_ref,
+                terms=terms,
+            )
+        if not isinstance(domain, RowDomain):
+            return False
+        argument_set_ref = domain.owner_ref
+    if argument_set_ref == subject_ref:
+        return False
+    return bool(
+        _unique_association_path_refs(
+            subject_ref,
+            destination=argument_set_ref,
+            terms=terms,
+            local_refs=local_refs,
+        )
+    )
 
 
 def _qualification_node(
@@ -893,6 +1138,11 @@ def _boolean_requirements(
                 node.condition_ref,
                 BooleanRequirementUseSite.QUANTIFIER_CONDITION,
             )
+        elif isinstance(node, RelatedRow) and node.condition_ref is not None:
+            scoped = (
+                node.condition_ref,
+                BooleanRequirementUseSite.QUANTIFIER_CONDITION,
+            )
         elif isinstance(node, Coverage):
             if node.required_member_condition_ref is not None:
                 required_condition = normalize_qualification(
@@ -917,12 +1167,6 @@ def _boolean_requirements(
             root_ref=local_refs[condition_ref].token,
             formulas=formulas,
         )
-        if use_site is BooleanRequirementUseSite.AGGREGATE_FILTER:
-            condition = relative_dnf(
-                requested_fact.id,
-                given=qualification,
-                condition=condition,
-            )
         requirements.extend(
             boolean_requirements(
                 requested_fact_id=requested_fact.id,
@@ -997,7 +1241,7 @@ def _input_use_sites(
                     reference_fact_ref=reference_fact_ref,
                 )
             )
-    if isinstance(requested_fact.selection, TakeWithBoundaryTies):
+    if isinstance(requested_fact.selection, (TakeWithBoundaryTies, PositionWithTies)):
         input_ref = requested_fact.selection.limit_input_ref
         denotation = _required_input_denotation(
             input_ref, input_denotations=input_denotations
@@ -1073,9 +1317,7 @@ def _output_requirement(
     transitive: Mapping[FactLocalRef, frozenset[SemanticValueRef]],
 ) -> OutputRequirement:
     output = requested_fact.outputs[output_index - 1]
-    output_ref = FactLocalRef(
-        requested_fact.id, FactLocalKind.OUTPUT, f"output_{output_index}"
-    )
+    output_ref = FactLocalRef(requested_fact.id, FactLocalKind.OUTPUT, output.id)
     value_ref = _value_ref(output.expression_ref, local_refs=local_refs, inputs=inputs)
     dependencies = (
         frozenset({value_ref})
@@ -1096,8 +1338,27 @@ def _source_requirements(
     transitive: Mapping[FactLocalRef, frozenset[SemanticValueRef]],
     terms: Mapping[FactLocalRef, SetTerm | AssociationTerm | FactTerm],
     expressions: Mapping[FactLocalRef, ExpressionNode],
+    domains: Mapping[SemanticValueRef, EvaluationDomain],
 ) -> frozenset[FactLocalRef]:
+    # Scalar domains can be independent. Row-valued surfaces still need a
+    # declared path connecting their owner to the requested subject.
+    row_surfaces = (
+        *tuple(item.value_ref for item in output_requirements),
+        *grouping_refs,
+        *tuple(local_refs[item.expression_ref] for item in ordering),
+    )
+    for surface in row_surfaces:
+        domain = domains.get(surface)
+        if isinstance(domain, RowDomain) and domain.owner_ref != subject_ref:
+            if not _unique_association_path_refs(
+                subject_ref,
+                destination=domain.owner_ref,
+                terms=terms,
+                local_refs=local_refs,
+            ):
+                raise ValueError("result surface has an unrelated row domain")
     refs: set[FactLocalRef] = {subject_ref, *grouping_refs}
+    explicitly_connected_sets: set[FactLocalRef] = set()
     for requirement in output_requirements:
         refs.update(
             item for item in requirement.dependencies if isinstance(item, FactLocalRef)
@@ -1129,6 +1390,11 @@ def _source_requirements(
         expression_node = expressions.get(ref)
         if isinstance(expression_node, Quantify):
             refs.add(local_refs[expression_node.over_set_ref])
+            refs.update(local_refs[item] for item in expression_node.association_refs)
+        elif isinstance(expression_node, RelatedRow):
+            related_set_ref = local_refs[expression_node.set_ref]
+            refs.add(related_set_ref)
+            explicitly_connected_sets.add(related_set_ref)
             refs.update(local_refs[item] for item in expression_node.association_refs)
         elif isinstance(expression_node, Coverage):
             refs.update(
@@ -1164,7 +1430,11 @@ def _source_requirements(
                 if association_ref is not None:
                     expanded.add(association_ref)
     for ref in tuple(expanded):
-        if ref.kind is FactLocalKind.SET and ref != subject_ref:
+        if (
+            ref.kind is FactLocalKind.SET
+            and ref != subject_ref
+            and ref not in explicitly_connected_sets
+        ):
             expanded.update(
                 _unique_association_path_refs(
                     subject_ref,
@@ -1247,9 +1517,11 @@ def _unique_association_path_refs(
             )
 
     visit(source, visited=frozenset((source,)), path=())
+    if not paths:
+        return ()
     if len(paths) != 1:
         raise ValueError(
-            "source-backed set requires one declared association path from subject"
+            "source-backed set has ambiguous association paths from subject"
         )
     return paths[0]
 

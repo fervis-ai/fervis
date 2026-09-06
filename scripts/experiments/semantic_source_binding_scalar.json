@@ -1,5 +1,0 @@
-{
-  "kind": "scalar_binding",
-  "question": "How many measurements exceed 100?",
-  "operand": "100"
-}

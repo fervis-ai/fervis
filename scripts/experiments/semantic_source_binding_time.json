@@ -1,7 +1,0 @@
-{
-  "kind": "time_binding",
-  "question": "How many events occurred in March 2026?",
-  "operand": "March 2026",
-  "expected_start": "2026-03-01",
-  "expected_end": "2026-03-31"
-}

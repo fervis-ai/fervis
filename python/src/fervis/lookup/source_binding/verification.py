@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
+from fervis.lookup.available_sources import SourceChoiceSurfaceKind
 
 from fervis.lookup.qualification import (
     BooleanAtomRef,
@@ -17,11 +18,12 @@ from fervis.lookup.question_contract import (
     FactLocalKind,
     FactLocalRef,
     FactTerm,
-    RawDataRecord,
     SubjectRows,
 )
+from fervis.lookup.question_contract.analysis import infer_expression_types
 from fervis.lookup.relation_catalog.row_sources import (
     row_source_type_supports_semantic_type,
+    semantic_type_for_row_source_type,
 )
 from fervis.lookup.semantic_types import IdentifierType
 from fervis.lookup.source_binding.model import (
@@ -29,6 +31,7 @@ from fervis.lookup.source_binding.model import (
     SemanticSourceBindingRequest,
     SourceBindingPlan,
     SourceMechanic,
+    SourceMechanicKind,
 )
 from fervis.types.enums import StrEnum
 
@@ -72,11 +75,20 @@ def verify_source_strategy(
     *,
     request: SemanticSourceBindingRequest,
 ) -> SourceStrategyVerificationOutcome:
+    try:
+        request = request.for_bindings(
+            plan.set_bindings, plan.fact_bindings, plan.association_bindings,
+        )
+    except ValueError:
+        return _failure(SourceStrategyVerificationFailureReason.INVALID_BINDING)
     if plan.strategy != request.strategy:
         return _failure(SourceStrategyVerificationFailureReason.INVALID_BINDING)
     output_failure = _verify_output_dependencies(plan, request=request)
     if output_failure is not None:
         return output_failure
+    expression_failure = _verify_concrete_expression_types(plan, request=request)
+    if expression_failure is not None:
+        return expression_failure
     identity_failure = _verify_set_identities(plan, request=request)
     if identity_failure is not None:
         return identity_failure
@@ -161,6 +173,65 @@ def _verify_set_identities(
     return None
 
 
+def _verify_concrete_expression_types(
+    plan: SourceBindingPlan,
+    *,
+    request: SemanticSourceBindingRequest,
+) -> SourceStrategyVerificationFailure | None:
+    for branch in request.strategy.branches:
+        concrete_types = {}
+        for ref, term in request.index.term_by_ref.items():
+            if not isinstance(term, FactTerm) or isinstance(
+                term.value_type, IdentifierType
+            ):
+                continue
+            realizations = tuple(
+                item
+                for item in plan.fact_bindings.get(ref.token, ())
+                if item.branch_id == branch.branch_id
+            )
+            if not realizations:
+                continue
+            if len(realizations) != 1 or len(realizations[0].field_refs) != 1:
+                return _failure(
+                    SourceStrategyVerificationFailureReason.INVALID_BINDING,
+                    ref.token,
+                )
+            realization = realizations[0]
+            source = request.source_catalog.source(realization.source_ref)
+            field = next(
+                (
+                    item
+                    for item in source.fields
+                    if item.field_ref == realization.field_refs[0]
+                ),
+                None,
+            )
+            if field is None:
+                return _failure(
+                    SourceStrategyVerificationFailureReason.INVALID_BINDING,
+                    ref.token,
+                )
+            try:
+                concrete_types[ref] = semantic_type_for_row_source_type(field.type)
+            except ValueError:
+                return _failure(
+                    SourceStrategyVerificationFailureReason.INVALID_BINDING,
+                    ref.token,
+                )
+        try:
+            infer_expression_types(
+                request.index,
+                fact_type_by_ref=concrete_types,
+            )
+        except ValueError:
+            return _failure(
+                SourceStrategyVerificationFailureReason.INVALID_BINDING,
+                *(ref.token for ref in concrete_types),
+            )
+    return None
+
+
 def _identity_contract(
     identity_ref: str | None,
     *,
@@ -179,7 +250,7 @@ def _verify_output_dependencies(
 ) -> SourceStrategyVerificationFailure | None:
     branch_ids = {item.branch_id for item in request.strategy.branches}
     required_fact_branches = request.required_fact_branches(
-        plan.invocation_applications
+        plan.invocation_applications, plan.subject_binding
     )
     failed: list[str] = []
     for requirement_ref, realizations in plan.fact_bindings.items():
@@ -263,6 +334,16 @@ def _verify_invocation_completeness(
     request: SemanticSourceBindingRequest,
 ) -> SourceStrategyVerificationFailure | None:
     failed: list[str] = []
+    for owner_ref, realizations in plan.boolean_bindings.items():
+        if any(not request.invocation_preserves_population(owner_ref, branch_id=realization.branch_id)
+               for realization in realizations) and any(
+            mechanic.kind is SourceMechanicKind.INVOCATION_PREDICATE
+            for realization in realizations for mechanic in realization.mechanics
+        ):
+            failed.append(owner_ref)
+    for application in plan.invocation_applications:
+        if application.owner_ref is not None and not request.invocation_preserves_population(application.owner_ref, branch_id=application.branch_id):
+            failed.append(application.owner_ref)
     for branch in request.strategy.branches:
         applied = {
             target.target_ref
@@ -351,26 +432,55 @@ def _subject_guarantee(
         )
     for branch in request.strategy.branches:
         realization = realizations_by_branch[branch.branch_id]
-        expected_surfaces = {
+        allowed_surfaces = {
             surface.surface_ref
             for source_ref in branch.source_refs
             for surface in request.source_catalog.choice_surfaces
             if surface.source_ref == source_ref
         }
-        reviewed_surfaces = {
-            review.surface_ref for review in realization.surface_reviews
-        }
-        if isinstance(obligation, RawDataRecord):
-            if realization.surface_reviews:
-                failed.append(realization.branch_id)
-            continue
-        if (
-            len(reviewed_surfaces) != len(realization.surface_reviews)
-            or reviewed_surfaces != expected_surfaces
-        ):
+        from fervis.lookup.source_binding.membership import membership_scopes
+        from fervis.lookup.source_binding.model import SourceRealization
+        scopes = membership_scopes(SourceRealization(request, plan.set_bindings, plan.fact_bindings, plan.association_bindings))[branch.branch_id]
+        from fervis.lookup.source_binding.occurrences import occurrence_scope
+        occurrences = occurrence_scope(request, plan, branch.branch_id)
+        expected_reviews = {(scope.owner_set_ref, surface.surface_ref) for scope in scopes for surface in scope.surfaces}
+        reviewed = {(review.owner_set_ref, review.surface_ref) for review in realization.surface_reviews}
+        allowed_reviews = expected_reviews | {(None, ref) for ref in allowed_surfaces}
+        if (len(reviewed) != len(realization.surface_reviews)
+            or not expected_reviews <= reviewed or not reviewed <= allowed_reviews):
             failed.append(realization.branch_id)
             continue
         for review in realization.surface_reviews:
+            surface = request.source_catalog.choice_surface(review.surface_ref)
+            def applies(owner_ref):
+                return review.owner_set_ref is None or occurrences.owner_applies(request, owner_ref, source_ref=surface.source_ref, occurrence_ref=occurrences.for_set(review.owner_set_ref).id)
+            if (review.owner_set_ref is None or surface.declared_entity_kind) and any(
+                not choice.baseline_included or choice.explicit_user_override_applies for choice in review.choice_reviews
+            ):
+                failed.append(review.surface_ref)
+            explicit_choices = set()
+            for choice in review.choice_reviews:
+                allowed = set(request.explicit_subject_requirement_refs(
+                    request.source_catalog.choice_value(choice.choice_ref), branch_id=branch.branch_id))
+                allowed.update(application.owner_ref for application in plan.invocation_applications
+                    if application.branch_id == branch.branch_id and application.value_ref == choice.choice_ref
+                    and application.owner_ref in {item.requirement_ref for item in request.index.boolean_requirements})
+                selected = set(choice.selection_requirement_refs)
+                if not selected <= allowed or not all(applies(owner) for owner in selected) or choice.explicit_user_override_applies != (bool(selected) and not choice.baseline_included):
+                    failed.append(choice.choice_ref)
+                if selected:
+                    explicit_choices.add(choice.choice_ref)
+            predicate_choices = {application.value_ref for application in plan.invocation_applications
+                if application.branch_id == branch.branch_id and application.source_ref == surface.source_ref
+                and application.owner_ref in {item.requirement_ref for item in request.index.boolean_requirements}
+                and applies(application.owner_ref)
+                and any(target.target_ref == surface.target_ref for target in application.target_applications)}
+            expected_choices = predicate_choices if surface.kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER and predicate_choices else {
+                choice.choice_ref for choice in review.choice_reviews if choice.included}
+            if set(review.included_choice_refs) != expected_choices:
+                failed.append(review.surface_ref)
+            if expected_choices != {choice.choice_ref for choice in review.choice_reviews} and not review.mechanics:
+                failed.append(review.surface_ref)
             excluded_choice_count = sum(
                 not choice.included
                 for choice in review.choice_reviews
@@ -383,6 +493,8 @@ def _subject_guarantee(
                 for mechanic in review.mechanics
                 for ref in mechanic.contract_evidence_refs
             )
+    from fervis.lookup.source_binding.parameter_coverage import uncovered_parameter_scopes
+    failed.extend(uncovered_parameter_scopes(plan, request=request))
     if failed:
         return _failure(
             SourceStrategyVerificationFailureReason.INSUFFICIENT_COMPLETENESS,

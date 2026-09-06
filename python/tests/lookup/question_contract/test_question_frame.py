@@ -9,7 +9,10 @@ from fervis.lookup.question_contract.parser import (
     ParsedSemanticQuestionMeaning,
     parse_semantic_question_frame,
 )
+from fervis.lookup.question_contract.prompt import SemanticQuestionContractTurnPrompt
+from fervis.lookup.question_contract.request import QuestionContractRequest
 from fervis.lookup.semantic_types import CollectionType, TemporalScopeType, TextType
+from fervis.lookup.turn_prompts import build_turn_prompt_context
 
 
 def test_question_frame_parses_requested_meaning_and_identity_once() -> None:
@@ -39,6 +42,41 @@ def test_question_frame_parses_requested_meaning_and_identity_once() -> None:
     assert parsed.input_denotations[0].input_ref == "i1"
     assert parsed.input_denotations[0].kind is InputDenotationKind.IDENTITY_REFERENCE
     assert parsed.input_denotations[0].denoted_instance_kind == "area"
+
+
+def test_question_frame_rejects_resolved_input_ref_as_identity_value() -> None:
+    payload = _frame_payload(
+        supplied_values=[
+            {
+                "meaning": "Nadia Wanjiku",
+                "denotation_basis": "Prior context resolves she to Nadia Wanjiku.",
+                "entity_reference": {
+                    "instance_kind": "staff",
+                    "value": {
+                        "operands": ["conversation.v1"],
+                        "origin": {
+                            "kind": "conversation_resolution",
+                            "resolved_input_ref": "conversation.v1",
+                        },
+                    },
+                },
+            }
+        ]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="conversation input operand must copy its resolved value",
+    ):
+        parse_semantic_question_frame(
+            payload,
+            question_context_texts=(
+                "Where did she work on her first two shifts?",
+            ),
+            conversation_text_by_resolved_input_ref={
+                "conversation.v1": "Nadia Wanjiku",
+            },
+        )
 
 
 def test_question_frame_parses_entity_reference_without_repeated_identity_type() -> None:
@@ -94,16 +132,20 @@ def test_question_frame_rejects_a_missing_supplied_value_branch() -> None:
 def test_question_frame_lowers_alternatives_to_one_collection_input() -> None:
     parsed = parse_semantic_question_frame(
         _frame_payload(
-            result_kind="grouped_results",
+            result_kind="one_per_group",
             grouping_meanings=["staff member identity"],
-            answer_values=[
+            returned_meanings=[
                 {
-                    "value_ref": "v1",
+                    "meaning_ref": "r1",
+                    "meaning": "staff member identity",
+                    "origin": {"kind": "question"},
+                },
+                {
+                    "meaning_ref": "r2",
                     "meaning": "sale count",
                     "origin": {"kind": "question"},
                 }
             ],
-            returned_value_refs=["v1"],
             supplied_values=[
                 {
                     "meaning": "the specified staff members",
@@ -129,6 +171,61 @@ def test_question_frame_lowers_alternatives_to_one_collection_input() -> None:
     assert isinstance(parsed.inputs[0].value_type.element_type, TextType)
 
 
+def test_question_frame_preserves_group_key_ordering_owner() -> None:
+    parsed = parse_semantic_question_frame(
+        _frame_payload(
+            result_kind="one_per_group",
+            grouping_meanings=["event day"],
+            ordering=[
+                {
+                    "ownership_basis": "The existing day key determines order.",
+                    "kind": "group_ref",
+                    "group_ref": "g1",
+                }
+            ],
+        ),
+        question_context_texts=("Return daily event counts ordered by day.",),
+    )
+
+    assert isinstance(parsed, ParsedSemanticQuestionMeaning)
+    assert parsed.answer_requests[0].ordering_group_refs == ("g1",)
+
+
+def test_question_frame_keeps_distinct_values_with_the_same_meaning() -> None:
+    parsed = parse_semantic_question_frame(
+        _frame_payload(
+            supplied_values=[
+                {
+                    "meaning": "staff member id",
+                    "denotation_basis": "The first UUID identifies one staff member.",
+                    "entity_reference": {
+                        "instance_kind": "staff member",
+                        "value": {
+                            "operands": ["staff-a"],
+                            "origin": {"kind": "question"},
+                        },
+                    },
+                },
+                {
+                    "meaning": "staff member id",
+                    "denotation_basis": "The second UUID identifies one staff member.",
+                    "entity_reference": {
+                        "instance_kind": "staff member",
+                        "value": {
+                            "operands": ["staff-b"],
+                            "origin": {"kind": "question"},
+                        },
+                    },
+                },
+            ]
+        ),
+        question_context_texts=("Compare staff-a and staff-b.",),
+    )
+
+    assert isinstance(parsed, ParsedSemanticQuestionMeaning)
+    assert tuple(item.operand for item in parsed.inputs) == ("staff-a", "staff-b")
+
+
 def test_question_frame_parses_temporal_scope_without_second_classification() -> None:
     parsed = parse_semantic_question_frame(
         _frame_payload(
@@ -137,9 +234,9 @@ def test_question_frame_parses_temporal_scope_without_second_classification() ->
                     "meaning": "the requested period",
                     "denotation_basis": "Today supplies a time period.",
                     "non_entity_value": {
+                        "kind": "temporal_scope",
                         "value": {
                             "operands": ["today"],
-                            "value_type": {"kind": "temporal_scope"},
                             "origin": {"kind": "question"},
                         }
                     },
@@ -157,25 +254,38 @@ def test_question_frame_parses_temporal_scope_without_second_classification() ->
 
 def test_question_frame_owns_bounded_selection_limit_once() -> None:
     payload = _frame_payload()
-    request = payload["outcome"]["answer_requests"][0]
-    request["result_kind"] = "qualifying_instances"
-    request["returned_candidate_identity"] = {
-        "meaning": "observation identity",
-        "origin": {"kind": "question"},
-    }
-    request["returned_result"] = {"kind": "identities"}
-    request["returned_value_refs"] = []
-    request["answer_values"] = [
-        {
-            "value_ref": "v1",
-            "meaning": "measured value",
+    result = payload["outcome"]["answer_requests"][0]["request"]["result"]
+    result.clear()
+    result.update({
+        "kind": "one_result_per_qualifying_row",
+        "result_candidates": {
+            "instance_kind": "observations",
             "origin": {"kind": "question"},
-        }
-    ]
-    request["ordering_value_refs"] = ["v1"]
-    request["selection"] = {
-        "kind": "take_with_boundary_ties",
-        "limit": {
+        },
+        "projection": {
+            "projection_basis": "Return each qualifying observation identity.",
+            "candidate_identity": "returned",
+            "explicitly_requested_values": [],
+        },
+        "result_order": {
+            "ordering_request_basis": "Measured value determines result order.",
+            "ordering": {
+                "kind": "ordered_by",
+                "values": [
+                    {
+                        "ownership_basis": "Measured value is not returned.",
+                        "kind": "unreturned_ordering_meaning",
+                        "meaning": "measured value",
+                        "origin": {"kind": "question"},
+                    }
+                ],
+            },
+            "selection": {"kind": "take_with_boundary_ties"},
+        },
+    })
+    payload["outcome"]["supplied_values"]["selection_limits"] = [
+        {
+            "answer_request_number": 1,
             "meaning": "requested number of results",
             "denotation_basis": "Five supplies the result limit.",
             "non_entity_value": {
@@ -185,8 +295,8 @@ def test_question_frame_owns_bounded_selection_limit_once() -> None:
                     "origin": {"kind": "question"},
                 }
             },
-        },
-    }
+        }
+    ]
     parsed = parse_semantic_question_frame(
         payload,
         question_context_texts=(
@@ -199,20 +309,31 @@ def test_question_frame_owns_bounded_selection_limit_once() -> None:
     assert parsed.answer_requests[0].selection_limit_input_ref == "i1"
 
 
-def test_question_frame_owns_row_identity_ordering_and_projection_once() -> None:
+def test_question_frame_preserves_returned_and_ordering_meanings_once() -> None:
     parsed = parse_semantic_question_frame(
         _frame_payload(
-            result_kind="grouped_results",
+            result_kind="one_per_group",
             grouping_meanings=["salesperson identity"],
-            answer_values=[
+                projection={
+                    "projection_basis": "Return each salesperson and their revenue.",
+                    "returned_grouping_keys": "all",
+                    "explicitly_requested_values": [
+                    {
+                        "value_ref": "v1",
+                        "value_kind_basis": "Revenue is a requested value.",
+                        "value_kind": "value",
+                        "meaning": "revenue",
+                        "origin": {"kind": "question"},
+                    }
+                ],
+            },
+            ordering=[
                 {
+                    "ownership_basis": "Revenue is returned and orders the groups.",
+                    "kind": "requested_value_ref",
                     "value_ref": "v1",
-                    "meaning": "revenue",
-                    "origin": {"kind": "question"},
-                },
+                }
             ],
-            returned_value_refs=["v1"],
-            ordering_value_refs=["v1"],
         ),
         question_context_texts=(
             "Which salesperson made the most revenue, and how much?",
@@ -221,7 +342,6 @@ def test_question_frame_owns_row_identity_ordering_and_projection_once() -> None
 
     assert isinstance(parsed, ParsedSemanticQuestionMeaning)
     request = parsed.answer_requests[0]
-    assert request.row_identity_origin is None
     assert tuple(item.meaning for item in request.grouping_origins) == (
         "salesperson identity",
     )
@@ -230,6 +350,75 @@ def test_question_frame_owns_row_identity_ordering_and_projection_once() -> None
         "salesperson identity",
         "revenue",
     )
+    assert request.output_kinds == ("identity", "value")
+
+
+def test_relational_turn_receives_question_frame_decision_bases() -> None:
+    question = "Which salesperson made the most revenue, and how much?"
+    parsed = parse_semantic_question_frame(
+        _frame_payload(
+            result_kind="one_per_group",
+            grouping_meanings=["salesperson identity"],
+            ordering=[
+                {
+                    "ownership_basis": "Revenue orders the groups.",
+                    "kind": "unreturned_ordering_meaning",
+                    "meaning": "revenue",
+                    "origin": {"kind": "question"},
+                }
+            ],
+        ),
+        question_context_texts=(question,),
+    )
+
+    assert isinstance(parsed, ParsedSemanticQuestionMeaning)
+    prompt = SemanticQuestionContractTurnPrompt(
+        QuestionContractRequest(
+            current_question=question,
+            conversation_context={},
+        ),
+        meaning=parsed,
+    ).to_model_invocation(
+        build_turn_prompt_context(
+            current_question=question,
+            conversation_context={},
+        )
+    ).prompt_text
+
+    assert '"return_request_basis": "The answer asks for the declared result."' in prompt
+    assert '"relational_shape_basis": "This is an ordinary relational request."' in prompt
+    assert (
+        '"result_grain_basis": "The declared result grain answers the question."'
+        in prompt
+    )
+    assert '"ordering_request_basis": "The declared values determine order."' in prompt
+    assert "Grouping assigns a key to every qualifying row." in prompt
+    assert "Qualification selects the requested keys." in prompt
+
+
+def test_question_frame_preserves_temporal_grouping_value_shape() -> None:
+    question = "What was total revenue on each date?"
+    payload = _frame_payload(
+        result_kind="one_per_group",
+        grouping_meanings=["date"],
+    )
+    [grouping] = payload["outcome"]["answer_requests"][0]["request"]["result"][
+        "grouping_meanings"
+    ]
+    grouping["grouping_kind"] = "non_identity_value"
+    grouping["grouping_value"] = {
+        "kind": "temporal_bucket",
+        "grain": "day",
+    }
+
+    parsed = parse_semantic_question_frame(
+        payload,
+        question_context_texts=(question,),
+    )
+
+    assert isinstance(parsed, ParsedSemanticQuestionMeaning)
+    [request] = parsed.answer_requests
+    assert request.grouping_value_shapes == (("temporal_bucket", "day"),)
 
 
 def test_question_frame_returns_typed_clarification() -> None:
@@ -254,64 +443,148 @@ def test_question_frame_returns_typed_clarification() -> None:
 
 def _frame_payload(
     *,
-    result_kind: str = "scalar",
+    result_kind: str = "one_for_population",
     grouping_meanings: list[str] | None = None,
-    answer_values: list[dict[str, object]] | None = None,
+    returned_meanings: list[dict[str, object]] | None = None,
+    projection: dict[str, object] | None = None,
     supplied_values: list[dict[str, object]] | None = None,
-    returned_value_refs: list[str] | None = None,
-    ordering_value_refs: list[str] | None = None,
+    ordering: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    values = answer_values or [
+    results = returned_meanings or [
         {
-            "value_ref": "v1",
+            "meaning_ref": "r1",
             "meaning": "store count",
             "origin": {"kind": "question"},
         }
     ]
-    request: dict[str, object] = {
-        "result_kind": result_kind,
-        "qualifying_row_kind": {
-            "meaning": "store",
+    provider_result_kind = {
+        "one_for_population": "one_value_for_population",
+        "one_per_candidate": "one_result_per_qualifying_row",
+        "one_per_group": "one_result_per_group",
+    }[result_kind]
+    result: dict[str, object] = {
+        "kind": provider_result_kind,
+        {
+            "one_for_population": "population_rows",
+            "one_per_candidate": "result_candidates",
+            "one_per_group": "grouped_observation_rows",
+        }[result_kind]: {
+            "instance_kind": "store",
             "origin": {"kind": "question"},
         },
-        "grouping_meanings": [
+    }
+    if result_kind == "one_per_group":
+        result["grouping_meanings"] = [
             {
+                "group_ref": f"g{index}",
+                "grouping_basis": "The related staff identity defines each group.",
                 "meaning": meaning,
                 "origin": {"kind": "question"},
                 "grouping_kind": "related_entity_identity",
             }
-            for meaning in grouping_meanings or []
-        ],
-        "return_request_basis": "The answer asks for the declared result.",
-        "returned_result": {
-            "kind": (
-                "values"
-                if result_kind == "scalar"
-                else "identities_and_values"
-                if returned_value_refs
-                else "identities"
-            )
-        },
-        "answer_values": values,
-        "returned_value_refs": (
-            ["v1"]
-            if result_kind == "scalar"
-            else returned_value_refs or []
-        ),
-        "ordering_value_refs": ordering_value_refs or [],
-        "selection": {"kind": "all_results"},
-        "universal_shape": "none",
-    }
-    if result_kind == "qualifying_instances":
-        request["returned_candidate_identity"] = {
-            "meaning": "store identity",
-            "origin": {"kind": "question"},
+            for index, meaning in enumerate(grouping_meanings or [], start=1)
+        ]
+    if result_kind == "one_for_population":
+        result["returned_meanings"] = results
+    else:
+        result["projection"] = projection or {
+            "projection_basis": "Return the result identity.",
+            **(
+                {
+                    "returned_grouping_keys": "all",
+                    "explicitly_requested_values": [],
+                }
+                if result_kind == "one_per_group"
+                else {
+                    "candidate_identity": "returned",
+                    "explicitly_requested_values": [],
+                }
+            ),
         }
+    result["result_order"] = {
+        "ordering_request_basis": (
+            "The declared values determine order." if ordering else "No order is requested."
+        ),
+        "ordering": (
+            {"kind": "ordered_by", "values": ordering}
+            if ordering
+            else {"kind": "no_ordering_requested"}
+        ),
+        "selection": {"kind": "all_results"},
+    }
+    request: dict[str, object] = {
+        "return_request_basis": "The answer asks for the declared result.",
+        "relational_shape_basis": "This is an ordinary relational request.",
+        "request": {
+            "relational_shape": "ordinary",
+            "result_grain_basis": "The declared result grain answers the question.",
+            "result": result,
+        },
+    }
+    operands = []
+    for item in supplied_values or []:
+        normalized = dict(item)
+        reference = normalized.get("entity_reference")
+        if isinstance(reference, dict):
+            reference = dict(reference)
+            value = reference.get("value")
+            if isinstance(value, dict) and isinstance(value.get("operands"), list):
+                identity_values = value["operands"]
+                reference["value"] = (
+                    {
+                        "kind": "single_identity",
+                        "identity_value": identity_values[0],
+                        "origin": value.get("origin"),
+                    }
+                    if len(identity_values) == 1
+                    else {
+                        "kind": "identity_alternatives",
+                        "identity_values": identity_values,
+                        "origin": value.get("origin"),
+                    }
+                )
+                normalized["entity_reference"] = reference
+        operands.append(normalized)
     return {
         "decision_basis": "The question states one complete factual request.",
         "outcome": {
             "kind": "question_meaning",
             "answer_requests": [request],
-            "supplied_values": supplied_values or [],
+            "supplied_values": {
+                "operands": operands,
+                "selection_limits": [],
+            },
+            "question_input_inventory_check": {
+                "all_input_like_phrases_declared": True,
+            },
         },
     }
+
+
+@pytest.mark.parametrize('result_kind', ('one_per_candidate', 'one_per_group'))
+def test_related_entity_output_obeys_declared_result_grain(result_kind):
+    from jsonschema import ValidationError, validate
+    from fervis.lookup.question_contract.schema import build_semantic_question_frame_schema
+
+    grouped = result_kind == 'one_per_group'
+    projection = {
+        'projection_basis': 'Return the related person.',
+        **({'returned_grouping_keys': 'all'} if grouped else {'candidate_identity': 'returned'}),
+        'explicitly_requested_values': [{
+            'value_ref': 'v1', 'value_kind_basis': 'An individual related person.',
+            'value_kind': 'related_entity', 'meaning': 'worker',
+            'origin': {'kind': 'question'},
+        }],
+    }
+    payload = _frame_payload(result_kind=result_kind,
+                             grouping_meanings=['store'] if grouped else None,
+                             projection=projection)
+    schema = build_semantic_question_frame_schema()
+    if grouped:
+        with pytest.raises(ValidationError):
+            validate(payload, schema)
+        with pytest.raises(ValueError, match='grouped projection cannot return an ungrouped entity'):
+            parse_semantic_question_frame(payload, question_context_texts=('List workers at each store.',))
+    else:
+        validate(payload, schema)
+        assert isinstance(parse_semantic_question_frame(payload, question_context_texts=('List workers at each store.',)), ParsedSemanticQuestionMeaning)

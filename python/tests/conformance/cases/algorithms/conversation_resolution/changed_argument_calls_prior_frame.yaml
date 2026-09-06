@@ -14,6 +14,8 @@ input:
     - frame_id: request:1
       source_ids: [prior_question]
       parts:
+        - {part_id: subject, kind: subject, text: sales}
+        - {part_id: output, kind: requested_output, text: sales count}
         - {part_id: location, kind: input, text: Acacia Mall, source_ref: location, value_type: identity}
         - {part_id: time, kind: input, text: today, source_ref: time, value_type: time}
       callable:
@@ -30,12 +32,15 @@ input:
     outcome:
       kind: resolved
       resolution_basis: Current meaning and retained prior meaning form the resolved question.
-      contextualized_question: How many sales did we make at Pivot Mall today?
       clauses:
         - current_clause_text: What about Pivot Mall?
           occurrence: 1
+          request_shape_basis: The prior frame supplies the omitted sales subject and requested count.
+          request_shape_source: prior_frame_supplies_omitted_request_parts
           resolved_text: How many sales did we make at Pivot Mall today?
-          retained_frame_parts: []
+          retained_frame_parts:
+            - {kind: frame_part, frame_id: request:1, part_id: subject}
+            - {kind: frame_part, frame_id: request:1, part_id: output}
           values:
             - value_id: current_location
               resolved_text: Pivot Mall

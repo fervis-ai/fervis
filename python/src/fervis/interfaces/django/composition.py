@@ -13,7 +13,7 @@ from fervis.model_io.backbone.factory import (
     reset_provider_backbone_for_tests,
 )
 from fervis.observability.django import DjangoObservabilityQuery
-from fervis.questions.contracts import AskRequestLimits
+from fervis.questions.contracts import AskRequestLimits, DEFAULT_MAX_THINKING_TOKENS
 
 if TYPE_CHECKING:
     from fervis.lookup.orchestration.service import LookupService
@@ -58,7 +58,7 @@ def lookup_conversation_context(
 def question_run_request_limits() -> AskRequestLimits:
     return AskRequestLimits(
         max_budget_usd=getattr(settings, "FERVIS_MAX_REQUEST_BUDGET_USD", 10.0),
-        max_thinking_tokens=getattr(settings, "FERVIS_MAX_THINKING_TOKENS", 8192),
+        max_thinking_tokens=getattr(settings, "FERVIS_MAX_THINKING_TOKENS", DEFAULT_MAX_THINKING_TOKENS),
     )
 
 

@@ -1,14 +1,14 @@
 id: finite_choice_normal_guard_role_match_excludes_value
-description: A normally excluded finite-choice state stays outside the requested population when no exact user requirement selects it.
+description: A normally excluded finite-choice state stays outside the requested population
+  when no exact user requirement selects it.
 migrates:
-  - python/tests/conformance/cases/algorithms/source_binding/finite_choice_normal_guard_role_match_excludes_value.yaml
+- python/tests/conformance/cases/algorithms/source_binding/finite_choice_normal_guard_role_match_excludes_value.yaml
 kind: algorithm
 algorithm: semantic.source_binding
 input:
   mode: subject_choice_membership
-  choice_included: true
-  matched_excluded_role: CANCELED_OR_VOIDED
   explicit_user_override_applies: false
+  baseline_included: false
 expect:
   result_contains:
     included: false

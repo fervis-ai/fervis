@@ -68,6 +68,26 @@ class TemporalScopeType:
 
 
 @dataclass(frozen=True)
+class UnspecifiedScalarType:
+    """A projected scalar whose source capability is not otherwise constrained."""
+
+
+@dataclass(frozen=True)
+class NumericType:
+    """A scalar required to support numeric operations."""
+
+
+@dataclass(frozen=True)
+class OrderableType:
+    """A scalar required to support deterministic ordering."""
+
+
+@dataclass(frozen=True)
+class TemporalPointType:
+    """A date or datetime value required by a temporal operation."""
+
+
+@dataclass(frozen=True)
 class UnitlessMeasure:
     pass
 
@@ -173,6 +193,10 @@ ScalarType: TypeAlias = (
     | DurationType
     | IdentifierType
     | TemporalScopeType
+    | UnspecifiedScalarType
+    | NumericType
+    | OrderableType
+    | TemporalPointType
 )
 
 
@@ -199,11 +223,15 @@ def value_type_kind(value_type: ValueType) -> str:
         DecimalType: "decimal",
         DurationType: "duration",
         IdentifierType: "identifier",
+        UnspecifiedScalarType: "value",
+        NumericType: "number",
+        OrderableType: "orderable",
+        TemporalPointType: "temporal",
     }[type(value_type)]
 
 
 def is_numeric(value_type: ValueType) -> bool:
-    return isinstance(value_type, (IntegerType, DecimalType))
+    return isinstance(value_type, (IntegerType, DecimalType, NumericType))
 
 
 def normalized_numeric_type(value_type: ValueType) -> ValueType:
@@ -231,7 +259,7 @@ def input_operand_matches_value_type(
         return operand in {"true", "false"}
     if isinstance(value_type, IntegerType):
         return re.fullmatch(INTEGER_OPERAND_PATTERN, operand) is not None
-    if isinstance(value_type, DecimalType):
+    if isinstance(value_type, (DecimalType, NumericType)):
         if re.fullmatch(DECIMAL_OPERAND_PATTERN, operand) is None:
             return False
         try:

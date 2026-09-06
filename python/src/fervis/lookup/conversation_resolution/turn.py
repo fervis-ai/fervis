@@ -75,6 +75,7 @@ def generate_conversation_resolution(
     except Exception as exc:
         raise ConversationResolutionGenerationError(
             message="conversation resolution parse failed",
+            error_context={"exception_class": type(exc).__name__, "message": str(exc)},
             usage=output.usage,
             duration_ms=output.duration_ms,
             artifact=output.artifact,

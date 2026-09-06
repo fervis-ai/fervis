@@ -1,0 +1,231 @@
+{
+  "question_context_texts": [
+    "What is the total sales revenue for each store and salesperson this month?"
+  ],
+  "frame_payload": {
+    "decision_basis": "The question requests one grouped result: total sales revenue for each store, restricted to the current month.",
+    "outcome": {
+      "answer_requests": [
+        {
+          "relational_shape_basis": "Each store is evaluated from its related sales observations, with the month restriction applied to those observations.",
+          "request": {
+            "relational_shape": "ordinary",
+            "result": {
+              "grouped_observation_rows": {
+                "instance_kind": "sales transaction",
+                "origin": {
+                  "kind": "question"
+                }
+              },
+              "grouping_meanings": [
+                {
+                  "group_ref": "g1",
+                  "grouping_basis": "The result is grouped by store.",
+                  "grouping_kind": "related_entity_identity",
+                  "meaning": "store",
+                  "origin": {
+                    "kind": "question"
+                  }
+                },
+                {
+                  "group_ref": "g2",
+                  "grouping_basis": "Group each sale by its salesperson.",
+                  "grouping_kind": "related_entity_identity",
+                  "meaning": "salesperson",
+                  "origin": {
+                    "kind": "question"
+                  }
+                }
+              ],
+              "kind": "one_result_per_group",
+              "projection": {
+                "explicitly_requested_values": [
+                  {
+                    "meaning": "total sales revenue",
+                    "origin": {
+                      "kind": "question"
+                    },
+                    "value_kind": "value",
+                    "value_kind_basis": "The answer states a numeric amount rather than an entity.",
+                    "value_ref": "v1"
+                  }
+                ],
+                "projection_basis": "Return the store grouping key and the aggregated sales revenue for that store.",
+                "returned_grouping_keys": "all"
+              },
+              "result_order": {
+                "ordering": {
+                  "kind": "no_ordering_requested"
+                },
+                "ordering_request_basis": "The question does not ask for any ordering of the stores.",
+                "selection": {
+                  "kind": "all_results"
+                }
+              }
+            },
+            "result_grain_basis": "One result row per store."
+          },
+          "return_request_basis": "State the total sales revenue for each store."
+        }
+      ],
+      "kind": "question_meaning",
+      "question_input_inventory_check": {
+        "all_input_like_phrases_declared": true
+      },
+      "supplied_values": {
+        "operands": [
+          {
+            "denotation_basis": "The question restricts sales revenue to the current month.",
+            "meaning": "this month",
+            "non_entity_value": {
+              "kind": "temporal_scope",
+              "value": {
+                "operands": [
+                  "this month"
+                ],
+                "origin": {
+                  "kind": "question"
+                }
+              }
+            }
+          }
+        ],
+        "selection_limits": []
+      }
+    }
+  },
+  "payload": {
+    "decision_basis": "The question fully specifies the candidate population (sales transactions), the grouping dimensions (store and salesperson), the requested measure (total sales revenue), and the time scope (this month), so the semantic contract is identifiable and complete.",
+    "outcome": {
+      "answer_requests": [
+        {
+          "candidate_set": {
+            "instance_interpretation": "normal_business_instance",
+            "instance_kind": "sales transaction"
+          },
+          "distinct_by": [],
+          "grouping": [
+            {
+              "grouping_basis": "store",
+              "id": "g1",
+              "kind": "related_instance_identity",
+              "set_ref": "s2"
+            },
+            {
+              "grouping_basis": "salesperson",
+              "id": "g2",
+              "kind": "related_instance_identity",
+              "set_ref": "s3"
+            }
+          ],
+          "ordering": [],
+          "origin": {
+            "meaning": "What is the total sales revenue for each store and salesperson this month?",
+            "resolved_input_ref": null,
+            "source": "question_context"
+          },
+          "outputs": {
+            "requested_value_outputs": [
+              {
+                "expression": {
+                  "argument": {
+                    "kind": "fact",
+                    "observed_for_ref": "s1",
+                    "origin": {
+                      "meaning": "sales revenue",
+                      "resolved_input_ref": null,
+                      "source": "question_context"
+                    }
+                  },
+                  "distinct_argument": false,
+                  "function": "sum",
+                  "kind": "aggregate"
+                },
+                "output_ref": "v1"
+              }
+            ],
+            "result_key_outputs": [
+              {
+                "expression": {
+                  "kind": "group_ref",
+                  "ref": "g1"
+                }
+              },
+              {
+                "expression": {
+                  "kind": "group_ref",
+                  "ref": "g2"
+                }
+              }
+            ]
+          },
+          "qualification": {
+            "kind": "within",
+            "scope": {
+              "input_ref": "i1",
+              "kind": "input_ref"
+            },
+            "value": {
+              "kind": "fact",
+              "observed_for_ref": "s1",
+              "origin": {
+                "meaning": "transaction date",
+                "resolved_input_ref": null,
+                "source": "question_context"
+              }
+            }
+          },
+          "requested_fact_ref": "fact_1",
+          "selection": null,
+          "set_graph": {
+            "identity_input_relations": {},
+            "other_related_sets": [
+              {
+                "association": {
+                  "id": "a1",
+                  "origin": {
+                    "meaning": "store",
+                    "resolved_input_ref": null,
+                    "source": "question_context"
+                  }
+                },
+                "set": {
+                  "id": "s2",
+                  "instance_kind": "store",
+                  "origin": {
+                    "source": "question_context",
+                    "meaning": "store",
+                    "resolved_input_ref": null
+                  }
+                },
+                "related_sets": []
+              },
+              {
+                "association": {
+                  "id": "a2",
+                  "origin": {
+                    "meaning": "salesperson",
+                    "resolved_input_ref": null,
+                    "source": "question_context"
+                  }
+                },
+                "set": {
+                  "id": "s3",
+                  "instance_kind": "salesperson",
+                  "origin": {
+                    "source": "question_context",
+                    "meaning": "salesperson",
+                    "resolved_input_ref": null
+                  }
+                },
+                "related_sets": []
+              }
+            ],
+            "requested_output_relations": {}
+          }
+        }
+      ],
+      "kind": "question_contract"
+    }
+  }
+}

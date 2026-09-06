@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import inspect
 import re
 from dataclasses import replace
@@ -21,6 +22,7 @@ from fervis.host_api.contracts import (
     EndpointContract,
     FrameworkKind,
     ParameterContract,
+    ParameterSemantics,
     ResponseFieldContract,
     SourceNamespaceKind,
 )
@@ -404,21 +406,20 @@ def _with_framework_param_semantics(
     response_fields: tuple[ResponseFieldContract, ...],
     view_class: type,
 ) -> tuple[ParameterContract, ...]:
+    declared = getattr(view_class, "fervis_parameter_semantics", {})
+    names = {param.name for param in query_params}
+    allowed = {value.value for value in ParameterSemantics}
+    if not isinstance(declared, Mapping) or any(
+        name not in names or not isinstance(value, str) or value not in allowed
+        for name, value in declared.items()
+    ):
+        raise ValueError("invalid parameter semantics declaration")
     response_shape_param_names = _response_shape_param_names_from_framework(
-        query_params,
-        response_fields=response_fields,
-        view_class=view_class,
+        query_params, response_fields=response_fields, view_class=view_class,
     )
-    if not response_shape_param_names:
-        return query_params
-    return tuple(
-        (
-            replace(param, semantics="response_shape")
-            if param.name in response_shape_param_names and not param.semantics
-            else param
-        )
-        for param in query_params
-    )
+    return tuple(replace(param, semantics=declared.get(param.name, param.semantics or (
+        ParameterSemantics.RESPONSE_SHAPE.value if param.name in response_shape_param_names else ""
+    ))) for param in query_params)
 
 
 def _response_shape_param_names_from_framework(

@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypeAlias
 
-from fervis.lookup.grounding import IdentityResolutionTask
-from fervis.lookup.question_contract import RequestedFactSemanticIndex
+from fervis.lookup.grounding import CanonicalIdentityOption, IdentityResolutionTask
+from fervis.lookup.question_contract import InputTerm, RequestedFactSemanticIndex
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.relation_catalog.row_sources import (
     RowSource,
@@ -42,6 +42,26 @@ class SemanticReadCandidate:
                 for field in source.fields
             }.values()
         )
+
+
+@dataclass(frozen=True)
+class ReturnedIdentityUse:
+    identity_ref: str
+    field_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AnswerReadIdentityUse:
+    read_id: str
+    request_param_refs: tuple[str, ...]
+    returned_identities: tuple[ReturnedIdentityUse, ...]
+
+
+@dataclass(frozen=True)
+class CanonicalIdentityAnswerUses:
+    canonical_option_id: str
+    identity_ref: str
+    answer_reads: tuple[AnswerReadIdentityUse, ...]
 
 
 @dataclass(frozen=True)
@@ -117,6 +137,93 @@ class SemanticReadEligibilityRequest:
     identity_tasks: tuple[IdentityResolutionTask, ...]
     resolver_catalog: RelationCatalog
 
+    def input_term(self, input_ref: str) -> InputTerm:
+        terms = {
+            index.input_by_ref[input_ref]
+            for index in self.indexes
+            if input_ref in index.input_by_ref
+        }
+        if len(terms) != 1:
+            raise ValueError("identity task input is not uniquely declared")
+        return next(iter(terms))
+
+    def canonical_identity_answer_uses(
+        self,
+        task: IdentityResolutionTask,
+    ) -> tuple[CanonicalIdentityAnswerUses, ...]:
+        return tuple(
+            self._canonical_identity_answer_uses(task, option)
+            for option in task.canonical_options
+        )
+
+    def _canonical_identity_answer_uses(
+        self,
+        task: IdentityResolutionTask,
+        option: CanonicalIdentityOption,
+    ) -> CanonicalIdentityAnswerUses:
+        routes = tuple(
+            route
+            for route in task.resolver_routes
+            if route.route_ref in option.resolver_route_refs
+        )
+        contracts = {
+            (
+                route.option.candidate.entity_kind,
+                route.option.candidate.key_id,
+                tuple(
+                    component.component_id
+                    for component in route.option.candidate.key_components
+                ),
+            )
+            for route in routes
+        }
+        if len(contracts) != 1:
+            raise ValueError("canonical option does not own one identity contract")
+        entity_kind, key_id, component_ids = next(iter(contracts))
+        answer_reads: list[AnswerReadIdentityUse] = []
+        for candidate in self.read_candidates:
+            request_param_refs = _complete_identity_request_params(
+                candidate,
+                entity_kind=entity_kind,
+                key_id=key_id,
+                component_ids=component_ids,
+            )
+            returned_identity = tuple(
+                evidence
+                for source in candidate.sources
+                for evidence in source.identity_evidence
+                if evidence.entity_kind == entity_kind and evidence.key_id == key_id
+            )
+            if not request_param_refs and not returned_identity:
+                continue
+            answer_reads.append(
+                AnswerReadIdentityUse(
+                    read_id=candidate.read_id,
+                    request_param_refs=request_param_refs,
+                    returned_identities=tuple(
+                        ReturnedIdentityUse(
+                            identity_ref=identity_ref,
+                            field_refs=tuple(
+                                dict.fromkeys(
+                                    field_ref
+                                    for item in returned_identity
+                                    if item.identity_ref == identity_ref
+                                    for field_ref in item.field_refs
+                                )
+                            ),
+                        )
+                        for identity_ref in dict.fromkeys(
+                            item.identity_ref for item in returned_identity
+                        )
+                    ),
+                )
+            )
+        return CanonicalIdentityAnswerUses(
+            canonical_option_id=option.canonical_option_id,
+            identity_ref=option.identity_ref,
+            answer_reads=tuple(answer_reads),
+        )
+
     @property
     def read_candidates(self) -> tuple[SemanticReadCandidate, ...]:
         api_sources_by_read: dict[str, list[RowSource]] = {}
@@ -177,6 +284,31 @@ class SemanticReadEligibilityRequest:
         task_refs = tuple(item.task_ref for item in self.identity_tasks)
         if len(task_refs) != len(set(task_refs)):
             raise ValueError("read eligibility repeats an identity task")
+
+
+def _complete_identity_request_params(
+    candidate: SemanticReadCandidate,
+    *,
+    entity_kind: str,
+    key_id: str,
+    component_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    params = tuple(
+        param
+        for source in candidate.sources
+        for param in source.params
+        if param.entity_target is not None
+        and param.entity_target.entity_kind == entity_kind
+        and param.entity_target.key_id == key_id
+        and param.entity_target.component_id in component_ids
+    )
+    if {
+        param.entity_target.component_id
+        for param in params
+        if param.entity_target is not None
+    } != set(component_ids):
+        return ()
+    return tuple(dict.fromkeys(param.param_ref for param in params))
 
 
 @dataclass(frozen=True)

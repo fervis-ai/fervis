@@ -16,7 +16,8 @@ from .contract_types import (
 )
 from .contracts import _scalar_contracts
 from .operations import _operation_input_refs
-from .scalars import _operation_node_output_refs, _operation_scalar_inputs
+from .scalars import _operation_scalar_inputs
+from fervis.lookup.answer_program.operations import operation_node_output_refs
 from fervis.lookup.plan_execution.operation_runtime import ResolvedOperationInput
 from fervis.lookup.answer_program.result_projection import (
     RelationResultOutput,
@@ -170,7 +171,10 @@ def _verify_result_output_targets(
         for operation in answer.operations
         if operation.output_relation
     }
-    terminal_outputs = operation_outputs - set(
+    available_relations = {
+        relation.id for relation in answer.relations
+    } | operation_outputs
+    terminal_outputs = available_relations - set(
         _operation_input_refs_for_all(answer.operations)
     )
     result_outputs = tuple(answer.result_projection.relation_outputs)
@@ -184,10 +188,10 @@ def _verify_result_output_targets(
         result_relations = {
             relation_output.relation_id for relation_output in result_outputs
         }
-        unknown_result_relations = result_relations - operation_outputs
+        unknown_result_relations = result_relations - available_relations
         if unknown_result_relations:
             raise VerificationError(
-                f"result output {result_outputs[0].id} references unknown operation output"
+                f"result output {result_outputs[0].id} references unknown relation"
             )
         non_terminal_result_relations = result_relations - terminal_outputs
         if non_terminal_result_relations:
@@ -263,7 +267,7 @@ def _operation_input_refs_for_all(operations: tuple[Operation, ...]) -> tuple[st
         refs.extend(_operation_input_refs(operation))
         refs.extend(
             output_relation_by_node_id[reference.node_id]
-            for reference in _operation_node_output_refs(operation)
+            for reference in operation_node_output_refs(operation.spec)
             if reference.node_id in output_relation_by_node_id
         )
     return tuple(refs)

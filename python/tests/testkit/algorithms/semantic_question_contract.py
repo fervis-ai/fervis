@@ -8,11 +8,17 @@ from fervis.lookup.grounding.semantic import (
     deterministic_scalar_values,
     grounding_partitions,
 )
+from fervis.lookup.expression_operators import (
+    ExpressionBinaryOperator,
+    infer_aggregate_result,
+    infer_operator_result,
+)
 from fervis.lookup.question_contract.analysis import (
     Groups,
     Singleton,
     SubjectRows,
 )
+from fervis.lookup.question_contract.model import FactLocalRef
 from fervis.lookup.question_contract.parser import (
     ParsedSemanticQuestionContract,
     ParsedSemanticQuestionMeaning,
@@ -25,6 +31,19 @@ from fervis.lookup.question_contract.schema import (
 from fervis.lookup.query_enrichment.semantic import (
     reference_input_recall_tasks,
     semantic_recall_requirements,
+)
+from fervis.lookup.relation_catalog.row_sources import (
+    RowSourceValueType,
+    semantic_type_for_row_source_type,
+    row_source_type_supports_semantic_type,
+)
+from fervis.lookup.semantic_types import (
+    BooleanType,
+    IdentifierType,
+    NumericType,
+    OrderableType,
+    TemporalPointType,
+    UnspecifiedScalarType,
 )
 from fervis.lookup.semantic_types import value_type_kind
 from tests.testkit.assertions import (
@@ -119,7 +138,15 @@ def run_semantic_question_contract_case(payload: dict[str, Any]) -> list[str]:
                 "result_grain": _grain(index.result_grain),
                 "grouping_refs": [item.token for item in index.grouping_refs],
                 "ordering_refs": [item.token for item in index.ordering_refs],
+                "ordering_meanings": [
+                    item.origin.meaning for item in index.requested_fact.ordering
+                ],
                 "input_use_refs": [item.input_ref for item in index.input_use_sites],
+                "fact_value_kinds": {
+                    ref.local_id: value_type_kind(index.inferred_type_by_ref[ref])
+                    for ref in sorted(index.term_requirement_refs)
+                    if ref.kind.value == "fact"
+                },
                 "input_uses": [
                     {
                         "input_ref": item.input_ref,
@@ -163,6 +190,7 @@ def run_semantic_question_contract_case(payload: dict[str, Any]) -> list[str]:
                         "source_requirement_refs": sorted(
                             ref.token
                             for dependency in item.dependencies
+                            if isinstance(dependency, FactLocalRef)
                             for ref in index.transitive_dependencies_by_ref.get(
                                 dependency, frozenset((dependency,))
                             )
@@ -238,6 +266,59 @@ def run_semantic_question_contract_case(payload: dict[str, Any]) -> list[str]:
     )
 
 
+def run_semantic_field_capability_case(payload: dict[str, Any]) -> list[str]:
+    request = payload["input"]
+    capability = {
+        "boolean": BooleanType(),
+        "identifier": IdentifierType("s1"),
+        "number": NumericType(),
+        "orderable": OrderableType(),
+        "temporal": TemporalPointType(),
+        "value": UnspecifiedScalarType(),
+    }[str(request["capability"])]
+    actual = {
+        "compatible_source_types": [
+            source_type
+            for source_type in request["source_types"]
+            if row_source_type_supports_semantic_type(
+                RowSourceValueType(str(source_type)),
+                capability,
+            )
+        ]
+    }
+    return subset_mismatches(
+        actual=actual,
+        expected_subset=payload["expect"]["result_contains"],
+    )
+
+
+def run_semantic_operator_signature_case(payload: dict[str, Any]) -> list[str]:
+    accepted: list[bool] = []
+    for item in payload["input"]["cases"]:
+        try:
+            operands = tuple(
+                semantic_type_for_row_source_type(RowSourceValueType(str(value)))
+                for value in item["source_types"]
+            )
+            if "aggregate" in item:
+                if len(operands) != 1:
+                    raise ValueError("aggregate requires one operand")
+                infer_aggregate_result(str(item["aggregate"]), operands[0])
+            else:
+                infer_operator_result(
+                    ExpressionBinaryOperator(str(item["operator"])),
+                    operands,
+                )
+        except ValueError:
+            accepted.append(False)
+        else:
+            accepted.append(True)
+    return subset_mismatches(
+        actual={"accepted": accepted},
+        expected_subset=payload["expect"]["result_equals"],
+    )
+
+
 def _grain(value: object) -> str:
     if isinstance(value, SubjectRows):
         return "subject_rows"
@@ -248,4 +329,8 @@ def _grain(value: object) -> str:
     raise TypeError("unknown result grain")
 
 
-__all__ = ["run_semantic_question_contract_case"]
+__all__ = [
+    "run_semantic_field_capability_case",
+    "run_semantic_operator_signature_case",
+    "run_semantic_question_contract_case",
+]

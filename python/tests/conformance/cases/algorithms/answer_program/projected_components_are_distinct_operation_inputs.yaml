@@ -8,7 +8,12 @@ input:
 expect:
   result_equals:
     inputs:
-      - input_id: parameter:period.start
+      - operation_id: filter_period
+        input_id: parameter:period.start
         value: "2026-03-01"
-      - input_id: parameter:period.end
+      - operation_id: filter_period
+        input_id: parameter:period.end
         value: "2026-03-31"
+      - operation_id: project_day
+        input_id: constant:temporal_grain@fixture-v1
+        value: day

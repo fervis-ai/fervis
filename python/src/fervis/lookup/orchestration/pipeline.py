@@ -100,6 +100,7 @@ from .question_execution import (
 )
 from .semantic_compilation import (
     SemanticCompilationClarification,
+    SemanticCompilationImpossible,
     SemanticCompilationRequest,
     SemanticCompilationSuccess,
     SemanticCompilationTurnError,
@@ -274,6 +275,9 @@ def _run_semantic_compile_question(state: _LookupPipelineState) -> LookupResult:
     state.semantic_turn_numbers = recorder.turn_numbers
     if isinstance(outcome, SemanticCompilationClarification):
         return _semantic_compilation_clarification_result(state, outcome)
+    if isinstance(outcome, SemanticCompilationImpossible):
+        _record_source_contract_snapshot(state, outcome)
+        return _semantic_compilation_impossible_result(state, outcome)
     state.semantic_compilation = outcome
     _record_source_contract_snapshot(state, outcome)
     return _run_semantic_execution_phase(state)
@@ -281,7 +285,7 @@ def _run_semantic_compile_question(state: _LookupPipelineState) -> LookupResult:
 
 def _record_source_contract_snapshot(
     state: _LookupPipelineState,
-    outcome: SemanticCompilationSuccess,
+    outcome: SemanticCompilationSuccess | SemanticCompilationImpossible,
 ) -> None:
     sink = state.ports.lineage_step_sink
     if sink is None:
@@ -454,6 +458,25 @@ def _semantic_compilation_clarification_result(
             else ""
         )
         or "",
+    )
+
+
+def _semantic_compilation_impossible_result(
+    state: _LookupPipelineState, outcome: SemanticCompilationImpossible,
+) -> LookupResult:
+    from fervis.lookup.outcomes.model import BlockedRequirement, BlockedRequirementKind, FactResult, Impossible
+    blocked = tuple(BlockedRequirement(
+        id=f"{fact.id}:unavailable_source", kind=BlockedRequirementKind.COMPLETE_EVIDENCE_PATH,
+        requested_fact_id=fact.id, fact_ref=fact.id, required_for=fact.origin.meaning,
+        reviewed_read_ids=outcome.reviewed_read_ids, proof_refs=(outcome.source_contract_snapshot.ref,),
+    ) for fact in outcome.question_contract.requested_facts if fact.id in outcome.blocked_fact_ids)
+    return _synthesize_result(
+        request=state.request, ports=state.ports,
+        fact_result=FactResult(outcome=Impossible(blocked_requirements=blocked,
+                                                proof_refs=(outcome.source_contract_snapshot.ref,))),
+        status=RunStatus.COMPLETED, usage=state.semantic_usage or {},
+        question_contract=outcome.question_contract,
+        grounded_values=tuple(value.typed_value for value in outcome.canonical_values),
     )
 
 

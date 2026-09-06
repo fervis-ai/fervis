@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from .versions import FUNCTION_SEMANTIC_VERSION
 from fervis.types.enums import StrEnum
 
 from fervis.lookup.answer_program.values import (
@@ -26,7 +27,7 @@ class NarrowPopulationCapability:
     operator: ExpressionBinaryOperator
     requested_fact_ids: tuple[str, ...]
     proof_refs: tuple[str, ...]
-    function_semantics_version: str = "1"
+    function_semantics_version: str = FUNCTION_SEMANTIC_VERSION
     kind: CapabilityKind = field(
         default=CapabilityKind.NARROW_COUNT,
         init=False,

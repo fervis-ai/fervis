@@ -73,7 +73,7 @@ _PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         default_base_url="https://api.openai.com/v1",
         default_model="gpt-5.4-mini",
         max_output_tokens_parameter="max_completion_tokens",
-        reasoning_effort="low",
+        reasoning_effort="medium",
     ),
 )
 

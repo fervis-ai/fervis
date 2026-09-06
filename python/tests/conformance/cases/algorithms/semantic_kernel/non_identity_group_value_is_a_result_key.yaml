@@ -1,0 +1,146 @@
+id: non_identity_group_value_is_a_result_key
+description: A non-entity grouping value identifies each grouped result row without being misclassified as an entity identity.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts:
+  - For each day in March 2026, how many events occurred, ordered by day?
+  frame_payload:
+    decision_basis: The answer returns one event count for each day in March 2026.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+      - return_request_basis: Return one event count per day.
+        relational_shape_basis: The requested relational shape is ordinary.
+        request:
+          relational_shape: ordinary
+          result_grain_basis: The requested result grain is one_result_per_group.
+          result:
+            kind: one_result_per_group
+            grouping_meanings:
+            - group_ref: g1
+              grouping_basis: One qualifying row contributes event day to this group.
+              meaning: event day
+              origin:
+                kind: question
+              grouping_kind: non_identity_value
+              grouping_value:
+                kind: temporal_bucket
+                grain: day
+            grouped_observation_rows:
+              instance_kind: event occurrences
+              origin:
+                kind: question
+            projection:
+              projection_basis: Return the group key and explicitly requested values.
+              returned_grouping_keys: all
+              explicitly_requested_values:
+              - value_ref: v1
+                value_kind_basis: The answer states the event count value.
+                value_kind: value
+                meaning: event count
+                origin:
+                  kind: question
+            result_order:
+              ordering_request_basis: The question orders results by the existing day key.
+              ordering:
+                kind: ordered_by
+                values:
+                - ownership_basis: The existing day grouping key determines order.
+                  kind: group_ref
+                  group_ref: g1
+              selection:
+                kind: all_results
+      supplied_values:
+        selection_limits: []
+        operands:
+        - meaning: March 2026
+          denotation_basis: March 2026 bounds the event occurrences.
+          non_entity_value:
+            kind: temporal_scope
+            value:
+              operands:
+              - March 2026
+              origin:
+                kind: question
+      question_input_inventory_check:
+        all_input_like_phrases_declared: true
+  payload:
+    decision_basis: Group March event occurrences by their day and count each group.
+    outcome:
+      kind: question_contract
+      answer_requests:
+      - requested_fact_ref: fact_1
+        origin:
+          source: question_context
+          meaning: daily event counts in March 2026
+          resolved_input_ref: null
+        candidate_set:
+          instance_kind: event occurrences
+          instance_interpretation: normal_business_instance
+        set_graph:
+          identity_input_relations: {}
+          requested_output_relations: {}
+          other_related_sets: []
+        qualification:
+          kind: within
+          value:
+            kind: fact
+            observed_for_ref: s1
+            origin:
+              source: question_context
+              meaning: event time
+              resolved_input_ref: null
+          scope:
+            kind: input_ref
+            input_ref: i1
+        grouping:
+        - id: g1
+          grouping_basis: Each event occurrence is grouped by its calendar day.
+          kind: value
+          expression:
+            kind: temporal_bucket
+            value:
+              kind: fact
+              observed_for_ref: s1
+              origin:
+                source: question_context
+                meaning: event time
+                resolved_input_ref: null
+            grain: day
+        ordering:
+        - ordering_basis: Compare result groups by their existing day key.
+          expression:
+            kind: group_ref
+            ref: g1
+          direction: ascending
+        selection: null
+        distinct_by: []
+        outputs:
+          result_key_outputs:
+          - expression:
+              kind: group_ref
+              ref: g1
+          requested_value_outputs:
+          - output_ref: v1
+            expression:
+              kind: aggregate
+              function: count
+              argument:
+                kind: set_ref
+                set_ref: s1
+              distinct_argument: false
+expect:
+  result_contains:
+    input_refs:
+    - i1
+    requested_facts:
+    - id: fact_1
+      result_grain: groups
+      input_use_refs:
+      - i1
+      grouping_refs:
+      - fact_1:expression:e2
+      output_refs:
+      - fact_1:output:output_1
+      - fact_1:output:output_2

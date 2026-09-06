@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from fervis.lookup.available_sources import (
@@ -29,6 +29,7 @@ from fervis.lookup.relation_catalog.row_sources import (
     build_row_source_catalog,
 )
 from fervis.lookup.runtime_values import RuntimeValueContext
+from fervis.lookup.semantic_types import SourceOrigin, SourceOriginKind
 from fervis.lookup.grounding import (
     CanonicalInputValue,
     IdentityExecutionClarification,
@@ -39,18 +40,14 @@ from fervis.lookup.grounding import (
     grounding_partitions,
     reference_grounding_tasks,
     time_grounding_tasks,
-    validate_canonical_input_ledger,
+    build_canonical_input_ledger,
     parse_semantic_grounding,
     reference_binding_options,
     SemanticGroundingTurnPrompt,
 )
 from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.plan_execution.authorized_sources import AuthorizedExecutionSources
-from fervis.lookup.plan_selection import (
-    SemanticPlanSelectionRequest,
-    parse_semantic_plan_selection,
-    SemanticPlanSelectionTurnPrompt,
-)
+from fervis.lookup.source_binding.candidates import candidate_source_strategy
 from fervis.lookup.query_enrichment import (
     SemanticQueryEnrichmentRequest,
     reference_input_recall_tasks,
@@ -94,15 +91,20 @@ from fervis.lookup.relation_catalog.selection import (
 )
 from fervis.lookup.semantic_turn import SemanticTurnResult, generate_semantic_turn
 from fervis.lookup.semantic_turn import SemanticTurnGenerationError
+from fervis.lookup.source_binding.membership import SourceMembershipTurnPrompt, membership_surfaces, parse_source_membership
+from fervis.lookup.source_binding.parser import empty_input_binding_payload
 from fervis.lookup.source_binding import (
     CatalogProvidedValue,
     SemanticSourceBindingRequest,
     compile_source_binding_plan,
     SemanticSourceBindingTurnPrompt,
+    SemanticSourceRealizationTurnPrompt,
+    compile_source_realization,
     SourceStrategyVerificationFailure,
     VerifiedSourceStrategy,
     verify_source_strategy,
     source_binding_clarification,
+    source_required_inputs_are_satisfiable,
 )
 from fervis.lookup.turn_prompts import (
     HostPromptContext,
@@ -152,8 +154,17 @@ class SemanticCompilationClarification:
     canonical_values: tuple[CanonicalInputValue, ...] = ()
 
 
+@dataclass(frozen=True)
+class SemanticCompilationImpossible:
+    question_contract: QuestionContract
+    canonical_values: tuple[CanonicalInputValue, ...]
+    blocked_fact_ids: tuple[str, ...]
+    source_contract_snapshot: SourceContractSnapshot
+    reviewed_read_ids: tuple[str, ...]
+
+
 SemanticCompilationOutcome = (
-    SemanticCompilationSuccess | SemanticCompilationClarification
+    SemanticCompilationSuccess | SemanticCompilationClarification | SemanticCompilationImpossible
 )
 
 
@@ -170,14 +181,18 @@ def resolve_semantic_continuation_arguments(
         conversation_context=request.conversation_context,
         host=request.host,
     )
-    input_by_ref = {item.id: item for item in frame.changed_inputs}
+    input_by_ref = {item.id: item for item in frame.program.inputs}
+    input_by_ref.update({item.id: item for item in frame.changed_inputs})
     denotation_by_ref = {
         item.input_ref: item for item in frame.program.input_denotations
     }
+    denotation_by_ref.update(
+        {item.input_ref: item for item in frame.changed_input_denotations}
+    )
     indexes = tuple(
         analyze_requested_fact(
             fact,
-            inputs={item.id: item for item in frame.program.inputs},
+            inputs=input_by_ref,
             input_denotations=denotation_by_ref,
         )
         for fact in frame.program.fact_template
@@ -238,16 +253,29 @@ def resolve_semantic_continuation_arguments(
         )
     )
     time_tasks = time_grounding_tasks(partitions, inputs=input_by_ref)
+    set_origins = {
+        ref: term.origin
+        for index in indexes
+        for ref, term in index.term_by_ref.items()
+        if ref.kind.value == "set"
+    }
+    for partition in partitions:
+        if partition.expected_set_ref is None:
+            continue
+        denotation = denotation_by_ref[partition.input_ref]
+        instance_kind = denotation.denoted_instance_kind
+        if instance_kind is None:
+            raise ValueError("identity grounding requires an instance kind")
+        set_origins[partition.expected_set_ref] = SourceOrigin(
+            SourceOriginKind.CONVERSATION_RESOLUTION,
+            instance_kind,
+            resolved_input_ref=partition.input_ref,
+        )
     grounding_request = SemanticGroundingRequest(
         question=request.question,
-        inputs=tuple(input_by_ref.values()),
+        inputs=frame.changed_inputs,
         tasks=reference_tasks,
-        set_origins={
-            ref: term.origin
-            for index in indexes
-            for ref, term in index.term_by_ref.items()
-            if ref.kind.value == "set"
-        },
+        set_origins=set_origins,
         resolver_catalog=resolver_catalog,
         time_tasks=time_tasks,
         runtime_date=(
@@ -333,11 +361,11 @@ def resolve_semantic_continuation_arguments(
             if isinstance(resolved, IdentityExecutionClarification):
                 return resolved
             canonical_values.append(resolved.canonical_value)
-    validate_canonical_input_ledger(
+    canonical_ledger = build_canonical_input_ledger(
         tuple(canonical_values),
         required_use_refs=tuple(changed_use_refs),
     )
-    return tuple(value.typed_value for value in canonical_values)
+    return tuple(value.typed_value for value in canonical_ledger)
 
 
 @dataclass(frozen=True)
@@ -404,7 +432,7 @@ def compile_semantic_question(
     )
     if isinstance(canonical_values, SemanticCompilationClarification):
         return canonical_values
-    validate_canonical_input_ledger(
+    canonical_values = build_canonical_input_ledger(
         canonical_values,
         required_use_refs=tuple(
             use.use_ref for index in indexes for use in index.input_use_sites
@@ -426,9 +454,7 @@ def _parse_question_contract(
     context: TurnPromptContext,
     on_turn: SemanticTurnObserver | None,
 ) -> ParsedSemanticQuestionContract | QuestionContractNeedsClarification:
-    conversation_text = _conversation_input_text(
-        request.question_contract_request
-    )
+    conversation_text = _conversation_input_text(request.question_contract_request)
     frame_turn = _turn(
         ModelTurnPurpose.QUESTION_CONTRACT,
         prompt=SemanticQuestionFrameTurnPrompt(request.question_contract_request),
@@ -482,19 +508,19 @@ def _recall_and_ground(
         use_ref for value in response_values for use_ref in value.use_refs
     }
     recall_buckets = tuple(
-        bucket
-        for index in indexes
-        for bucket in semantic_recall_buckets(index)
+        bucket for index in indexes for bucket in semantic_recall_buckets(index)
     )
     reference_tasks = tuple(
         task
         for task in reference_input_recall_tasks(indexes, inputs=inputs)
         if task.input_use_ref not in certified_use_refs
     )
+    from fervis.lookup.query_enrichment.semantic import semantic_recall_requirements
     query_request = SemanticQueryEnrichmentRequest(
         recall_buckets=recall_buckets,
         reference_tasks=reference_tasks,
         resource_names=_resource_names(request.full_catalog),
+        requirements=tuple(item for index in indexes for item in semantic_recall_requirements(index)),
     )
     query_turn = _turn(
         ModelTurnPurpose.QUERY_ENRICHMENT,
@@ -645,7 +671,7 @@ def _select_bind_and_compile(
         eligibility,
         source_catalog,
         strategies,
-    ) = _select_source_strategies(
+    ) = _prepare_source_candidates(
         initial_catalog_selection=grounded.catalog_selection,
         initial_answer_sources=grounded.answer_sources,
         initial_eligibility=initial_eligibility,
@@ -655,11 +681,12 @@ def _select_bind_and_compile(
         request=request,
         on_turn=on_turn,
     )
-    if any(not strategy.branches for strategy in strategies):
-        return SemanticCompilationClarification(
-            cause=tuple(strategy for strategy in strategies if not strategy.branches),
-            question_contract=contract,
-            canonical_values=canonical_values,
+    blocked = tuple(strategy.requested_fact_id for strategy in strategies if not strategy.branches)
+    if blocked:
+        return SemanticCompilationImpossible(
+            question_contract=contract, canonical_values=canonical_values,
+            blocked_fact_ids=blocked, source_contract_snapshot=source_catalog.contract_snapshot,
+            reviewed_read_ids=tuple(read.id for read in catalog_selection.relation_catalog.reads),
         )
     strategy_by_fact = {item.requested_fact_id: item for item in strategies}
     verified: list[VerifiedSourceStrategy] = []
@@ -693,6 +720,15 @@ def _select_bind_and_compile(
                 responses=request.clarification_responses,
             ),
         )
+        realization = _turn(
+            ModelTurnPurpose.SOURCE_REALIZATION,
+            prompt=SemanticSourceRealizationTurnPrompt(source_binding_request),
+            context=context,
+            parse=lambda payload, current=source_binding_request: compile_source_realization(payload, request=current),
+            request=request,
+            on_turn=on_turn,
+        ).result
+        source_binding_request = realization.request
         clarification = source_binding_clarification(source_binding_request)
         if clarification is not None:
             return SemanticCompilationClarification(
@@ -700,18 +736,28 @@ def _select_bind_and_compile(
                 question_contract=contract,
                 canonical_values=canonical_values,
             )
-        binding_turn = _turn(
-            ModelTurnPurpose.SOURCE_BINDING,
-            prompt=SemanticSourceBindingTurnPrompt(source_binding_request),
-            context=context,
-            parse=lambda payload, current=source_binding_request: (
-                compile_source_binding_plan(payload, request=current)
-            ),
-            request=request,
-            on_turn=on_turn,
-        )
+        surfaces = membership_surfaces(realization)
+        if any(surfaces.values()):
+            membership = _turn(
+                ModelTurnPurpose.SOURCE_BINDING, prompt=SourceMembershipTurnPrompt(realization),
+                context=context, parse=lambda payload, current=realization: parse_source_membership(payload, realization=current),
+                request=request, on_turn=on_turn,
+            ).result
+        else:
+            membership = parse_source_membership({branch:{} for branch in surfaces}, realization=realization)
+        empty_payload = empty_input_binding_payload(membership.realization.request)
+        if empty_payload is not None:
+            bound_plan = compile_source_binding_plan(empty_payload, membership=membership)
+        else:
+            bound_plan = _turn(
+                ModelTurnPurpose.SOURCE_BINDING,
+                prompt=SemanticSourceBindingTurnPrompt(membership),
+                context=context,
+                parse=lambda payload, current=membership: compile_source_binding_plan(payload, membership=current),
+                request=request, on_turn=on_turn,
+            ).result
         verification = verify_source_strategy(
-            binding_turn.result,
+            bound_plan,
             request=source_binding_request,
         )
         if isinstance(verification, SourceStrategyVerificationFailure):
@@ -753,7 +799,9 @@ def _catalog_values(
             parameter.type.value,
             parameter.choices,
         ) != (target.param_id, target.value_type, target.choices):
-            raise ValueError("catalog clarification target no longer matches its source")
+            raise ValueError(
+                "catalog clarification target no longer matches its source"
+            )
         literal_type = _catalog_literal_type(target.value_type)
         value_id = f"catalog_value:{response.response_id}"
         proof_ref = clarification_response_ref(response.response_id)
@@ -797,10 +845,7 @@ def _grounding_response_values(
             raise ValueError("grounding clarification lacks an identity use or key")
         proof_ref = clarification_response_ref(response.response_id)
         value_id = f"grounded_identity:{response.response_id}"
-        if (
-            response.option.matched_field
-            and response.option.matched_value != ""
-        ):
+        if response.option.matched_field and response.option.matched_value != "":
             fact_value = FactValue.identity(
                 id=value_id,
                 known_input_id=response.known_input_id,
@@ -841,7 +886,23 @@ def _catalog_literal_type(value_type: str) -> LiteralType:
     return LiteralType.STRING
 
 
-def _select_source_strategies(
+def _executable_relation_catalog(catalog: RelationCatalog, *, values: tuple[FactValue, ...]) -> RelationCatalog:
+    from fervis.lookup.relation_catalog.selection.results import relation_catalog_for_read_ids
+    sources = build_api_row_source_catalog(catalog)
+    executable = {source.read_id for source in sources.sources
+                  if source_required_inputs_are_satisfiable(source, values=values)}
+    return relation_catalog_for_read_ids(catalog, read_ids=tuple(read.id for read in catalog.reads if read.id in executable))
+
+
+def _bound_recall_selection(selection: CatalogSelectionResult, *, full_catalog: RelationCatalog, values: tuple[FactValue, ...]) -> CatalogSelectionResult:
+    executable = {read.id for read in _executable_relation_catalog(full_catalog, values=values).reads}
+    return replace(selection, requested_fact_selections=tuple(
+        replace(fact, unselected_positive_read_ids=tuple(ref for ref in fact.unselected_positive_read_ids if ref in executable))
+        for fact in selection.requested_fact_selections
+    ))
+
+
+def _prepare_source_candidates(
     *,
     initial_catalog_selection: CatalogSelectionResult,
     initial_answer_sources,
@@ -852,80 +913,68 @@ def _select_source_strategies(
     request: SemanticCompilationRequest,
     on_turn: SemanticTurnObserver | None,
 ):
+    initial_catalog_selection = _bound_recall_selection(
+        initial_catalog_selection, full_catalog=request.full_catalog,
+        values=tuple(value.typed_value for value in canonical_values),
+    )
     batches = [initial_catalog_selection]
     eligibility_results = [initial_eligibility]
     while True:
-        catalog_selection = combine_catalog_selection_batches(
-            tuple(batches),
-            full_catalog=request.full_catalog,
+        selection = combine_catalog_selection_batches(
+            tuple(batches), full_catalog=request.full_catalog
         )
-        answer_sources = (
+        sources = (
             initial_answer_sources
             if len(batches) == 1
             else build_row_source_catalog(
-                catalog_selection.relation_catalog,
-                memory_relations=request.memory_relations,
+                selection.relation_catalog, memory_relations=request.memory_relations
             )
         )
         eligibility = combine_semantic_read_eligibility_results(
             tuple(eligibility_results)
         )
-        source_catalog = build_available_source_catalog(
-            answer_sources,
-            read_eligibility=eligibility,
-            snapshot_namespace=request.run_id,
+        catalog = build_available_source_catalog(
+            sources, read_eligibility=eligibility, snapshot_namespace=request.run_id
         )
-        plan_request = SemanticPlanSelectionRequest(
-            indexes=indexes,
-            source_catalog=source_catalog,
-            canonical_values=canonical_values,
-        )
-        strategies = _turn(
-            ModelTurnPurpose.PLAN_SELECTION,
-            prompt=SemanticPlanSelectionTurnPrompt(plan_request),
-            context=context,
-            parse=lambda payload: parse_semantic_plan_selection(
-                payload,
-                request=plan_request,
-            ),
-            request=request,
-            on_turn=on_turn,
-        ).result
-        if all(strategy.branches for strategy in strategies):
-            return (
-                catalog_selection,
-                answer_sources,
-                eligibility,
-                source_catalog,
-                strategies,
+        source_refs = frozenset(
+            source.id
+            for source in catalog.sources
+            if source_required_inputs_are_satisfiable(
+                source, values=tuple(value.typed_value for value in canonical_values)
             )
+        )
+        catalog = catalog.select(
+            source_refs=source_refs,
+            relation_evidence_refs=frozenset(
+                edge.evidence_ref
+                for edge in catalog.relation_evidence
+                if {edge.left_source_ref, edge.right_source_ref} <= source_refs
+            ),
+        )
+        strategies = tuple(
+            candidate_source_strategy(index, catalog, canonical_values)
+            for index in indexes
+        )
+        result = selection, sources, eligibility, catalog, tuple(strategies)
+        # Type-compatible rows are not evidence of semantic coverage. Review
+        # every recalled batch before asking realization to choose its sources.
         next_batch = next_catalog_selection_batch(
-            catalog_selection=catalog_selection,
+            catalog_selection=selection,
             full_catalog=request.full_catalog,
             max_reads_per_fact=request.max_catalog_reads_per_fact,
         )
         if next_batch is None:
-            return (
-                catalog_selection,
-                answer_sources,
-                eligibility,
-                source_catalog,
-                strategies,
-            )
-        next_sources = build_api_row_source_catalog(next_batch.relation_catalog)
+            return result
         next_request = SemanticReadEligibilityRequest(
             indexes=indexes,
-            source_catalog=next_sources,
+            source_catalog=build_api_row_source_catalog(next_batch.relation_catalog),
             answer_catalog=next_batch.relation_catalog,
             identity_tasks=(),
             resolver_catalog=RelationCatalog(reads=()),
         )
         eligibility_results.append(
             _read_eligibility_turn(
-                next_request,
-                context=context,
-                request=request,
-                on_turn=on_turn,
+                next_request, context=context, request=request, on_turn=on_turn
             )
         )
         batches.append(next_batch)
@@ -981,10 +1030,7 @@ def _conversation_input_text(
     resolution = request.conversation_resolution
     if resolution is None:
         return {}
-    return {
-        item.input_ref: " | ".join(item.context_texts())
-        for item in resolution.inputs
-    }
+    return resolution.question_contract_input_text_by_ref()
 
 
 def _resolver_options(

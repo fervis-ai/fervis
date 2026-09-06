@@ -17,8 +17,10 @@ from fervis.lookup.question_contract.model import (
     InputTerm,
 )
 from fervis.lookup.semantic_types import (
+    IdentifierType,
     SourceOrigin,
     SourceOriginKind,
+    TemporalScopeType,
     TextType,
 )
 
@@ -26,7 +28,7 @@ from fervis.lookup.semantic_types import (
 def test_semantic_question_contract_schema_is_valid_json_schema():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), (), 0, (("r1", "value"),), "all_results", None, "ordinary"),
         ),
         input_refs=("i1",),
         temporal_scope_input_refs=("i1",),
@@ -42,9 +44,8 @@ def test_semantic_question_contract_schema_is_valid_json_schema():
         "requested_fact_ref",
         "origin",
         "candidate_set",
+        "set_graph",
         "grouping",
-        "other_sets",
-        "other_associations",
         "qualification",
         "ordering",
         "selection",
@@ -56,10 +57,51 @@ def test_semantic_question_contract_schema_is_valid_json_schema():
     assert answer_request["properties"]["grouping"]["items"] == {"type": "null"}
 
 
+def test_question_frame_row_projection_has_disjoint_identity_and_value_ownership():
+    schema = build_semantic_question_frame_schema()
+    complete = schema["properties"]["outcome"]["oneOf"][0]
+    supplied_values = complete["properties"]["supplied_values"]
+    assert tuple(supplied_values["properties"]) == (
+        "operands",
+        "selection_limits",
+    )
+    request = complete["properties"]["answer_requests"]["items"]["properties"][
+        "request"
+    ]["oneOf"][1]
+    branches = request["properties"]["result"]["oneOf"]
+    row_branch = next(
+        branch
+        for branch in branches
+        if branch["properties"]["kind"]["enum"]
+        == ["one_result_per_qualifying_row"]
+    )
+    assert "returned_meanings" not in row_branch["properties"]
+    projection = row_branch["properties"]["projection"]
+    assert tuple(projection["properties"]) == (
+        "projection_basis",
+        "candidate_identity",
+        "explicitly_requested_values",
+    )
+    ordering = row_branch["properties"]["result_order"]["properties"]["ordering"]
+    [ordered_by] = [
+        variant
+        for variant in ordering["oneOf"]
+        if variant["properties"]["kind"]["enum"] == ["ordered_by"]
+    ]
+    ordering_kinds = {
+        variant["properties"]["kind"]["enum"][0]
+        for variant in ordered_by["properties"]["values"]["items"]["oneOf"]
+    }
+    assert ordering_kinds == {
+        "requested_value_ref",
+        "unreturned_ordering_meaning",
+    }
+
+
 def test_semantic_contract_exposes_only_operations_with_declared_input_operands():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), (), 0, (("r1", "value"),), "all_results", None, "ordinary"),
         ),
         input_refs=("i1",),
         temporal_scope_input_refs=("i1",),
@@ -79,11 +121,12 @@ def test_semantic_contract_exposes_input_operations_when_their_operands_exist():
                 "fact_1",
                 "qualifying_instances",
                 (),
+                (None,),
                 1,
-                1,
+                (),
                 "take_with_boundary_ties",
                 "i3",
-                "none",
+                "ordinary",
             ),
         ),
         input_refs=("i1", "i2", "i3"),
@@ -99,6 +142,34 @@ def test_semantic_contract_exposes_input_operations_when_their_operands_exist():
     assert "take_with_boundary_ties" in _selection_kinds(schema)
 
 
+def test_quantified_row_identity_comparison_can_follow_its_own_relationship():
+    schema = build_semantic_question_contract_schema(
+        answer_request_specs=(
+            ("fact_1", "scalar", (), (), 0, (("r1", "value"),), "all_results", None, "ordinary"),
+        ),
+        input_refs=("i1",),
+        identity_input_refs=("i1",),
+    )
+
+    row_condition = schema["$defs"]["row_condition_expression_3"]
+    [identity_comparison] = [
+        resolved
+        for branch in row_condition["oneOf"]
+        for resolved in (_resolved_schema(schema, branch),)
+        if resolved["properties"]["kind"]["enum"] == ["input_comparison"]
+        and resolved["properties"]["input"]["properties"]["input_ref"]["$ref"]
+        == "#/$defs/identity_input_ref_value"
+    ]
+    identity_fact_ref = identity_comparison["properties"]["fact"]["$ref"]
+    identity_fact = schema["$defs"][identity_fact_ref.rsplit("/", 1)[-1]]
+    path_kinds = {
+        branch["properties"]["kind"]["enum"][0]
+        for branch in identity_fact["properties"]["identity_path"]["oneOf"]
+    }
+
+    assert path_kinds == {"candidate_instance", "related_instance"}
+
+
 def test_semantic_contract_exposes_coverage_only_for_declared_coverage_shape():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
@@ -106,8 +177,9 @@ def test_semantic_contract_exposes_coverage_only_for_declared_coverage_shape():
                 "fact_1",
                 "qualifying_instances",
                 (),
-                0,
+                (),
                 1,
+                (),
                 "all_results",
                 None,
                 "every_required_member_has_observation",
@@ -116,13 +188,43 @@ def test_semantic_contract_exposes_coverage_only_for_declared_coverage_shape():
         input_refs=(),
     )
 
-    assert "coverage" in _condition_kinds(schema)
+    qualification = _answer_request_schema(schema)["properties"]["qualification"]
+    assert qualification["properties"]["kind"]["enum"] == ["coverage"]
+
+
+def test_related_grouping_references_one_reserved_graph_set():
+    schema = build_semantic_question_contract_schema(
+        answer_request_specs=(
+            (
+                "fact_1",
+                "grouped_results",
+                ("related_entity_identity",),
+                (None,),
+                1,
+                (),
+                "first_rank_with_ties",
+                None,
+                "ordinary",
+            ),
+        ),
+        input_refs=(),
+    )
+
+    grouping = _answer_request_schema(schema)["properties"]["grouping"]["items"]
+    [related_identity] = grouping["oneOf"]
+    properties = related_identity["properties"]
+    assert properties["set_ref"] == {
+        "type": "string",
+        "pattern": r"^s(?:[2-9]|[1-9][0-9]+)$",
+    }
+    assert "identified_set_ref" not in properties
+    assert "association_ref" not in properties
 
 
 def test_collection_and_temporal_inputs_are_absent_from_generic_value_leaves():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), (), 0, (("r1", "value"),), "all_results", None, "ordinary"),
         ),
         input_refs=("i1", "i2"),
         collection_input_refs=("i1",),
@@ -138,7 +240,7 @@ def test_collection_and_temporal_inputs_are_absent_from_generic_value_leaves():
 def test_semantic_contract_without_inputs_has_no_input_expression_branch():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), (), 0, (("r1", "value"),), "all_results", None, "ordinary"),
         ),
         input_refs=(),
     )
@@ -153,7 +255,7 @@ def test_semantic_contract_without_inputs_has_no_input_expression_branch():
 def test_identity_input_is_consumed_by_an_identifier_comparison():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
+            ("fact_1", "scalar", (), (), 0, (("r1", "value"),), "all_results", None, "ordinary"),
         ),
         input_refs=("i1",),
         identity_input_refs=("i1",),
@@ -165,19 +267,151 @@ def test_identity_input_is_consumed_by_an_identifier_comparison():
     assert schema["$defs"]["identity_input_ref_value"]["enum"] == ["i1"]
 
 
-def test_candidate_set_ref_cannot_be_redeclared_as_an_additional_set():
+def test_identity_fact_is_a_valid_direct_output():
     schema = build_semantic_question_contract_schema(
         answer_request_specs=(
-            ("fact_1", "scalar", (), 0, 1, "all_results", None, "none"),
+            (
+                "fact_1",
+                "qualifying_instances",
+                (),
+                (),
+                1,
+                (),
+                "all_results",
+                None,
+                "ordinary",
+            ),
         ),
         input_refs=("i1",),
         identity_input_refs=("i1",),
     )
     payload = _identity_count_contract()
     answer_request = payload["outcome"]["answer_requests"][0]
-    answer_request["other_sets"].append(
-        {"id": "s1", "origin": answer_request["origin"]}
+    answer_request["set_graph"] = {
+        "identity_input_relations": {"i1": None},
+        "requested_output_relations": {},
+        "other_related_sets": [],
+    }
+    identifier_fact = {
+        "kind": "fact",
+        "identity_path": {"kind": "candidate_instance"},
+        "origin": answer_request["origin"],
+    }
+    answer_request["qualification"]["fact"] = identifier_fact
+    answer_request["outputs"] = {
+        "result_key_outputs": [{"expression": identifier_fact}],
+        "requested_value_outputs": [],
+    }
+
+    assert not tuple(Draft7Validator(schema).iter_errors(payload))
+
+
+def test_identity_fact_is_not_an_ordering_value():
+    schema = build_semantic_question_contract_schema(
+        answer_request_specs=(
+            (
+                "fact_1",
+                "qualifying_instances",
+                (),
+                (None,),
+                1,
+                (),
+                "all_results",
+                None,
+                "ordinary",
+            ),
+        ),
+        input_refs=("i1",),
+        identity_input_refs=("i1",),
     )
+    payload = _identity_count_contract()
+    answer_request = payload["outcome"]["answer_requests"][0]
+    answer_request["set_graph"] = {
+        "identity_input_relations": {"i1": None},
+        "requested_output_relations": {},
+        "other_related_sets": [],
+    }
+    identifier_fact = {
+        "kind": "fact",
+        "identity_path": {"kind": "candidate_instance"},
+        "origin": answer_request["origin"],
+    }
+    answer_request["qualification"]["fact"] = identifier_fact
+    answer_request["ordering"] = [
+        {
+            "ordering_basis": "Compare candidate identifiers.",
+            "expression": identifier_fact,
+            "direction": "ascending",
+        }
+    ]
+    answer_request["outputs"] = {
+        "result_key_outputs": [{"expression": identifier_fact}],
+        "requested_value_outputs": [],
+    }
+
+    assert tuple(Draft7Validator(schema).iter_errors(payload))
+
+
+def test_mixed_result_schema_rejects_value_expression_in_result_key_output():
+    schema = build_semantic_question_contract_schema(
+        answer_request_specs=(
+            (
+                "fact_1",
+                "grouped_results",
+                ("related_entity_identity",),
+                (),
+                1,
+                (("v1", "value"),),
+                "all_results",
+                None,
+                "ordinary",
+            ),
+        ),
+        input_refs=(),
+    )
+    payload = _grouped_ranking_contract()
+    answer_request = payload["outcome"]["answer_requests"][0]
+    answer_request["ordering"] = []
+    answer_request["selection"] = None
+    answer_request["outputs"] = {
+        "result_key_outputs": [
+            {
+                "expression": {
+                    "kind": "fact",
+                    "observed_for_ref": "s2",
+                    "origin": answer_request["origin"],
+                }
+            }
+        ],
+        "requested_value_outputs": [
+            {
+                "output_ref": "v1",
+                "expression": {
+                    "kind": "aggregate",
+                    "function": "count",
+                    "argument": {"kind": "set_ref", "set_ref": "s1"},
+                    "distinct_argument": False,
+                }
+            }
+        ],
+    }
+
+    assert tuple(Draft7Validator(schema).iter_errors(payload))
+
+
+def test_candidate_set_ref_cannot_be_redeclared_as_an_additional_set():
+    schema = build_semantic_question_contract_schema(
+        answer_request_specs=(
+            ("fact_1", "scalar", (), (), 0, (("r1", "value"),), "all_results", None, "ordinary"),
+        ),
+        input_refs=("i1",),
+        identity_input_refs=("i1",),
+    )
+    payload = _identity_count_contract()
+    answer_request = payload["outcome"]["answer_requests"][0]
+    answer_request["set_graph"]["identity_input_relations"]["i1"]["set"][
+        "id"
+    ] = "s1"
 
     assert tuple(Draft7Validator(schema).iter_errors(payload))
 
@@ -185,7 +419,11 @@ def test_candidate_set_ref_cannot_be_redeclared_as_an_additional_set():
 def test_equal_origins_do_not_collapse_distinct_authored_sets() -> None:
     payload = _identity_count_contract()
     answer_request = payload["outcome"]["answer_requests"][0]
-    answer_request["other_sets"][0]["origin"] = answer_request["origin"]
+    answer_request["set_graph"]["identity_input_relations"]["i1"]["set"][
+        "origin"
+    ] = (
+        answer_request["origin"]
+    )
     origin = SourceOrigin(
         SourceOriginKind.QUESTION_CONTEXT,
         answer_request["origin"]["meaning"],
@@ -194,18 +432,28 @@ def test_equal_origins_do_not_collapse_distinct_authored_sets() -> None:
     meaning = ParsedSemanticQuestionMeaning(
         decision_basis="The question asks for one count.",
         answer_requests=(
-            AnswerRequestMeaning(
-                requested_fact_id="fact_1",
-                result_kind="scalar",
+                AnswerRequestMeaning(
+                    requested_fact_id="fact_1",
+                    return_request_basis="Return the place count.",
+                    relational_shape_basis="Count related place instances.",
+                    result_grain_basis="One count for the population.",
+                    ordering_request_basis="No ordering is requested.",
+                    result_kind="scalar",
                 candidate_set_origin=origin,
+                grouping_refs=(),
                 grouping_origins=(),
                 grouping_kinds=(),
-                row_identity_origin=None,
+                grouping_value_shapes=(),
+                ordering_group_refs=(),
+            ordering_value_refs=(),
                 ordering_origins=(),
                 output_origins=(origin,),
+                    output_kinds=("value",),
+                    result_key_count=0,
+                    requested_value_refs=("r1",),
                 selection_kind="all_results",
                 selection_limit_input_ref=None,
-                universal_shape="none",
+                relational_shape="ordinary",
             ),
         ),
         inputs=(InputTerm("i1", input_origin, "Nairobi", TextType()),),
@@ -230,60 +478,183 @@ def test_equal_origins_do_not_collapse_distinct_authored_sets() -> None:
     assert isinstance(parsed, ParsedSemanticQuestionContract)
     [fact] = parsed.contract.requested_facts
     assert tuple(item.id for item in fact.sets) == ("s1", "s2")
+    [identifier_fact] = fact.facts
+    assert identifier_fact.owner_ref == "a1"
+    assert identifier_fact.value_type == IdentifierType("s2")
     assert tuple(
         (item.id, item.from_set_ref, item.to_set_ref)
         for item in fact.associations
     ) == (("a1", "s1", "s2"),)
 
 
+def test_equal_fact_origins_do_not_collapse_incompatible_relational_values() -> None:
+    population_origin = SourceOrigin(
+        SourceOriginKind.QUESTION_CONTEXT,
+        "in-person sales occurrences that happened this month",
+    )
+    time_origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "this month")
+    meaning = ParsedSemanticQuestionMeaning(
+        decision_basis="The question asks for one count over a supplied month.",
+        answer_requests=(
+                AnswerRequestMeaning(
+                    requested_fact_id="fact_1",
+                    return_request_basis="Return the sales count.",
+                    relational_shape_basis="Count sales in the supplied month.",
+                    result_grain_basis="One count for the population.",
+                    ordering_request_basis="No ordering is requested.",
+                    result_kind="scalar",
+                candidate_set_origin=population_origin,
+                grouping_refs=(),
+                grouping_origins=(),
+                grouping_kinds=(),
+                grouping_value_shapes=(),
+                ordering_group_refs=(),
+            ordering_value_refs=(),
+                ordering_origins=(),
+                output_origins=(population_origin,),
+                    output_kinds=("value",),
+                    result_key_count=0,
+                    requested_value_refs=("r1",),
+                selection_kind="all_results",
+                selection_limit_input_ref=None,
+                relational_shape="ordinary",
+            ),
+        ),
+        inputs=(InputTerm("i1", time_origin, "this month", TemporalScopeType()),),
+        input_denotations=(
+            InputDenotation(
+                "input_denotation_1",
+                "i1",
+                "this month",
+                "This supplies the time period.",
+                None,
+                InputDenotationKind.NON_IDENTITY_SCALAR,
+            ),
+        ),
+    )
+    origin = {
+        "source": "question_context",
+        "meaning": population_origin.meaning,
+        "resolved_input_ref": None,
+    }
+    payload = {
+        "decision_basis": "Count the qualifying sales occurrences.",
+        "outcome": {
+            "kind": "question_contract",
+            "answer_requests": [
+                {
+                    "requested_fact_ref": "fact_1",
+                    "origin": origin,
+                    "candidate_set": {
+                        "instance_kind": population_origin.meaning,
+                        "instance_interpretation": "normal_business_instance"
+                    },
+                    "set_graph": {
+                        "identity_input_relations": {},
+                        "requested_output_relations": {},
+                        "other_related_sets": [],
+                    },
+                    "grouping": [],
+                    "qualification": {
+                        "kind": "and",
+                        "arguments": [
+                            {
+                                "kind": "fact",
+                                "observed_for_ref": "s1",
+                                "origin": origin,
+                            },
+                            {
+                                "kind": "within",
+                                "value": {
+                                    "kind": "fact",
+                                    "observed_for_ref": "s1",
+                                    "origin": origin,
+                                },
+                                "scope": {"kind": "input_ref", "input_ref": "i1"},
+                            },
+                        ],
+                    },
+                    "ordering": [],
+                    "selection": None,
+                    "distinct_by": [],
+                    "outputs": {
+                        "result_key_outputs": [],
+                        "requested_value_outputs": [
+                            {
+                                "output_ref": "r1",
+                                "expression": {
+                                    "kind": "aggregate",
+                                    "function": "count",
+                                    "argument": {"kind": "set_ref", "set_ref": "s1"},
+                                    "distinct_argument": False,
+                                }
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+    }
+
+    parsed = parse_semantic_question_contract(
+        payload,
+        meaning=meaning,
+        question_context_texts=(
+            "How many in-person sales happened this month?",
+        ),
+    )
+
+    assert isinstance(parsed, ParsedSemanticQuestionContract)
+    [requested_fact] = parsed.contract.requested_facts
+    assert len(requested_fact.facts) == 2
+
+
 def test_semantic_question_frame_schema_is_valid_and_basis_first():
     schema = build_semantic_question_frame_schema()
     Draft7Validator.check_schema(schema)
     complete = schema["properties"]["outcome"]["oneOf"][0]
-    result = complete["properties"]["answer_requests"]["items"]["oneOf"][0]
+    result = complete["properties"]["answer_requests"]["items"]
     assert tuple(complete["properties"]) == (
         "kind",
         "answer_requests",
         "supplied_values",
+        "question_input_inventory_check",
     )
     assert tuple(result["properties"]) == (
-        "result_kind",
-        "qualifying_row_kind",
-        "grouping_meanings",
         "return_request_basis",
-        "returned_result",
-        "answer_values",
-        "returned_value_refs",
-        "ordering_value_refs",
-        "selection",
-        "universal_shape",
+        "relational_shape_basis",
+        "request",
     )
-    assert result["properties"]["selection"]["properties"]["kind"]["enum"] == [
-        "all_results"
-    ]
-    supplied = complete["properties"]["supplied_values"]["items"]
-    branches_by_choice = {
-        next(
-            name
-            for name in ("entity_reference", "non_entity_value")
-            if name in branch["properties"]
-        ): branch
-        for branch in supplied["oneOf"]
+    supplied = complete["properties"]["supplied_values"]
+    branches_by_choice = supplied["properties"]
+    assert set(branches_by_choice) == {
+        "operands",
+        "selection_limits",
     }
-    assert set(branches_by_choice) == {"entity_reference", "non_entity_value"}
+    operand_choices = branches_by_choice["operands"]["items"]["oneOf"]
     assert all(
-        tuple(branch["properties"])[:2] == ("meaning", "denotation_basis")
-        for branch in branches_by_choice.values()
+        tuple(option["properties"])[:2] == ("meaning", "denotation_basis")
+        for option in operand_choices
     )
-    assert all(
-        choice in branches_by_choice[choice]["required"]
-        for choice in branches_by_choice
+    identity = operand_choices[0]
+    assert tuple(identity["properties"]) == (
+        "meaning",
+        "denotation_basis",
+        "entity_reference",
     )
-    identity = branches_by_choice["entity_reference"]["properties"][
-        "entity_reference"
-    ]
-    assert tuple(identity["properties"]) == ("instance_kind", "value")
-    assert "value_type" not in identity["properties"]["value"]["properties"]
+    reference = identity["properties"]["entity_reference"]
+    assert tuple(reference["properties"]) == ("instance_kind", "value")
+    identity_values = reference["properties"]["value"]["oneOf"]
+    assert tuple(identity_values[0]["properties"]) == (
+        "kind",
+        "identity_value",
+        "origin",
+    )
+    assert tuple(identity_values[1]["properties"]) == (
+        "kind",
+        "identity_values",
+        "origin",
+    )
 
 
 def test_grouping_schema_does_not_infer_identity_relation_from_origin_text():
@@ -298,18 +669,28 @@ def test_grouping_schema_does_not_infer_identity_relation_from_origin_text():
     meaning = ParsedSemanticQuestionMeaning(
         decision_basis="Return one result for each candidate invoice.",
         answer_requests=(
-            AnswerRequestMeaning(
-                requested_fact_id="fact_1",
-                result_kind="grouped_results",
+                AnswerRequestMeaning(
+                    requested_fact_id="fact_1",
+                    return_request_basis="Return each invoice identity.",
+                    relational_shape_basis="Group qualifying invoices by identity.",
+                    result_grain_basis="One row for each invoice.",
+                    ordering_request_basis="No ordering is requested.",
+                    result_kind="grouped_results",
                 candidate_set_origin=candidate,
+                grouping_refs=("g1",),
                 grouping_origins=(grouping,),
                 grouping_kinds=("qualifying_row_identity",),
-                row_identity_origin=None,
+                grouping_value_shapes=(None,),
+                ordering_group_refs=(),
+            ordering_value_refs=(),
                 ordering_origins=(),
                 output_origins=(grouping,),
+                    output_kinds=("identity",),
+                    result_key_count=1,
+                    requested_value_refs=(),
                 selection_kind="all_results",
                 selection_limit_input_ref=None,
-                universal_shape="none",
+                relational_shape="ordinary",
             ),
         ),
         inputs=(),
@@ -324,46 +705,62 @@ def test_grouping_schema_does_not_infer_identity_relation_from_origin_text():
 def test_grouped_result_frame_owns_the_exact_grouping_shape():
     meaning_schema = build_semantic_question_frame_schema()
     complete = meaning_schema["properties"]["outcome"]["oneOf"][0]
-    result_branches = complete["properties"]["answer_requests"]["items"]["oneOf"]
+    standard_request = complete["properties"]["answer_requests"]["items"][
+        "properties"
+    ]["request"]["oneOf"][1]
+    result_branches = standard_request["properties"]["result"]["oneOf"]
     branches_by_kind = {
-        branch["properties"]["result_kind"]["enum"][0]: branch
+        branch["properties"]["kind"]["enum"][0]: branch
         for branch in result_branches
     }
+    assert "grouping_meanings" not in branches_by_kind[
+        "one_value_for_population"
+    ]["properties"]
+    assert "grouping_meanings" not in branches_by_kind[
+        "one_result_per_qualifying_row"
+    ]["properties"]
     assert (
-        branches_by_kind["scalar"]["properties"]["grouping_meanings"]["maxItems"] == 0
-    )
-    assert (
-        branches_by_kind["qualifying_instances"]["properties"]["grouping_meanings"][
-            "maxItems"
-        ]
-        == 0
-    )
-    assert (
-        branches_by_kind["grouped_results"]["properties"]["grouping_meanings"][
-            "minItems"
-        ]
+        branches_by_kind["one_result_per_group"]["properties"][
+            "grouping_meanings"
+        ]["minItems"]
         == 1
     )
-    qualifying = branches_by_kind["qualifying_instances"]
-    assert tuple(qualifying["properties"]) == (
-        "result_kind",
-        "qualifying_row_kind",
-        "grouping_meanings",
-        "returned_candidate_identity",
-        "return_request_basis",
-        "returned_result",
-        "answer_values",
-        "returned_value_refs",
-        "ordering_value_refs",
-        "selection",
-        "universal_shape",
+    grouped_projection = branches_by_kind["one_result_per_group"]["properties"][
+        "projection"
+    ]
+    assert tuple(grouped_projection["properties"]) == (
+        "projection_basis",
+        "returned_grouping_keys",
+        "explicitly_requested_values",
     )
-    scalar_values = branches_by_kind["scalar"]["properties"]["answer_values"]
+    assert grouped_projection["properties"]["returned_grouping_keys"] == {
+        "enum": ["all"]
+    }
+    grouping_branches = meaning_schema["$defs"]["grouping_origin"]["oneOf"]
+    assert [
+        branch["properties"]["grouping_kind"]["enum"][0]
+        for branch in grouping_branches
+    ] == ["qualifying_row_identity", "related_entity_identity", "non_identity_value"]
+    non_identity = grouping_branches[2]["properties"]["grouping_value"]["oneOf"]
+    assert [branch["properties"]["kind"]["enum"][0] for branch in non_identity] == [
+        "observed_value",
+        "temporal_bucket",
+    ]
+    qualifying = branches_by_kind["one_result_per_qualifying_row"]
+    assert tuple(qualifying["properties"]) == (
+        "kind",
+        "result_candidates",
+        "projection",
+        "result_order",
+    )
+    scalar_values = branches_by_kind["one_value_for_population"]["properties"][
+        "returned_meanings"
+    ]
     assert scalar_values["minItems"] == scalar_values["maxItems"] == 1
     assert tuple(scalar_values["items"]["properties"]) == (
-        "value_ref",
         "meaning",
         "origin",
+        "meaning_ref",
     )
 
     contract_schema = build_semantic_question_contract_schema(
@@ -372,11 +769,12 @@ def test_grouped_result_frame_owns_the_exact_grouping_shape():
                 "fact_1",
                 "grouped_results",
                 ("qualifying_row_identity", "non_identity_value"),
-                0,
+                (),
                 2,
+                (),
                 "all_results",
                 None,
-                "none",
+                "ordinary",
             ),
         ),
         input_refs=(),
@@ -388,20 +786,28 @@ def test_grouped_result_frame_owns_the_exact_grouping_shape():
     assert distinct_by["maxItems"] == 0
 
 
-def test_qualifying_instance_frame_requires_its_returned_identity():
+def test_candidate_result_frame_requires_a_projection():
     schema = build_semantic_question_frame_schema()
     complete = schema["properties"]["outcome"]["oneOf"][0]
-    branches = complete["properties"]["answer_requests"]["items"]["oneOf"]
+    standard_request = complete["properties"]["answer_requests"]["items"][
+        "properties"
+    ]["request"]["oneOf"][1]
+    branches = standard_request["properties"]["result"]["oneOf"]
     qualifying_branches = [
         branch
         for branch in branches
-        if branch["properties"]["result_kind"]["enum"]
-        == ["qualifying_instances"]
+        if branch["properties"]["kind"]["enum"]
+        == ["one_result_per_qualifying_row"]
     ]
 
     assert qualifying_branches
     assert all(
-        "returned_candidate_identity" in branch["required"]
+        set(branch["properties"]["projection"]["properties"])
+        == {
+            "projection_basis",
+            "candidate_identity",
+            "explicitly_requested_values",
+        }
         for branch in qualifying_branches
     )
 
@@ -409,18 +815,28 @@ def test_qualifying_instance_frame_requires_its_returned_identity():
 def test_ordered_question_frame_requires_a_declared_ordering_value():
     schema = build_semantic_question_frame_schema()
     complete = schema["properties"]["outcome"]["oneOf"][0]
-    branches = complete["properties"]["answer_requests"]["items"]["oneOf"]
-    ordered_branches = [
+    standard_request = complete["properties"]["answer_requests"]["items"][
+        "properties"
+    ]["request"]["oneOf"][1]
+    branches = standard_request["properties"]["result"]["oneOf"]
+    ordered_values = [
         branch
         for branch in branches
-        if branch["properties"]["selection"]["properties"]["kind"]["enum"][0]
-        in {"first_rank_with_ties", "take_with_boundary_ties"}
+        if branch["properties"]["kind"]["enum"][0]
+        != "one_value_for_population"
     ]
 
-    assert ordered_branches
+    assert ordered_values
     assert all(
-        branch["properties"]["answer_values"]["minItems"] >= 1
-        for branch in ordered_branches
+        next(
+            option
+            for option in branch["properties"]["result_order"]["properties"][
+                "ordering"
+            ]["oneOf"]
+            if option["properties"]["kind"]["enum"] == ["ordered_by"]
+        )["properties"]["values"]["minItems"]
+        >= 1
+        for branch in ordered_values
     )
 
 
@@ -431,11 +847,12 @@ def test_grouped_result_schema_rejects_row_grain_ordering_values():
                 "fact_1",
                 "grouped_results",
                 ("related_entity_identity",),
+                (None,),
                 1,
-                1,
+                (),
                 "first_rank_with_ties",
                 None,
-                "none",
+                "ordinary",
             ),
         ),
         input_refs=(),
@@ -446,7 +863,6 @@ def test_grouped_result_schema_rejects_row_grain_ordering_values():
     payload["outcome"]["answer_requests"][0]["ordering"][0]["expression"] = {
         "kind": "fact",
         "observed_for_ref": "s1",
-        "value_type": {"kind": "decimal", "measure": {"kind": "unitless"}},
         "origin": payload["outcome"]["answer_requests"][0]["origin"],
     }
 
@@ -462,7 +878,7 @@ def test_semantic_question_frame_exposes_semantic_string_value_kinds():
     )
     property_value = _question_frame_payload(
         operand="approved",
-        kind="property_value",
+        kind="categorical_value",
     )
     ambiguous_text = _question_frame_payload(operand="approved", kind="text")
 
@@ -475,7 +891,9 @@ def test_semantic_question_frame_couples_boolean_type_to_boolean_operand():
     schema = build_semantic_question_frame_schema()
     valid = _question_frame_payload(operand="true", kind="boolean")
     adjective = _question_frame_payload(operand="approved", kind="boolean")
-    property_value = _question_frame_payload(operand="approved", kind="property_value")
+    property_value = _question_frame_payload(
+        operand="approved", kind="categorical_value"
+    )
 
     assert not tuple(Draft7Validator(schema).iter_errors(valid))
     assert tuple(Draft7Validator(schema).iter_errors(adjective))
@@ -484,26 +902,8 @@ def test_semantic_question_frame_couples_boolean_type_to_boolean_operand():
 
 def test_semantic_question_frame_couples_numeric_types_to_numeric_operands():
     schema = build_semantic_question_frame_schema()
-    valid = _question_frame_payload(
-        operand="125.50",
-        value_type={
-            "kind": "decimal",
-            "measure": {
-                "kind": "money",
-                "currency": {"kind": "contextual"},
-            },
-        },
-    )
-    metric_name = _question_frame_payload(
-        operand="revenue",
-        value_type={
-            "kind": "decimal",
-            "measure": {
-                "kind": "money",
-                "currency": {"kind": "contextual"},
-            },
-        },
-    )
+    valid = _question_frame_payload(operand="125.50", kind="number")
+    metric_name = _question_frame_payload(operand="revenue", kind="number")
 
     assert not tuple(Draft7Validator(schema).iter_errors(valid))
     assert tuple(Draft7Validator(schema).iter_errors(metric_name))
@@ -519,7 +919,6 @@ def _question_frame_payload(
     *,
     operand: str,
     kind: str | None = None,
-    value_type: dict[str, object] | None = None,
     denotation_kind: str = "scalar",
     instance_kind: str | None = None,
 ) -> dict[str, object]:
@@ -531,17 +930,26 @@ def _question_frame_payload(
         supplied_value["entity_reference"] = {
             "instance_kind": instance_kind,
             "value": {
+                "kind": "single_identity",
+                "identity_value": operand,
+                "origin": {"kind": "question"},
+            },
+        }
+        supplied_values = {
+            "operands": [supplied_value],
+            "selection_limits": [],
+        }
+    else:
+        supplied_value["non_entity_value"] = {
+            "kind": kind,
+            "value": {
                 "operands": [operand],
                 "origin": {"kind": "question"},
             },
         }
-    else:
-        supplied_value["non_entity_value"] = {
-            "value": {
-                "operands": [operand],
-                "value_type": value_type or {"kind": kind},
-                "origin": {"kind": "question"},
-            }
+        supplied_values = {
+            "operands": [supplied_value],
+            "selection_limits": [],
         }
     return {
         "decision_basis": "The question asks for one count.",
@@ -549,28 +957,37 @@ def _question_frame_payload(
             "kind": "question_meaning",
             "answer_requests": [
                 {
-                    "result_kind": "scalar",
-                    "qualifying_row_kind": {
-                        "meaning": "observations",
-                        "origin": {"kind": "question"},
-                    },
-                    "grouping_meanings": [],
                     "return_request_basis": "The answer asks for one count.",
-                    "returned_result": {"kind": "values"},
-                    "answer_values": [
-                        {
-                            "value_ref": "v1",
-                            "meaning": "observation count",
-                            "origin": {"kind": "question"},
-                        }
-                    ],
-                    "returned_value_refs": ["v1"],
-                    "ordering_value_refs": [],
-                    "selection": {"kind": "all_results"},
-                    "universal_shape": "none",
+                    "relational_shape_basis": "Count ordinary observations.",
+                    "request": {
+                        "relational_shape": "ordinary",
+                        "result_grain_basis": "One count over all observations.",
+                        "result": {
+                            "kind": "one_value_for_population",
+                            "population_rows": {
+                                "instance_kind": "observations",
+                                "origin": {"kind": "question"},
+                            },
+                            "returned_meanings": [
+                                {
+                                    "meaning_ref": "r1",
+                                    "meaning": "observation count",
+                                    "origin": {"kind": "question"},
+                                }
+                            ],
+                            "result_order": {
+                                "ordering_request_basis": "No ordering is requested.",
+                                "ordering": {"kind": "no_ordering_requested"},
+                                "selection": {"kind": "all_results"},
+                            },
+                        },
+                    },
                 }
             ],
-            "supplied_values": [supplied_value],
+            "supplied_values": supplied_values,
+            "question_input_inventory_check": {
+                "all_input_like_phrases_declared": True,
+            },
         },
     }
 
@@ -589,35 +1006,44 @@ def _identity_count_contract() -> dict[str, object]:
                 {
                     "requested_fact_ref": "fact_1",
                     "origin": origin,
-                    "other_sets": [
-                        {
-                            "id": "s2",
-                            "origin": {
-                                "source": "question_context",
-                                "meaning": "places",
-                                "resolved_input_ref": None,
-                            },
-                        }
-                    ],
-                    "other_associations": [
-                        {
-                            "id": "a1",
-                            "from_set_ref": "s1",
-                            "to_set_ref": "s2",
-                            "origin": origin,
-                        }
-                    ],
                     "candidate_set": {
+                        "instance_kind": "observations related to the supplied place",
                         "instance_interpretation": "normal_business_instance"
+                    },
+                    "set_graph": {
+                        "identity_input_relations": {
+                            "i1": {
+                                "association": {"id": "a1", "origin": origin},
+                                "set": {
+                                    "id": "s2",
+                                    "instance_kind": "place",
+                                    "origin": {
+                                        "source": "question_context",
+                                        "meaning": "places",
+                                        "resolved_input_ref": None,
+                                    },
+                                },
+                                "related_sets": [],
+                            }
+                        },
+                        "requested_output_relations": {},
+                        "other_related_sets": [],
                     },
                     "qualification": {
                         "kind": "input_comparison",
-                        "input": {"kind": "input_ref", "input_ref": "i1"},
+                        "input": {
+                            "kind": "input_ref",
+                            "input_ref": "i1",
+                            "operand_meaning": "the supplied place",
+                            "instance_kind": "place",
+                        },
                         "operator": "equals",
                         "fact": {
                             "kind": "fact",
-                            "observed_for_ref": "a1",
-                            "value_type": {"kind": "identifier", "set_ref": "s2"},
+                            "identity_path": {
+                                "kind": "related_instance",
+                                "association_ref": "a1",
+                            },
                             "origin": origin,
                         },
                     },
@@ -625,19 +1051,23 @@ def _identity_count_contract() -> dict[str, object]:
                     "ordering": [],
                     "selection": None,
                     "distinct_by": [],
-                    "outputs": [
-                        {
-                            "expression": {
-                                "kind": "aggregate",
-                                "function": "count",
-                                "argument": {
-                                    "kind": "set_ref",
-                                    "set_ref": "s1",
-                                },
-                                "distinct_argument": False,
+                    "outputs": {
+                        "result_key_outputs": [],
+                        "requested_value_outputs": [
+                            {
+                                "output_ref": "r1",
+                                "expression": {
+                                    "kind": "aggregate",
+                                    "function": "count",
+                                    "argument": {
+                                        "kind": "set_ref",
+                                        "set_ref": "s1",
+                                    },
+                                    "distinct_argument": False,
+                                }
                             }
-                        }
-                    ],
+                        ],
+                    },
                 }
             ],
         },
@@ -656,7 +1086,6 @@ def _grouped_ranking_contract() -> dict[str, object]:
         "argument": {
             "kind": "fact",
             "observed_for_ref": "s1",
-            "value_type": {"kind": "decimal", "measure": {"kind": "unitless"}},
             "origin": origin,
         },
         "distinct_argument": False,
@@ -670,29 +1099,48 @@ def _grouped_ranking_contract() -> dict[str, object]:
                     "requested_fact_ref": "fact_1",
                     "origin": origin,
                     "candidate_set": {
+                        "instance_kind": "sales",
                         "instance_interpretation": "normal_business_instance"
+                    },
+                    "set_graph": {
+                        "identity_input_relations": {},
+                        "requested_output_relations": {},
+                        "other_related_sets": [
+                            {
+                                "association": {"id": "a1", "origin": origin},
+                                "set": {
+                                    "id": "s2",
+                                    "instance_kind": "staff",
+                                    "origin": origin,
+                                },
+                                "related_sets": [],
+                            }
+                        ]
                     },
                     "grouping": [
                         {
                             "id": "g1",
                             "grouping_basis": "Group each sale by its staff identity.",
                             "kind": "related_instance_identity",
-                            "identified_set": {"id": "s2"},
-                            "association": {"id": "a1", "origin": origin},
+                            "set_ref": "s2",
                         }
                     ],
-                    "other_sets": [],
-                    "other_associations": [],
                     "qualification": None,
                     "ordering": [
                         {
+                            "ordering_basis": "Compare groups by summed sales.",
                             "expression": aggregate,
                             "direction": "descending",
                         }
                     ],
                     "selection": {"kind": "first_rank_with_ties"},
                     "distinct_by": [],
-                    "outputs": [{"expression": {"kind": "group_ref", "ref": "g1"}}],
+                    "outputs": {
+                        "result_key_outputs": [
+                            {"expression": {"kind": "group_ref", "ref": "g1"}}
+                        ],
+                        "requested_value_outputs": [],
+                    },
                 }
             ],
         },
@@ -739,3 +1187,13 @@ def _grouping_kinds(schema: dict[str, object]) -> set[str]:
     return {
         branch["properties"]["kind"]["enum"][0] for branch in grouping["oneOf"]
     }
+
+
+def test_temporal_scope_is_one_complete_operand_not_endpoint_alternatives():
+    schema = build_semantic_question_frame_schema()
+    valid = _question_frame_payload(operand="March 1 through March 31, 2026", kind="temporal_scope")
+    assert Draft7Validator(schema).is_valid(valid)
+    from copy import deepcopy
+    invalid = deepcopy(valid)
+    invalid["outcome"]["supplied_values"]["operands"][0]["non_entity_value"]["value"]["operands"] = ["March 1, 2026", "March 31, 2026"]
+    assert not Draft7Validator(schema).is_valid(invalid)

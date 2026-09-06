@@ -56,7 +56,11 @@ from fervis.lookup.semantic_types import (
     TextType,
 )
 from fervis.lookup.turn_prompts import build_turn_prompt_context
-from tests.lookup.grounding._fixtures import _staff_read
+from tests.lookup.grounding._fixtures import (
+    _area_read,
+    _location_with_area_read,
+    _staff_read,
+)
 
 
 def test_read_eligibility_assesses_one_api_read_instead_of_its_row_paths() -> None:
@@ -81,6 +85,28 @@ def test_read_eligibility_assesses_one_api_read_instead_of_its_row_paths() -> No
     assert candidate.read_id == "list_staff_list"
     assert invocation.prompt_text.count('read="list_staff_list"') == 1
     assert all(source.row_path_id != "root" for source in candidate.sources)
+
+
+def test_read_eligibility_sees_declared_cross_read_relations() -> None:
+    [index] = _semantic_contract().semantic_indexes
+    catalog = RelationCatalog(
+        reads=(_location_with_area_read(), _area_read())
+    )
+    request = _request(index=index, catalog=catalog)
+
+    prompt = SemanticReadEligibilityTurnPrompt(request).to_model_invocation(
+        build_turn_prompt_context(
+            current_question="How many locations are in an area?",
+            conversation_context={},
+        )
+    ).prompt_text
+
+    assert (
+        '<relation left_source="list_location_list" '
+        'left_field_refs="field.data.area.area_id" '
+        'right_source="list_area_list" '
+        'right_field_refs="field.data.area_id" />'
+    ) in prompt
 
 
 def test_read_retention_is_fact_local_and_does_not_author_bindings() -> None:
@@ -210,10 +236,17 @@ def test_identity_selection_precedes_read_assessment_and_resolves() -> None:
     assert isinstance(
         resolution.canonical_value.typed_value.payload, IdentityValuePayload
     )
-    assert prompt.index("Identity resolution tasks:") < prompt.index(
-        "Answer read candidates:"
-    )
+    assert prompt.index(
+        "Available identity resolver routes (separate from answer reads):"
+    ) < prompt.index("Declared canonical identity uses in answer reads:")
+    assert prompt.index(
+        "Declared canonical identity uses in answer reads:"
+    ) < prompt.index("Answer read candidates:")
     assert prompt.index("Identity selection") < prompt.index("Read assessment")
+    assert (
+        '<parameter param_ref="list_staff_list.query.name" source="query" value="Ada" />'
+        in prompt
+    )
     assert "regardless of whether another read could also answer" in prompt
     assert "set_reviews" not in prompt
     assert "identifier_reviews" not in prompt
@@ -324,6 +357,16 @@ def test_identity_route_assessments_cover_every_meaning_before_selection() -> No
         request=request,
     ).identity_outcomes
     assert selection.resolver_route_id == route.route_ref
+
+    payload["identity_outcomes"][task.task_ref]["resolver_route_id"] = (
+        other_route.route_ref
+    )
+    validate(payload, build_semantic_read_eligibility_schema(request))
+    with pytest.raises(
+        ValueError,
+        match="identity selection references an unknown resolver route",
+    ):
+        parse_semantic_read_eligibility(payload, request=request)
 
 
 def test_one_selected_identity_route_resolves_every_collection_operand() -> None:
@@ -476,36 +519,63 @@ def _semantic_contract() -> ParsedSemanticQuestionContract:
                 "kind": "question_meaning",
                 "answer_requests": [
                     {
-                        "result_kind": "qualifying_instances",
-                        "qualifying_row_kind": _frame_origin("staff members"),
-                        "grouping_meanings": [],
-                        "returned_candidate_identity": _frame_origin(
-                            "qualifying staff members"
-                        ),
                         "return_request_basis": "Return the matching staff identity.",
-                        "returned_result": {"kind": "identities"},
-                        "answer_values": [],
-                        "returned_value_refs": [],
-                        "ordering_value_refs": [],
-                        "selection": {"kind": "all_results"},
-                        "universal_shape": "none",
-                    }
-                ],
-                "supplied_values": [
-                    {
-                        "meaning": "the staff member being listed",
-                        "denotation_basis": (
-                            "Ada names one particular staff member."
+                        "relational_shape_basis": (
+                            "This is an ordinary identity-qualified row request."
                         ),
-                        "entity_reference": {
-                            "instance_kind": "staff member",
-                            "value": {
-                                "operands": ["Ada"],
-                                "origin": {"kind": "question"},
+                        "request": {
+                            "relational_shape": "ordinary",
+                            "result_grain_basis": (
+                                "One result row represents one qualifying staff member."
+                            ),
+                            "result": {
+                                "kind": "one_result_per_qualifying_row",
+                                "result_candidates": {
+                                    "instance_kind": "staff members",
+                                    "origin": {"kind": "question"},
+                                },
+                                "projection": {
+                                    "projection_basis": (
+                                        "Return the matching staff identity."
+                                    ),
+                                    "candidate_identity": "returned",
+                                    "explicitly_requested_values": [],
+                                },
+                                "result_order": {
+                                    "ordering_request_basis": (
+                                        "The question requests no ordering."
+                                    ),
+                                    "ordering": {
+                                        "kind": "no_ordering_requested"
+                                    },
+                                    "selection": {"kind": "all_results"},
+                                },
                             },
                         },
-                    },
+                    }
                 ],
+                "supplied_values": {
+                    "operands": [
+                        {
+                            "meaning": "the staff member being listed",
+                            "denotation_basis": (
+                                "Ada names one particular staff member."
+                            ),
+                            "entity_reference": {
+                                "instance_kind": "staff members",
+                                "value": {
+                                    "kind": "single_identity",
+                                    "identity_value": "Ada",
+                                    "origin": {"kind": "question"},
+                                },
+                            },
+                        }
+                    ],
+                    "selection_limits": [],
+                },
+                "question_input_inventory_check": {
+                    "all_input_like_phrases_declared": True,
+                },
             },
         },
         question_context_texts=(question,),
@@ -520,19 +590,29 @@ def _semantic_contract() -> ParsedSemanticQuestionContract:
                     {
                         "requested_fact_ref": "fact_1",
                         "origin": _origin("staff members named Ada"),
-                        "other_sets": [],
-                        "other_associations": [],
                         "candidate_set": {
+                            "instance_kind": "staff members",
                             "instance_interpretation": "normal_business_instance",
+                        },
+                        "set_graph": {
+                            "identity_input_relations": {"i1": None},
+                            "requested_output_relations": {},
+                            "other_related_sets": [],
                         },
                         "qualification": {
                             "kind": "input_comparison",
-                            "input": {"kind": "input_ref", "input_ref": "i1"},
+                            "input": {
+                                "kind": "input_ref",
+                                "input_ref": "i1",
+                                "operand_meaning": "the staff member being listed",
+                                "instance_kind": "staff members",
+                            },
                             "operator": "equals",
                             "fact": {
                                 "kind": "fact",
-                                "observed_for_ref": "s1",
-                                "value_type": {"kind": "identifier", "set_ref": "s1"},
+                                "identity_path": {
+                                    "kind": "candidate_instance",
+                                },
                                 "origin": _origin("staff member identity"),
                             },
                         },
@@ -540,9 +620,17 @@ def _semantic_contract() -> ParsedSemanticQuestionContract:
                         "ordering": [],
                         "selection": None,
                         "distinct_by": [],
-                        "outputs": [
-                            {"expression": {"kind": "set_ref", "set_ref": "s1"}}
-                        ],
+                        "outputs": {
+                            "result_key_outputs": [
+                                {
+                                    "expression": {
+                                        "kind": "set_ref",
+                                        "set_ref": "s1",
+                                    }
+                                }
+                            ],
+                            "requested_value_outputs": [],
+                        },
                     }
                 ],
             },

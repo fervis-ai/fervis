@@ -9,14 +9,15 @@ from .model import (
     SetRealization,
     SourceBindingClarification,
     SourceBindingPlan,
+    SourceRealization,
     SourceMechanicKind,
     SubjectChoiceReview,
     SubjectSurfaceReview,
     source_binding_clarification,
     source_required_inputs_are_satisfiable,
 )
-from .parser import compile_source_binding_plan
-from .prompt import SemanticSourceBindingTurnPrompt
+from .parser import compile_source_binding_plan, compile_source_realization
+from .prompt import SemanticSourceBindingTurnPrompt, SemanticSourceRealizationTurnPrompt
 from .verification import (
     SourceStrategyVerificationFailure,
     VerifiedSourceStrategy,
@@ -34,6 +35,9 @@ __all__ = [
     "MissingCatalogValue",
     "SourceBindingClarification",
     "SourceBindingPlan",
+    "SourceRealization",
+    "SemanticSourceRealizationTurnPrompt",
+    "compile_source_realization",
     "SourceMechanicKind",
     "SubjectChoiceReview",
     "SubjectSurfaceReview",

@@ -792,6 +792,9 @@ def _bound_row(
     output: dict[str, RuntimeValue] = {}
     for relation_field in relation.fields:
         row_source_field = row_source.field(relation_field.field_id)
+        if row_source_field.declared_entity_kind:
+            output[relation_field.field_id] = row_source_field.declared_entity_kind
+            continue
         catalog_field = fields_by_ref.get(row_source_field.field_ref)
         if catalog_field is None:
             raise ValueError(f"unknown relation field {relation_field.field_id}")

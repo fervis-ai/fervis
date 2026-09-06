@@ -39,10 +39,11 @@ input:
     outcome:
       kind: resolved
       resolution_basis: The current location replaces the prior location while today remains.
-      contextualized_question: How many sales did we make at Pivot Mall today?
       clauses:
         - current_clause_text: What about Pivot Mall?
           occurrence: 1
+          request_shape_basis: The prior frame supplies the omitted request shape while the current clause changes its location.
+          request_shape_source: prior_frame_supplies_omitted_request_parts
           resolved_text: How many sales did we make at Pivot Mall today?
           retained_frame_parts:
             - {kind: frame_part, frame_id: request:1, part_id: subject}

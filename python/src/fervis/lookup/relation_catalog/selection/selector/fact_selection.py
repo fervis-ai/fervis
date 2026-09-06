@@ -134,10 +134,46 @@ def _merge_exact_rankings(
     *,
     candidate_limit: int,
 ) -> tuple[CatalogSelectionRanking, ...]:
-    return _round_robin_unique_rankings(
+    return _select_for_group_coverage(
         tuple(selection.exact_rankings for selection in selections),
+        coverage_groups=tuple(
+            selection.positive_rankings for selection in selections
+        ),
         limit=candidate_limit,
     )
+
+
+def _select_for_group_coverage(
+    candidate_groups: tuple[tuple[CatalogSelectionRanking, ...], ...],
+    *,
+    coverage_groups: tuple[tuple[CatalogSelectionRanking, ...], ...],
+    limit: int,
+) -> tuple[CatalogSelectionRanking, ...]:
+    rankings = _round_robin_unique_rankings(candidate_groups)
+    covered_groups_by_read: dict[str, frozenset[int]] = {
+        ranking.read_id: frozenset(
+            index
+            for index, group in enumerate(coverage_groups)
+            if any(item.read_id == ranking.read_id for item in group)
+        )
+        for ranking in rankings
+    }
+    uncovered_groups = {
+        index for index, group in enumerate(coverage_groups) if group
+    }
+    remaining = list(rankings)
+    selected: list[CatalogSelectionRanking] = []
+    while remaining and len(selected) < limit:
+        ranking = max(
+            remaining,
+            key=lambda item: len(
+                covered_groups_by_read[item.read_id] & uncovered_groups
+            ),
+        )
+        remaining.remove(ranking)
+        selected.append(ranking)
+        uncovered_groups -= covered_groups_by_read[ranking.read_id]
+    return tuple(selected)
 
 
 def _remaining_positive_rankings(
@@ -355,38 +391,43 @@ def _resource_name_match(
     requested_resource_name: str,
     read_resource_names: tuple[str, ...],
 ) -> _ResourceNameMatch | None:
-    is_exact_resource_name = False
-    matched_names: list[str] = []
     requested_terms = frozenset(
         _explicit_catalog_search_query_terms((requested_resource_name,))
     )
     if not requested_terms:
         return None
+    if requested_resource_name in read_resource_names:
+        return _ResourceNameMatch(
+            query_terms=_explicit_catalog_search_query_terms(
+                (requested_resource_name,)
+            ),
+            is_exact_resource_name=True,
+        )
     for read_resource_name in read_resource_names:
         read_terms = frozenset(
             _explicit_catalog_search_query_terms((read_resource_name,))
         )
-        if requested_resource_name == read_resource_name:
-            is_exact_resource_name = True
-            matched_names.append(requested_resource_name)
-            break
         if _requested_terms_match_read_resource(requested_terms, read_terms):
-            matched_names.append(requested_resource_name)
-            break
-    query_terms = _explicit_catalog_search_query_terms(tuple(matched_names))
-    if not query_terms:
-        return None
-    return _ResourceNameMatch(
-        query_terms=query_terms,
-        is_exact_resource_name=is_exact_resource_name,
-    )
+            return _ResourceNameMatch(
+                query_terms=_explicit_catalog_search_query_terms(
+                    (requested_resource_name,)
+                )
+            )
+    return None
 
 
 def _requested_terms_match_read_resource(
     requested_terms: frozenset[str],
     read_terms: frozenset[str],
 ) -> bool:
-    return bool(requested_terms and read_terms and requested_terms < read_terms)
+    return bool(
+        requested_terms
+        and read_terms
+        and (
+            requested_terms < read_terms
+            or read_terms < requested_terms
+        )
+    )
 
 
 def _rank_resource_read(

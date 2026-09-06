@@ -1,0 +1,23 @@
+{
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/$defs/subject_identifier_fact_expression/properties/identity_path",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "current_row"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      }
+    }
+  ]
+}

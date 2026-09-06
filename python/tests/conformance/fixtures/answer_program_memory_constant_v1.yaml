@@ -1,4 +1,4 @@
-schema_revision: 8
+schema_revision: 13
 program:
   $type: AnswerProgram
   fields:
@@ -76,7 +76,7 @@ program:
     compatibility:
       $type: ProgramCompatibility
       fields:
-        schema_revision: 8
+        schema_revision: 13
         compiler_version: ""
         function_semantics: {$tuple: []}
         source_contracts: {$tuple: []}

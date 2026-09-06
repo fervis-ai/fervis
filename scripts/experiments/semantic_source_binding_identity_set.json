@@ -1,5 +1,0 @@
-{
-  "kind": "identity_set_binding",
-  "question": "How many observations belong to members Alpha and Beta?",
-  "operand": ["Alpha", "Beta"]
-}

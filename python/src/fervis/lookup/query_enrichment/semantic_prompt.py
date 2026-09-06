@@ -24,10 +24,35 @@ class SemanticQueryEnrichmentTurnPrompt(TurnPromptBase):
     turn_task = "match semantic requirements to catalog resource names for recall"
 
     def __init__(self, request: SemanticQueryEnrichmentRequest) -> None:
+        required = {
+            ref for bucket in request.recall_buckets for ref in bucket.requirement_refs
+        }
+        defined = {item.requirement_ref for item in request.requirements}
+        if not required <= defined or len(defined) != len(request.requirements):
+            raise ValueError("recall requires complete, unique requirement definitions")
         self.request = request
 
     def data_sections(self, builder: TurnPromptBuilder) -> tuple[PromptSection, ...]:
         return (
+            builder.json_section(
+                "Semantic requirements:",
+                {
+                    "requirements": [
+                        {
+                            "requirement_ref": item.requirement_ref.token,
+                            "kind": item.kind.value,
+                            "meaning": item.origin.meaning,
+                            "owner_refs": [ref.token for ref in item.owner_refs],
+                            "identity_set_ref": item.identity_set_ref.token
+                            if item.identity_set_ref
+                            else None,
+                            "use_site_refs": list(item.use_site_refs),
+                        }
+                        for item in self.request.requirements
+                    ]
+                },
+                indent=2,
+            ),
             builder.json_section(
                 "Recall buckets:",
                 {
@@ -98,7 +123,7 @@ class SemanticQueryEnrichmentTurnPrompt(TurnPromptBase):
                 "Recall bucket resource lineage",
                 (
                     "Write exactly one recall_bucket_matches item for every shown bucket_ref.",
-                    "For each bucket, compare its meaning with every shown resource_name.",
+                    "For each bucket, compare its meaning and every referenced requirement definition with every shown resource_name. Include resources needed for qualifications and absence tests, not only the returned entity kind.",
                     "First write exhaustive_resource_names. Include every resource name with semantic proximity to the bucket: the same concept in different words, a broader or narrower form of that concept, or a closely related process. Uncertainty means inclusion.",
                     "Then write matching_resource_names as the names from that inventory that actually fit the bucket.",
                     "Every matching resource name appears in exhaustive_resource_names.",

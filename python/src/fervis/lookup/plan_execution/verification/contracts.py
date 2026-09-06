@@ -21,6 +21,9 @@ from .contract_types import (
 )
 from .execution_proof import ExecutionProofContext
 from .operation_contracts import _operation_relation_contract
+from fervis.lookup.plan_execution.expression_schema import expression_value_type
+from fervis.lookup.answer_program.inputs import parameter_runtime_type
+from fervis.lookup.answer_program.operations import operation_scalar_output_ids
 from fervis.lookup.answer_program.operations import (
     ComputeSpec,
     Operation,
@@ -54,14 +57,19 @@ def _relation_contracts(
             contract,
             declarations.pop(relation.id, None),
         )
+    scalar_types = {f"parameter:{p.id}":parameter_runtime_type(p.value_type) for p in answer.parameters}
+    node_output_types: dict[str, dict[str, str]] = {}
     for operation in answer.operations:
+        if isinstance(operation.spec, ComputeSpec):
+            node_output_types[operation.id] = {operation.spec.output_scalar:expression_value_type(operation.spec.expression, scalar_types=scalar_types, node_output_types=node_output_types)}
         if not operation.output_relation:
             continue
         contract = _operation_relation_contract(
             operation,
             contracts,
-            proof_context=proof_context,
+            proof_context=proof_context, scalar_types=scalar_types, node_output_types=node_output_types,
         )
+        node_output_types[operation.id] = {key:contract.field_types.get(key, "") for key in operation_scalar_output_ids(operation.spec)}
         contracts[operation.output_relation] = _with_declared_semantic_guarantee(
             contract,
             declarations.pop(operation.output_relation, None),
@@ -344,7 +352,7 @@ def _binding_proof(
         read_field_evidence_ref(
             read_id=row_source.read_id, field_id=row_source_field.id
         )
-        if row_source.read_id
+        if row_source.read_id and not row_source_field.declared_entity_kind
         else row_source_field_evidence_ref(
             row_source_id=row_source.id,
             field_id=row_source_field.id,

@@ -1402,7 +1402,8 @@ def test_common_question_interface_has_no_framework_or_runtime_internal_imports(
 ):
     from pathlib import Path
 
-    source = Path("src/fervis/interfaces/common/questions.py").read_text(
+    python_root = Path(__file__).resolve().parents[2]
+    source = (python_root / "src/fervis/interfaces/common/questions.py").read_text(
         encoding="utf-8"
     )
 

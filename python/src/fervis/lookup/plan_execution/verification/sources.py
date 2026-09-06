@@ -227,6 +227,10 @@ def _verify_api_relation_catalog_refs(
                     raise VerificationError(
                         f"relation {relation.id} field role is not allowed"
                     )
+            if row_source_field.declared_entity_kind:
+                if {key.entity_kind for key in row_source.candidate_keys} != {row_source_field.declared_entity_kind}:
+                    raise VerificationError("row class contradicts its declared entity authority")
+                continue
             _verify_field_requirements(
                 relation=relation,
                 field=_catalog_field(

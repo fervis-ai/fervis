@@ -7,6 +7,7 @@ from .identity import (
     reference_binding_options,
 )
 from .semantic import (
+    CanonicalIdentityOption,
     CanonicalInputValue,
     CompatibleIdentityRoute,
     GroundingPartition,
@@ -23,12 +24,13 @@ from .semantic import (
     identity_resolution_tasks,
     reference_grounding_tasks,
     time_grounding_tasks,
-    validate_canonical_input_ledger,
+    build_canonical_input_ledger,
 )
 from .semantic_parser import parse_semantic_grounding
 from .semantic_prompt import SemanticGroundingTurnPrompt
 
 __all__ = [
+    "CanonicalIdentityOption",
     "CanonicalInputValue",
     "CompatibleIdentityRoute",
     "ExpectedInputIdentity",
@@ -51,5 +53,5 @@ __all__ = [
     "reference_binding_options",
     "reference_grounding_tasks",
     "time_grounding_tasks",
-    "validate_canonical_input_ledger",
+    "build_canonical_input_ledger",
 ]

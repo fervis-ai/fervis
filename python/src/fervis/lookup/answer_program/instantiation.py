@@ -22,6 +22,7 @@ from fervis.lookup.answer_program.expression_instantiation import (
     InstantiatedProgramInputs,
     instantiate_program_expressions,
 )
+from fervis.lookup.answer_program.operations import operation_node_output_refs
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
 from fervis.lookup.relation_catalog.row_sources.model import RowSourceCatalog
 from fervis.lookup.answer_program.values import (
@@ -35,7 +36,9 @@ from fervis.lookup.answer_program.operations import (
     ComputeSpec,
     FilterSpec,
     OrderSpec,
+    ProjectSpec,
     Take,
+    AtPosition,
     UniversalConditionSpec,
 )
 from fervis.lookup.answer_program.inputs import (
@@ -375,6 +378,15 @@ def _instantiate_operations(
                             operation_id=operation.id,
                         )
                     )
+        if isinstance(spec, ProjectSpec):
+            for output in spec.outputs:
+                inputs.extend(
+                    _resolve_expression_inputs(
+                        output.expression,
+                        bindings=bindings,
+                        operation_id=operation.id,
+                    )
+                )
         if not isinstance(spec, OrderSpec):
             operations.append(
                 ExecutableOperation(
@@ -391,9 +403,9 @@ def _instantiate_operations(
                 output_relation=operation.output_relation,
             )
         )
-        if isinstance(spec.selection, Take):
+        if isinstance(spec.selection, (Take, AtPosition)):
             limit_inputs = _resolve_expression_inputs(
-                spec.selection.limit,
+                (spec.selection.limit if isinstance(spec.selection, Take) else spec.selection.position),
                 bindings=bindings,
                 operation_id=operation.id,
             )
@@ -588,6 +600,10 @@ def _execution_proof_graph(
                 kind=ProofNodeKind.OPERATION,
             )
         )
+        for node_id in dict.fromkeys(ref.node_id for ref in operation_node_output_refs(operation.spec)):
+            edges.append(ExecutionProofEdge(
+                source=f"operation:{node_id}", target=operation_node_id, role=ProofEdgeRole.INPUT,
+            ))
         for input_relation in operation.input_relation_ids:
             edges.append(
                 ExecutionProofEdge(

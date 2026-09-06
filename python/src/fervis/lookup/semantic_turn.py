@@ -63,6 +63,7 @@ def generate_semantic_turn(
             usage=output.usage,
             duration_ms=output.duration_ms,
             artifact=output.artifact,
+            error_context={"exception_class": type(exc).__name__, "message": str(exc)},
         ) from exc
     return SemanticTurnResult(
         result=result,

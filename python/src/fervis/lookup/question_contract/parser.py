@@ -46,6 +46,7 @@ from fervis.lookup.question_contract.model import (
     OrderingDirection,
     Quantifier,
     Quantify,
+    RelatedRow,
     QuestionContract,
     RequestedFact,
     RequestedOutput,
@@ -53,6 +54,7 @@ from fervis.lookup.question_contract.model import (
     Subject,
     ResultSelection,
     TakeWithBoundaryTies,
+    PositionWithTies,
     TemporalBucket,
     TemporalGrain,
 )
@@ -70,6 +72,8 @@ from fervis.lookup.semantic_types import (
     ItemQuantityUnit,
     MoneyMeasure,
     Measure,
+    NumericType,
+    OrderableType,
     PercentageMeasure,
     QuantityMeasure,
     RatioMeasure,
@@ -79,9 +83,11 @@ from fervis.lookup.semantic_types import (
     SourceOriginKind,
     ScalarType,
     TemporalScopeType,
+    TemporalPointType,
     TextType,
     TimeUnit,
     UnitlessMeasure,
+    UnspecifiedScalarType,
     ValueType,
     input_operand_matches_value_type,
 )
@@ -97,16 +103,26 @@ class ParsedSemanticQuestionContract:
 @dataclass(frozen=True)
 class AnswerRequestMeaning:
     requested_fact_id: str
+    return_request_basis: str
+    relational_shape_basis: str
+    result_grain_basis: str
+    ordering_request_basis: str
     result_kind: str
     candidate_set_origin: SourceOrigin
+    grouping_refs: tuple[str, ...]
     grouping_origins: tuple[SourceOrigin, ...]
     grouping_kinds: tuple[str, ...]
-    row_identity_origin: SourceOrigin | None
+    grouping_value_shapes: tuple[tuple[str, str | None] | None, ...]
+    ordering_group_refs: tuple[str | None, ...]
+    ordering_value_refs: tuple[str | None, ...]
     ordering_origins: tuple[SourceOrigin, ...]
     output_origins: tuple[SourceOrigin, ...]
+    output_kinds: tuple[str, ...]
+    result_key_count: int
+    requested_value_refs: tuple[str, ...]
     selection_kind: str
     selection_limit_input_ref: str | None
-    universal_shape: str
+    relational_shape: str
 
 
 @dataclass(frozen=True)
@@ -135,223 +151,519 @@ def parse_semantic_question_frame(
         raise ValueError("unknown question meaning outcome")
     parsed = decision.outcome.parse_as(output.CompleteSemanticQuestionFrameOutput)
     conversation_text = dict(conversation_text_by_resolved_input_ref or {})
-    input_interner = _InputInterner(
+    input_collector = _InputCollector(
         question_context_texts=question_context_texts,
         conversation_text_by_ref=conversation_text,
     )
     answer_requests: list[AnswerRequestMeaning] = []
     denotations: list[InputDenotation] = []
-    for result_index, result in enumerate(parsed.answer_requests, start=1):
+    selection_limits = _selection_limit_inputs(
+        parsed.supplied_values.selection_limits,
+        answer_request_count=len(parsed.answer_requests),
+        input_collector=input_collector,
+        denotations=denotations,
+    )
+    result_kind_by_provider_value = {
+        "one_value_for_population": "scalar",
+        "one_result_per_qualifying_row": "qualifying_instances",
+        "one_result_per_group": "grouped_results",
+    }
+    if not parsed.question_input_inventory_check.all_input_like_phrases_declared:
+        raise ValueError("question input inventory must be complete")
+    for result_index, frame in enumerate(parsed.answer_requests, start=1):
+        if not frame.return_request_basis.strip():
+            raise ValueError("return_request_basis is required")
+        if not frame.relational_shape_basis.strip():
+            raise ValueError("relational_shape_basis is required")
+        request = frame.request.parse_as(output.QuestionFrameRequestOutput)
+        if not request.result_grain_basis.strip():
+            raise ValueError("result_grain_basis is required")
+        result = request.result
+        try:
+            provider_result_kind = result.discriminator("kind")
+            result_kind = result_kind_by_provider_value[provider_result_kind]
+        except KeyError as error:
+            raise ValueError("unknown requested result kind") from error
         requested_fact_id = f"fact_{result_index}"
-        candidate_set_origin = _frame_source_origin(
-            result.qualifying_row_kind,
+        candidate_field = (
+            "coverage_candidates"
+            if request.relational_shape == "every_required_member_has_observation"
+            else {
+                "one_value_for_population": "population_rows",
+                "one_result_per_qualifying_row": "result_candidates",
+                "one_result_per_group": "grouped_observation_rows",
+            }[provider_result_kind]
+        )
+        candidate_set_origin = _frame_row_source_origin(
+            output.FrameRowSourceOutput.parse(result.field(candidate_field)),
             conversation_text_by_ref=conversation_text,
         )
+        grouping_meanings = (
+            tuple(
+                item.parse_as(output.GroupingMeaningOutput)
+                for item in _provider_object_array(
+                    result.field("grouping_meanings"),
+                )
+            )
+            if provider_result_kind == "one_result_per_group"
+            else ()
+        )
+        if any(not item.grouping_basis.strip() for item in grouping_meanings):
+            raise ValueError("grouping_basis is required")
         grouping_origins = tuple(
             _frame_source_origin(
                 item,
                 conversation_text_by_ref=conversation_text,
             )
-            for item in result.grouping_meanings
+            for item in grouping_meanings
         )
-        grouping_kinds = tuple(item.grouping_kind for item in result.grouping_meanings)
-        row_identity_origin = (
-            _frame_source_origin(
-                result.returned_candidate_identity,
+        grouping_kinds = tuple(item.grouping_kind for item in grouping_meanings)
+        grouping_value_shapes = tuple(
+            _frame_grouping_value_shape(item) for item in grouping_meanings
+        )
+        grouping_refs = tuple(item.group_ref for item in grouping_meanings)
+        grouping_origin_by_ref = {
+            item.group_ref: origin
+            for item, origin in zip(
+                grouping_meanings,
+                grouping_origins,
+                strict=True,
+            )
+        }
+        if len(grouping_origin_by_ref) != len(grouping_meanings):
+            raise ValueError("grouping refs must be unique")
+        if result_kind == "scalar":
+            returned_meanings = _frame_returned_meanings(
+                _provider_object_array(result.field("returned_meanings")),
                 conversation_text_by_ref=conversation_text,
             )
-            if result.returned_candidate_identity is not None
-            else None
+        else:
+            returned_meanings = _frame_projection_meanings(
+                _provider_object(result.field("projection")),
+                candidate_origin=candidate_set_origin,
+                grouping_origins=grouping_origins,
+                grouping_kinds=grouping_kinds,
+                conversation_text_by_ref=conversation_text,
+            )
+        result_order = output.FrameResultOrderOutput.parse(
+            result.field("result_order")
         )
-        if not result.return_request_basis.strip():
-            raise ValueError("return_request_basis is required")
-        answer_values = _frame_answer_values(
-            result.answer_values,
+        if not result_order.ordering_request_basis.strip():
+            raise ValueError("ordering_request_basis is required")
+        ordering_kind = result_order.ordering.discriminator("kind")
+        if ordering_kind == "no_ordering_requested":
+            ordering_values: tuple[ProviderObject, ...] = ()
+        elif ordering_kind == "ordered_by":
+            ordering_values = result_order.ordering.parse_as(
+                output.OrderedByOutput
+            ).values
+        else:
+            raise ValueError("unknown ordering request")
+        ordering_origins, ordering_group_refs, ordering_value_refs = _frame_ordering_meanings(
+            ordering_values,
+            returned_values_by_ref=returned_meanings.returned_values_by_ref,
+            grouping_origins_by_ref=grouping_origin_by_ref,
             conversation_text_by_ref=conversation_text,
         )
-        ordering_origins = _referenced_frame_values(
-            result.ordering_value_refs,
-            values_by_ref=answer_values,
-            label="ordering value",
-        )
-        projected_non_key_origins = _referenced_frame_values(
-            result.returned_value_refs,
-            values_by_ref=answer_values,
-            label="returned value",
-        )
-        returned_result = result.returned_result.parse_as(
-            output.ReturnedResultOutput
-        )
-        if result.result_kind == "scalar" and (
-            row_identity_origin is not None
-            or grouping_origins
-            or returned_result.kind != "values"
-            or len(projected_non_key_origins) != 1
-            or tuple(answer_values.values()) != projected_non_key_origins
+        if result_kind == "scalar" and (
+            grouping_origins
+            or len(returned_meanings.output_origins) != 1
             or ordering_origins
         ):
             raise ValueError("scalar requested meaning requires one output")
-        if (result.result_kind == "grouped_results") != bool(grouping_origins):
+        if (result_kind == "grouped_results") != bool(grouping_origins):
             raise ValueError("grouping meanings must match grouped result meaning")
-        if (result.result_kind == "qualifying_instances") != (
-            row_identity_origin is not None
-        ):
-            raise ValueError(
-                "row identity meaning must match qualifying-instance result"
-            )
-        if result.result_kind != "scalar":
-            expected_returned_kind = (
-                "identities_and_values"
-                if projected_non_key_origins
-                else "identities"
-            )
-            if returned_result.kind != expected_returned_kind:
-                raise ValueError("returned result contradicts returned value refs")
-        output_origins = (
-            projected_non_key_origins
-            if result.result_kind == "scalar"
-            else (
-                *((row_identity_origin,) if row_identity_origin is not None else ()),
-                *grouping_origins,
-                *projected_non_key_origins,
-            )
-        )
+        output_origins = returned_meanings.output_origins
         if not output_origins:
             raise ValueError("requested meaning requires one output")
-        selection = result.selection.parse_as(output.SelectionOutput)
+        selection = result_order.selection.parse_as(output.SelectionOutput)
         selection_limit_input_ref: str | None = None
-        if selection.kind == "take_with_boundary_ties":
-            limit = _required(selection.limit, field="selection.limit")
-            selection_limit_input_ref = _append_supplied_value(
-                limit,
-                input_interner=input_interner,
-                denotations=denotations,
-            )
+        if selection.kind in {"take_with_boundary_ties", "position_with_ties"}:
+            selection_limit_input_ref = selection_limits.pop(result_index, None)
+            if selection_limit_input_ref is None:
+                raise ValueError("bounded selection requires one selection limit")
         elif selection.kind not in {"all_results", "first_rank_with_ties"}:
             raise ValueError("unknown requested result selection")
+        elif result_index in selection_limits:
+            raise ValueError("unbounded selection cannot own a selection limit")
         if (
-            selection.kind
-            in {"first_rank_with_ties", "take_with_boundary_ties"}
+            selection.kind in {"first_rank_with_ties", "take_with_boundary_ties", "position_with_ties"}
             and not ordering_origins
         ):
             raise ValueError("ranked result requires an ordering value")
-        if result.universal_shape not in {
-            "none",
+        if request.relational_shape not in {
+            "ordinary",
             "every_related_row",
             "every_required_member_has_observation",
+            "same_related_row",
         }:
-            raise ValueError("unknown universal requirement shape")
+            raise ValueError("unknown relational requirement shape")
         answer_requests.append(
             AnswerRequestMeaning(
                 requested_fact_id=requested_fact_id,
-                result_kind=result.result_kind,
+                return_request_basis=frame.return_request_basis.strip(),
+                relational_shape_basis=frame.relational_shape_basis.strip(),
+                result_grain_basis=request.result_grain_basis.strip(),
+                ordering_request_basis=result_order.ordering_request_basis.strip(),
+                result_kind=result_kind,
                 candidate_set_origin=candidate_set_origin,
+                grouping_refs=grouping_refs,
                 grouping_origins=grouping_origins,
                 grouping_kinds=grouping_kinds,
-                row_identity_origin=row_identity_origin,
+                grouping_value_shapes=grouping_value_shapes,
+                ordering_group_refs=ordering_group_refs,
+                ordering_value_refs=ordering_value_refs,
                 ordering_origins=ordering_origins,
                 output_origins=output_origins,
+                output_kinds=returned_meanings.output_kinds,
+                result_key_count=returned_meanings.result_key_count,
+                requested_value_refs=returned_meanings.requested_value_refs,
                 selection_kind=selection.kind,
                 selection_limit_input_ref=selection_limit_input_ref,
-                universal_shape=result.universal_shape,
+                relational_shape=request.relational_shape,
             )
         )
-    for item in parsed.supplied_values:
-        _append_supplied_value(
-            item,
-            input_interner=input_interner,
-            denotations=denotations,
-        )
-    if {item.input_ref for item in denotations} != set(input_interner.input_by_id):
+    if selection_limits:
+        raise ValueError("selection limit references no bounded answer request")
+    for supplied_operand in parsed.supplied_values.operands:
+        if supplied_operand.has_field("entity_reference"):
+            _append_entity_reference(
+                supplied_operand.parse_as(output.SuppliedEntityReferenceOutput),
+                input_collector=input_collector,
+                denotations=denotations,
+            )
+        elif supplied_operand.has_field("non_entity_value"):
+            _append_non_entity_value(
+                supplied_operand.parse_as(output.SuppliedNonEntityValueOutput),
+                input_collector=input_collector,
+                denotations=denotations,
+            )
+        else:
+            raise ValueError("supplied operand has no declared value branch")
+    if {item.input_ref for item in denotations} != set(input_collector.input_by_id):
         raise ValueError(
             "input denotations must cover every supplied input exactly once"
         )
     return ParsedSemanticQuestionMeaning(
         decision_basis=decision.decision_basis.strip(),
         answer_requests=tuple(answer_requests),
-        inputs=input_interner.inputs,
+        inputs=input_collector.inputs,
         input_denotations=tuple(denotations),
     )
 
 
-def _frame_answer_values(
+def _frame_grouping_value_shape(
+    grouping: output.GroupingMeaningOutput,
+) -> tuple[str, str | None] | None:
+    value = grouping.grouping_value
+    if grouping.grouping_kind in {"related_entity_identity", "qualifying_row_identity"}:
+        if value is not None:
+            raise ValueError("entity grouping cannot declare a value shape")
+        return None
+    if grouping.grouping_kind != "non_identity_value" or value is None:
+        raise ValueError("non-identity grouping requires a value shape")
+    kind = value.discriminator("kind")
+    if kind in {"observed_value", "computed_value", "condition"}:
+        value.parse_as(output.NonTemporalGroupingValueOutput)
+        return (kind, None)
+    if kind == "temporal_bucket":
+        parsed = value.parse_as(output.TemporalBucketGroupingValueOutput)
+        return (kind, TemporalGrain(parsed.grain).value)
+    raise ValueError("unknown grouping value shape")
+
+
+def _frame_returned_meanings(
     values: tuple[ProviderObject, ...],
     *,
     conversation_text_by_ref: Mapping[str, str],
-) -> dict[str, SourceOrigin]:
+) -> _FrameProjection:
     parsed: dict[str, SourceOrigin] = {}
-    ref_by_origin: dict[SourceOrigin, str] = {}
     for value in values:
-        item = value.parse_as(output.NonKeyFrameValueOutput)
-        if item.value_ref in parsed:
-            raise ValueError("non-key value refs must be unique")
+        item = value.parse_as(output.ReturnedMeaningOutput)
+        if item.meaning_ref in parsed:
+            raise ValueError("returned meaning refs must be unique")
         origin = _frame_source_origin(
             item,
             conversation_text_by_ref=conversation_text_by_ref,
         )
-        if origin in ref_by_origin:
-            raise ValueError("one non-key value is declared more than once")
-        ref_by_origin[origin] = item.value_ref
-        parsed[item.value_ref] = origin
-    return parsed
+        parsed[item.meaning_ref] = origin
+    return _FrameProjection(
+        output_origins=tuple(parsed.values()),
+        output_kinds=tuple("value" for _ in parsed),
+        result_key_count=0,
+        requested_value_refs=tuple(parsed),
+        returned_values_by_ref=parsed,
+    )
 
 
-def _referenced_frame_values(
-    refs: tuple[str, ...],
+@dataclass(frozen=True)
+class _FrameProjection:
+    output_origins: tuple[SourceOrigin, ...]
+    output_kinds: tuple[str, ...]
+    result_key_count: int
+    requested_value_refs: tuple[str, ...]
+    returned_values_by_ref: Mapping[str, SourceOrigin]
+
+
+def _frame_projection_meanings(
+    value: ProviderObject,
     *,
-    values_by_ref: Mapping[str, SourceOrigin],
-    label: str,
-) -> tuple[SourceOrigin, ...]:
-    if len(refs) != len(set(refs)):
-        raise ValueError(f"{label} refs must be unique")
-    try:
-        return tuple(values_by_ref[ref] for ref in refs)
-    except KeyError as exc:
-        raise ValueError(f"{label} references an undeclared value") from exc
+    candidate_origin: SourceOrigin,
+    grouping_origins: tuple[SourceOrigin, ...],
+    grouping_kinds: tuple[str, ...],
+    conversation_text_by_ref: Mapping[str, str],
+) -> _FrameProjection:
+    if grouping_origins:
+        group_projection = value.parse_as(output.GroupProjectionOutput)
+        if group_projection.returned_grouping_keys != "all":
+            raise ValueError("grouped projection must return every grouping key")
+        candidate_identity = "returned"
+        projection_basis = group_projection.projection_basis
+        returned_values = group_projection.explicitly_requested_values
+        if any(item.value_kind == "related_entity" for item in returned_values):
+            raise ValueError("grouped projection cannot return an ungrouped entity")
+    else:
+        candidate_projection = value.parse_as(output.CandidateProjectionOutput)
+        candidate_identity = candidate_projection.candidate_identity
+        if candidate_identity not in {"returned", "omitted"}:
+            raise ValueError("unknown candidate identity projection")
+        projection_basis = candidate_projection.projection_basis
+        returned_values = candidate_projection.explicitly_requested_values
+    if not projection_basis.strip():
+        raise ValueError("projection_basis is required")
+
+    key_origins: tuple[SourceOrigin, ...] = ()
+    key_kinds: tuple[str, ...] = ()
+    if candidate_identity == "returned":
+        if grouping_origins:
+            key_origins = grouping_origins
+            key_kinds = tuple(
+                "identity"
+                if grouping_kind
+                in {"qualifying_row_identity", "related_entity_identity"}
+                else "value"
+                for grouping_kind in grouping_kinds
+            )
+        else:
+            key_origins = (candidate_origin,)
+            key_kinds = ("identity",)
+
+    values_by_ref: dict[str, SourceOrigin] = {}
+    value_kinds_by_ref: dict[str, str] = {}
+    for item in returned_values:
+        if item.value_ref in values_by_ref:
+            raise ValueError("returned value refs must be unique")
+        if not item.value_kind_basis.strip():
+            raise ValueError("returned value kind basis is required")
+        values_by_ref[item.value_ref] = _frame_source_origin(
+            item,
+            conversation_text_by_ref=conversation_text_by_ref,
+        )
+        value_kinds_by_ref[item.value_ref] = {
+            "related_entity": "related_entity",
+            "value": "value",
+        }[item.value_kind]
+    if not key_origins and not values_by_ref:
+        raise ValueError("row projection must return identity or a requested value")
+    return _FrameProjection(
+        output_origins=(*key_origins, *values_by_ref.values()),
+        output_kinds=(
+            *key_kinds,
+            *value_kinds_by_ref.values(),
+        ),
+        result_key_count=len(key_origins),
+        requested_value_refs=tuple(values_by_ref),
+        returned_values_by_ref=values_by_ref,
+    )
 
 
-def _append_supplied_value(
-    item: ProviderObject,
+def _frame_ordering_meanings(
+    values: tuple[ProviderObject, ...],
     *,
-    input_interner: _InputInterner,
+    returned_values_by_ref: Mapping[str, SourceOrigin],
+    grouping_origins_by_ref: Mapping[str, SourceOrigin],
+    conversation_text_by_ref: Mapping[str, str],
+) -> tuple[tuple[SourceOrigin, ...], tuple[str | None, ...], tuple[str | None, ...]]:
+    origins: list[SourceOrigin] = []
+    grouping_refs: list[str | None] = []
+    value_refs: list[str | None] = []
+    returned_refs: set[str] = set()
+    for value in values:
+        kind = value.discriminator("kind")
+        value_ref = None
+        if kind == "requested_value_ref":
+            requested_value = value.parse_as(output.RequestedValueOrderingOutput)
+            if not requested_value.ownership_basis.strip():
+                raise ValueError("ordering ownership basis is required")
+            try:
+                origin = returned_values_by_ref[requested_value.value_ref]
+            except KeyError as exc:
+                raise ValueError(
+                    "ordering references an undeclared returned value"
+                ) from exc
+            if requested_value.value_ref in returned_refs:
+                raise ValueError("ordering returned value refs must be unique")
+            returned_refs.add(requested_value.value_ref)
+            value_ref = requested_value.value_ref
+            grouping_ref = None
+        elif kind == "group_ref":
+            group_value = value.parse_as(output.GroupOrderingReferenceOutput)
+            if not group_value.ownership_basis.strip():
+                raise ValueError("ordering ownership basis is required")
+            try:
+                origin = grouping_origins_by_ref[group_value.group_ref]
+            except KeyError as exc:
+                raise ValueError(
+                    "ordering references an undeclared grouping"
+                ) from exc
+            grouping_ref = group_value.group_ref
+        elif kind == "unreturned_ordering_meaning":
+            unreturned_value = value.parse_as(output.UnreturnedOrderingMeaningOutput)
+            if not unreturned_value.ownership_basis.strip():
+                raise ValueError("ordering ownership basis is required")
+            origin = _frame_source_origin(
+                unreturned_value,
+                conversation_text_by_ref=conversation_text_by_ref,
+            )
+            grouping_ref = None
+        else:
+            raise ValueError("unknown ordering meaning kind")
+        origins.append(origin)
+        grouping_refs.append(grouping_ref)
+        value_refs.append(value_ref)
+    return tuple(origins), tuple(grouping_refs), tuple(value_refs)
+
+
+def _selection_limit_inputs(
+    limits: tuple[output.SelectionLimitOutput, ...],
+    *,
+    answer_request_count: int,
+    input_collector: _InputCollector,
+    denotations: list[InputDenotation],
+) -> dict[int, str]:
+    result: dict[int, str] = {}
+    for limit in limits:
+        request_number = limit.answer_request_number
+        if request_number < 1 or request_number > answer_request_count:
+            raise ValueError("selection limit references an unknown answer request")
+        if request_number in result:
+            raise ValueError("answer request has multiple selection limits")
+        value = limit.non_entity_value.value
+        result[request_number] = _record_supplied_value(
+            meaning=limit.meaning,
+            denotation_basis=limit.denotation_basis,
+            operands=value.operands,
+            origin=value.origin,
+            value_type=input_collector.scalar_value_type(value.value_type),
+            kind=InputDenotationKind.NON_IDENTITY_SCALAR,
+            instance_kind=None,
+            input_collector=input_collector,
+            denotations=denotations,
+        )
+    return result
+
+
+def _append_entity_reference(
+    item: output.SuppliedEntityReferenceOutput,
+    *,
+    input_collector: _InputCollector,
     denotations: list[InputDenotation],
 ) -> str:
-    has_identity = item.has_field("entity_reference")
-    has_non_entity = item.has_field("non_entity_value")
-    if has_identity == has_non_entity:
-        raise ValueError("supplied value must choose exactly one denotation")
-    if has_identity:
-        identity_value = item.parse_as(output.EntityReferenceSuppliedValueOutput)
-        identity_reference = identity_value.entity_reference
-        operands = identity_reference.value.operands
-        origin = identity_reference.value.origin
-        meaning = identity_value.meaning
-        denotation_basis = identity_value.denotation_basis
-        value_type: ScalarType = TextType()
-        kind = InputDenotationKind.IDENTITY_REFERENCE
-        instance_kind = identity_reference.instance_kind.strip()
-        if not instance_kind:
-            raise ValueError("entity reference requires an instance kind")
-    else:
-        scalar_value = item.parse_as(output.NonEntitySuppliedValueOutput)
-        non_entity_value = scalar_value.non_entity_value
-        operands = non_entity_value.value.operands
-        origin = non_entity_value.value.origin
-        meaning = scalar_value.meaning
-        denotation_basis = scalar_value.denotation_basis
-        value_type = input_interner.scalar_value_type(
-            non_entity_value.value.value_type
-        )
-        kind = InputDenotationKind.NON_IDENTITY_SCALAR
-        instance_kind = None
-    input_ref = input_interner.supplied_value_reference(
+    reference = item.entity_reference
+    instance_kind = reference.instance_kind.strip()
+    if not instance_kind:
+        raise ValueError("entity reference requires an instance kind")
+    operands, origin = _identity_value(reference.value)
+    return _record_supplied_value(
+        meaning=item.meaning,
+        denotation_basis=item.denotation_basis,
+        operands=operands,
+        origin=origin,
+        value_type=TextType(),
+        kind=InputDenotationKind.IDENTITY_REFERENCE,
+        instance_kind=instance_kind,
+        input_collector=input_collector,
+        denotations=denotations,
+    )
+
+
+def _identity_value(
+    value: ProviderObject,
+) -> tuple[tuple[str, ...], output.FrameOriginOutput]:
+    kind = value.discriminator("kind")
+    if kind == "single_identity":
+        single = value.parse_as(output.SingleIdentityValueOutput)
+        return (single.identity_value,), single.origin
+    if kind == "identity_alternatives":
+        alternatives = value.parse_as(output.IdentityAlternativesValueOutput)
+        return alternatives.identity_values, alternatives.origin
+    raise ValueError("unknown identity value kind")
+
+
+def _append_non_entity_value(
+    item: output.SuppliedNonEntityValueOutput,
+    *,
+    input_collector: _InputCollector,
+    denotations: list[InputDenotation],
+) -> str:
+    value = _non_entity_operand(item)
+    return _record_supplied_value(
+        meaning=item.meaning,
+        denotation_basis=item.denotation_basis,
+        operands=value.value.operands,
+        origin=value.value.origin,
+        value_type=_ledger_value_type(value),
+        kind=InputDenotationKind.NON_IDENTITY_SCALAR,
+        instance_kind=None,
+        input_collector=input_collector,
+        denotations=denotations,
+    )
+
+
+def _non_entity_operand(
+    item: output.SuppliedNonEntityValueOutput,
+) -> output.NonEntityOperandOutput | output.DurationOperandOutput:
+    if item.non_entity_value.discriminator("kind") == "duration":
+        return item.non_entity_value.parse_as(output.DurationOperandOutput)
+    return item.non_entity_value.parse_as(output.NonEntityOperandOutput)
+
+
+def _ledger_value_type(
+    value: output.NonEntityOperandOutput | output.DurationOperandOutput,
+) -> ScalarType:
+    if value.kind == "categorical_value":
+        return TextType()
+    if value.kind == "temporal_scope":
+        return TemporalScopeType()
+    if value.kind == "number":
+        return NumericType()
+    if value.kind == "boolean":
+        return BooleanType()
+    if value.kind == "duration":
+        if not isinstance(value, output.DurationOperandOutput):
+            raise ValueError("duration value requires unit")
+        return DurationType(TimeUnit(value.unit))
+    raise ValueError("unknown non-entity value kind")
+
+
+def _record_supplied_value(
+    *,
+    meaning: str,
+    denotation_basis: str,
+    operands: tuple[str, ...],
+    origin: output.FrameOriginOutput,
+    value_type: ScalarType,
+    kind: InputDenotationKind,
+    instance_kind: str | None,
+    input_collector: _InputCollector,
+    denotations: list[InputDenotation],
+) -> str:
+    input_ref = input_collector.supplied_value_reference(
         meaning=meaning,
         operands=operands,
         value_type=value_type,
         origin=origin,
     )
-    if any(value.input_ref == input_ref for value in denotations):
-        raise ValueError("one supplied input has multiple denotations")
     denotations.append(
         InputDenotation(
             id=f"input_denotation_{len(denotations) + 1}",
@@ -437,17 +749,24 @@ def parse_semantic_question_contract(
             raise ValueError("result_kind does not match the requested result grain")
         expressions = requested_fact.expressions
         has_coverage = any(isinstance(item, Coverage) for item in expressions)
-        has_quantifier = any(isinstance(item, Quantify) for item in expressions)
-        if request_meaning.universal_shape == "every_required_member_has_observation":
+        has_related_row = any(isinstance(item, RelatedRow) for item in expressions)
+        if request_meaning.relational_shape == "every_required_member_has_observation":
             if not has_coverage:
                 raise ValueError("required-member coverage expression is missing")
         elif has_coverage:
-            raise ValueError("coverage contradicts the requested universal shape")
+            raise ValueError("coverage contradicts the requested relational shape")
         if (
-            request_meaning.universal_shape == "every_related_row"
-            and not has_quantifier
+            request_meaning.relational_shape == "every_related_row"
+            and not _requires_universal_qualification(requested_fact, index)
         ):
-            raise ValueError("related-row quantifier expression is missing")
+            raise ValueError("universal qualification is missing from the required result")
+        if request_meaning.relational_shape == "same_related_row":
+            if not has_related_row:
+                raise ValueError("same-related-row expression is missing")
+        elif has_related_row:
+            raise ValueError(
+                "related-row expression contradicts the requested relational shape"
+            )
     return ParsedSemanticQuestionContract(
         decision_basis=decision.decision_basis.strip(),
         contract=QuestionContract(
@@ -491,6 +810,28 @@ def _incomplete_outcome(
     )
 
 
+def _requires_universal_qualification(fact: RequestedFact, index: RequestedFactSemanticIndex) -> bool:
+    expressions = {item.id: item for item in fact.expressions}
+
+    def required(ref: str, positive: bool = True) -> bool:
+        node = expressions.get(ref)
+        if isinstance(node, Quantify):
+            return (positive and node.quantifier in {Quantifier.FORALL, Quantifier.NOT_EXISTS}) or (not positive and node.quantifier is Quantifier.EXISTS)
+        if not isinstance(node, BooleanComposition):
+            return False
+        if node.operator is BooleanCompositionOperator.NOT:
+            return required(node.argument_refs[0], not positive)
+        conjunction = (node.operator is BooleanCompositionOperator.AND) == positive
+        results = (required(child, positive) for child in node.argument_refs)
+        return any(results) if conjunction else all(results)
+
+    if fact.qualification_ref is not None:
+        return required(fact.qualification_ref)
+    if isinstance(index.result_grain, Singleton):
+        return any(required(output.expression_ref) for output in fact.outputs)
+    return False
+
+
 def _requested_fact(
     item: output.AnswerRequestOutput,
     *,
@@ -500,6 +841,9 @@ def _requested_fact(
     input_by_id: Mapping[str, InputTerm],
     denotation_by_input_ref: Mapping[str, InputDenotation],
 ) -> RequestedFact:
+    candidate_instance_kind = item.candidate_set.instance_kind.strip()
+    if candidate_instance_kind != request_meaning.candidate_set_origin.meaning:
+        raise ValueError("candidate set type conflicts with the question frame")
     origin = _source_origin(
         item.origin,
         question_context_texts=question_context_texts,
@@ -516,30 +860,48 @@ def _requested_fact(
     candidate_set_ref = "s1"
     terms = _SemanticTermInterner(
         candidate_set=SetTerm(candidate_set_ref, request_meaning.candidate_set_origin),
+        candidate_instance_kind=candidate_instance_kind,
         origin_for=origin_for,
     )
     grouping_outputs = tuple(item.grouping)
     if len(grouping_outputs) != len(request_meaning.grouping_origins):
         raise ValueError("relational grouping must match requested grouping meanings")
-    for grouping, grouping_origin in zip(
-        grouping_outputs,
-        request_meaning.grouping_origins,
-        strict=True,
-    ):
-        if grouping.discriminator("kind") != "related_instance_identity":
+    if tuple(_required_text_field(group, "id") for group in grouping_outputs) != request_meaning.grouping_refs:
+        raise ValueError("relational grouping must preserve frame references")
+    for group, shape in zip(grouping_outputs, request_meaning.grouping_value_shapes, strict=True):
+        if shape is None:
             continue
-        parsed_grouping = grouping.parse_as(output.RelatedIdentityGroupingOutput)
-        terms.add_derived_set(parsed_grouping.identified_set.id, grouping_origin)
-        terms.add_derived_association(
-            parsed_grouping.association.id,
-            from_set_ref=candidate_set_ref,
-            to_set_ref=parsed_grouping.identified_set.id,
-            origin=origin_for(parsed_grouping.association.origin),
-        )
-    for set_output in item.other_sets:
-        terms.add_set(set_output)
-    for association_output in item.other_associations:
-        terms.add_association(association_output)
+        expression = _provider_object(group.field("expression"))
+        kind, grain = shape
+        if kind == "observed_value" and expression.discriminator("kind") != "fact":
+            raise ValueError("grouping expression conflicts with its declared recorded value")
+        if kind == "computed_value" and expression.discriminator("kind") not in {
+            "add", "subtract", "multiply", "divide", "negate"
+        }:
+            raise ValueError("grouping expression conflicts with its declared computation")
+        if kind == "condition" and expression.discriminator("kind") not in {
+            "and", "or", "not", "input_comparison", "value_comparison", "within",
+            "null_check", "quantify", "coverage"
+        }:
+            raise ValueError("grouping expression conflicts with its declared condition")
+        if kind == "temporal_bucket" and (
+            expression.discriminator("kind") != "temporal_bucket"
+            or expression.field("grain") != grain
+        ):
+            raise ValueError("grouping expression conflicts with its declared calendar grain")
+    expected_selection = request_meaning.selection_kind
+    if item.selection is None:
+        actual_selection = "all_results"
+    else:
+        actual_selection = item.selection.discriminator("kind")
+    if actual_selection != expected_selection:
+        raise ValueError("selection conflicts with the question frame")
+    if expected_selection in {"take_with_boundary_ties", "position_with_ties"}:
+        assert item.selection is not None
+        limit = _provider_object(item.selection.field("limit"))
+        if limit.discriminator("kind") != "input_ref" or limit.field("input_ref") != request_meaning.selection_limit_input_ref:
+            raise ValueError("selection limit conflicts with the question frame")
+    terms.add_graph(item.set_graph.parse_as(output.SetGraphOutput))
     expression_parser = _NestedExpressionParser(
         default_origin=origin,
         input_by_id=input_by_id,
@@ -551,7 +913,7 @@ def _requested_fact(
     qualification_ref = (
         None
         if item.qualification is None
-        else expression_parser.reference(item.qualification)
+        else expression_parser.reference(item.qualification, expected_type=BooleanType())
     )
     grouping_refs = tuple(
         _register_grouping(
@@ -568,35 +930,103 @@ def _requested_fact(
             strict=True,
         )
     )
-    if len(item.outputs) != len(request_meaning.output_origins):
+    result_key_outputs = iter(item.outputs.result_key_outputs)
+    requested_value_outputs_by_ref = {
+        _required_text_field(value, "output_ref"): value
+        for value in item.outputs.requested_value_outputs
+    }
+    if len(requested_value_outputs_by_ref) != len(item.outputs.requested_value_outputs):
+        raise ValueError("relational requested value refs must be unique")
+    if tuple(requested_value_outputs_by_ref) != (
+        request_meaning.requested_value_refs
+    ):
+        raise ValueError("relational requested values must preserve frame references")
+    requested_value_outputs = iter(requested_value_outputs_by_ref.values())
+    if (
+        len(item.outputs.result_key_outputs)
+        + len(item.outputs.requested_value_outputs)
+        != len(request_meaning.output_origins)
+    ):
         raise ValueError("relational outputs must match requested output meanings")
-    outputs = tuple(
-        RequestedOutput(
-            id=f"output_{index}",
-            expression_ref=expression_parser.reference(value.expression),
-            origin=output_origin,
+    outputs: list[RequestedOutput] = []
+    for index, (output_origin, output_kind) in enumerate(
+        zip(
+            request_meaning.output_origins,
+            request_meaning.output_kinds,
+            strict=True,
+        ),
+        start=1,
+    ):
+        is_result_key = index <= request_meaning.result_key_count
+        if is_result_key:
+            result_key = next(result_key_outputs)
+            expression_ref = expression_parser.reference(result_key.expression)
+        elif output_kind == "related_entity":
+            value = next(requested_value_outputs)
+            related_value = value.parse_as(
+                output.RequestedRelatedEntityOutputOutput
+            )
+            expression_ref = expression_parser.register_returned_identity(
+                output_ref=related_value.output_ref,
+                instance_kind=related_value.instance_kind,
+                origin=output_origin,
+            )
+        else:
+            value = next(requested_value_outputs)
+            parsed_value = value.parse_as(output.RequestedValueOutputOutput)
+            expression_ref = expression_parser.reference(parsed_value.expression)
+        if (is_result_key and request_meaning.result_kind == "qualifying_instances"
+            and output_kind == "identity"
+            and expression_parser.identified_set_ref(expression_ref) != candidate_set_ref):
+            raise ValueError("candidate identity output must identify the candidate set")
+        is_identity = expression_parser.is_identity_ref(expression_ref)
+        if output_kind in {"identity", "related_entity"} and not is_identity:
+            raise ValueError("result identity output must reference an identity")
+        if output_kind == "value" and is_identity:
+            raise ValueError("result value output cannot reference an identity")
+        outputs.append(
+            RequestedOutput(
+                id=f"output_{index}",
+                expression_ref=expression_ref,
+                origin=output_origin,
+            )
         )
-        for index, (value, output_origin) in enumerate(
-            zip(
-                item.outputs,
-                request_meaning.output_origins,
-                strict=True,
-            ),
-            start=1,
-        )
-    )
     if len(item.ordering) != len(request_meaning.ordering_origins):
         raise ValueError("relational ordering must match requested ordering meanings")
     ordering_values: list[Ordering] = []
-    for value, ordering_origin in zip(
+    for ordering_value, ordering_origin, ordering_group_ref, ordering_value_ref in zip(
         item.ordering,
         request_meaning.ordering_origins,
+        request_meaning.ordering_group_refs,
+        request_meaning.ordering_value_refs,
         strict=True,
     ):
+        if ordering_group_ref is not None and (
+            ordering_value.expression.discriminator("kind") != "group_ref"
+            or ordering_value.expression.field("ref") != ordering_group_ref
+        ):
+            raise ValueError("ordering must reference its declared grouping")
+        if (
+            ordering_group_ref is None
+            and ordering_value.expression.discriminator("kind") == "group_ref"
+        ):
+            raise ValueError("ordering must realize its declared non-key value")
+        if ordering_value.expression.discriminator("kind") == "requested_value_ref":
+            if ordering_value_ref is None or ordering_value.expression.field("value_ref") != ordering_value_ref:
+                raise ValueError("ordering must reference its declared requested value")
+            expression_ref = outputs[
+                request_meaning.result_key_count + request_meaning.requested_value_refs.index(ordering_value_ref)
+            ].expression_ref
+        else:
+            if ordering_value_ref is not None:
+                raise ValueError("ordering must reference its declared requested value")
+            expression_ref = expression_parser.reference(
+                ordering_value.expression, expected_type=OrderableType(),
+            )
         ordering_values.append(
             Ordering(
-                expression_ref=expression_parser.reference(value.expression),
-                direction=OrderingDirection(value.direction),
+                expression_ref=expression_ref,
+                direction=OrderingDirection(ordering_value.direction),
                 origin=ordering_origin,
             )
         )
@@ -620,7 +1050,7 @@ def _requested_fact(
         ),
         qualification_ref=qualification_ref,
         grouping_refs=grouping_refs,
-        outputs=outputs,
+        outputs=tuple(outputs),
         ordering=ordering,
         selection=selection,
         distinct_by=distinct_by,
@@ -655,10 +1085,9 @@ def _register_grouping(
         )
     if kind == "related_instance_identity":
         related_grouping = grouping.parse_as(output.RelatedIdentityGroupingOutput)
-        return expression_parser.register_identity_group(
+        return expression_parser.register_related_identity_group(
             related_grouping.id,
-            observed_for_ref=related_grouping.association.id,
-            identified_set_ref=related_grouping.identified_set.id,
+            set_ref=related_grouping.set_ref,
             origin=grouping_origin,
         )
     if kind == "value":
@@ -674,13 +1103,18 @@ class _SemanticTermInterner:
         self,
         *,
         candidate_set: SetTerm,
+        candidate_instance_kind: str,
         origin_for: Callable[[output.SourceOriginOutput], SourceOrigin],
     ) -> None:
         self._candidate_set = candidate_set
         self._origin_for = origin_for
         self._sets = [candidate_set]
         self._canonical_set_ref_by_authored_ref = {candidate_set.id: candidate_set.id}
+        self._instance_kind_by_set_ref = {
+            candidate_set.id: candidate_instance_kind,
+        }
         self._associations: list[AssociationTerm] = []
+        self._set_ref_by_output_ref: dict[str, str] = {}
 
     @property
     def sets(self) -> tuple[SetTerm, ...]:
@@ -691,13 +1125,24 @@ class _SemanticTermInterner:
         return tuple(self._associations)
 
     def add_set(self, value: output.SetTermOutput) -> None:
-        self.add_derived_set(value.id, self._origin_for(value.origin))
+        self.add_derived_set(
+            value.id,
+            self._origin_for(value.origin),
+            instance_kind=value.instance_kind,
+        )
 
-    def add_derived_set(self, set_ref: str, origin: SourceOrigin) -> None:
+    def add_derived_set(
+        self,
+        set_ref: str,
+        origin: SourceOrigin,
+        *,
+        instance_kind: str,
+    ) -> None:
         if set_ref in self._canonical_set_ref_by_authored_ref:
-            return
+            raise ValueError(f"duplicate semantic set declaration: {set_ref}")
         self._sets.append(SetTerm(set_ref, origin))
         self._canonical_set_ref_by_authored_ref[set_ref] = set_ref
+        self._instance_kind_by_set_ref[set_ref] = instance_kind.strip()
 
     def set_ref(self, value: str) -> str:
         try:
@@ -705,12 +1150,71 @@ class _SemanticTermInterner:
         except KeyError as exc:
             raise ValueError(f"unknown semantic set reference: {value}") from exc
 
+    def require_instance_kind(self, set_ref: str, expected: str) -> None:
+        canonical_ref = self.set_ref(set_ref)
+        if self._instance_kind_by_set_ref[canonical_ref] != expected.strip():
+            raise ValueError("entity type conflicts with the identified set")
+
+    def identity_owner_for_set(self, set_ref: str) -> tuple[str, str]:
+        canonical_set_ref = self.set_ref(set_ref)
+        incoming = tuple(
+            association
+            for association in self._associations
+            if association.to_set_ref == canonical_set_ref
+        )
+        if len(incoming) != 1:
+            raise ValueError(
+                "related requested value requires one incoming association"
+            )
+        return incoming[0].id, canonical_set_ref
+
     def owner_ref(self, value: str) -> str:
         if value in self._canonical_set_ref_by_authored_ref:
             return self.set_ref(value)
         if value in {item.id for item in self._associations}:
             return value
         raise ValueError(f"unknown semantic owner reference: {value}")
+
+    def direct_association_refs(
+        self,
+        *,
+        from_set_ref: str,
+        to_set_ref: str,
+    ) -> tuple[str, ...]:
+        refs = tuple(
+            item.id
+            for item in self._associations
+            if item.from_set_ref == from_set_ref and item.to_set_ref == to_set_ref
+        )
+        if not refs:
+            raise ValueError("related row lacks a direct association")
+        return refs
+
+    def association_target(
+        self,
+        association_ref: str,
+        *,
+        from_set_ref: str,
+    ) -> str:
+        association = next(
+            (item for item in self._associations if item.id == association_ref),
+            None,
+        )
+        if association is None:
+            raise ValueError(f"unknown semantic association: {association_ref}")
+        if association.from_set_ref != self.set_ref(from_set_ref):
+            raise ValueError(
+                "identity path association does not start at the current row"
+            )
+        return association.to_set_ref
+
+    def set_ref_for_output(self, output_ref: str) -> str:
+        try:
+            return self._set_ref_by_output_ref[output_ref]
+        except KeyError as exc:
+            raise ValueError(
+                f"related output has no relation: {output_ref}"
+            ) from exc
 
     def add_association(self, value: output.AssociationTermOutput) -> None:
         self.add_derived_association(
@@ -739,13 +1243,83 @@ class _SemanticTermInterner:
             None,
         )
         if existing is not None:
-            if (
-                existing.from_set_ref == association.from_set_ref
-                and existing.to_set_ref == association.to_set_ref
-            ):
-                return
-            raise ValueError(f"conflicting association reference: {association_ref}")
+            raise ValueError(
+                f"duplicate semantic association declaration: {association_ref}"
+            )
         self._associations.append(association)
+
+    def add_graph(
+        self,
+        graph: output.SetGraphOutput,
+    ) -> None:
+        for relation in graph.identity_input_relations.values():
+            if relation is None:
+                continue
+            self._add_role_relation(relation)
+        for output_ref, relation in graph.requested_output_relations.items():
+            _, set_ref = self._add_role_relation(relation)
+            self._set_ref_by_output_ref[output_ref] = set_ref
+        self._add_related_sets(
+            graph.other_related_sets,
+            parent_set_ref=self._candidate_set.id,
+        )
+
+    def _add_role_relation(
+        self,
+        relation: output.RoleRelationOutput,
+    ) -> tuple[str, str]:
+        self.add_set(relation.set)
+        association_ref = _required_text_field(
+            relation.association,
+            "id",
+        )
+        self.add_derived_association(
+            association_ref,
+            from_set_ref=self._candidate_set.id,
+            to_set_ref=relation.set.id,
+            origin=self._origin_for(
+                _provider_object(relation.association.field("origin")).parse_as(
+                    output.SourceOriginOutput
+                )
+            ),
+        )
+        self._add_related_sets(
+            relation.related_sets,
+            parent_set_ref=relation.set.id,
+        )
+        return association_ref, relation.set.id
+
+    def _add_related_sets(
+        self,
+        values: tuple[ProviderObject, ...],
+        *,
+        parent_set_ref: str,
+    ) -> None:
+        for item in values:
+            set_value = _provider_object(item.field("set"))
+            association_values = (
+                _provider_object_array(item.field("associations"))
+                if item.has_field("associations")
+                else (_provider_object(item.field("association")),)
+            )
+            set_output = set_value.parse_as(output.SetTermOutput)
+            self.add_set(set_output)
+            set_ref = set_output.id
+            for association in association_values:
+                self.add_derived_association(
+                    _required_text_field(association, "id"),
+                    from_set_ref=parent_set_ref,
+                    to_set_ref=set_ref,
+                    origin=self._origin_for(
+                        _provider_object(association.field("origin")).parse_as(
+                            output.SourceOriginOutput
+                        )
+                    ),
+                )
+            self._add_related_sets(
+                _provider_object_array(item.field("related_sets")),
+                parent_set_ref=set_ref,
+            )
 
 
 class _NestedExpressionParser:
@@ -766,7 +1340,7 @@ class _NestedExpressionParser:
         self._terms = terms
         self._origin_for = origin_for
         self._facts: list[FactTerm] = []
-        self._fact_ref_by_value: dict[tuple[str, ValueType, SourceOrigin], str] = {}
+        self._fact_refs_by_origin: dict[tuple[str, SourceOrigin], list[str]] = {}
         self._expressions: list[ExpressionNode] = []
         self._expression_ref_by_value: dict[ExpressionNode, str] = {}
         self._expression_ref_by_group_ref: dict[str, str] = {}
@@ -782,6 +1356,15 @@ class _NestedExpressionParser:
     @property
     def sets(self) -> tuple[SetTerm, ...]:
         return self._terms.sets
+
+    def identified_set_ref(self, ref: str) -> str | None:
+        if ref in {item.id for item in self._terms.sets}:
+            return ref
+        return next((item.value_type.set_ref for item in self._facts
+                     if item.id == ref and isinstance(item.value_type, IdentifierType)), None)
+
+    def is_identity_ref(self, ref: str) -> bool:
+        return self.identified_set_ref(ref) is not None
 
     def register_group(self, group_ref: str, expression: ProviderObject) -> str:
         if group_ref in self._expression_ref_by_group_ref:
@@ -808,10 +1391,55 @@ class _NestedExpressionParser:
         self._expression_ref_by_group_ref[group_ref] = resolved_ref
         return resolved_ref
 
-    def reference(self, item: ProviderObject) -> str:
+    def register_related_identity_group(
+        self,
+        group_ref: str,
+        *,
+        set_ref: str,
+        origin: SourceOrigin,
+    ) -> str:
+        association_ref, identified_set_ref = self._terms.identity_owner_for_set(
+            set_ref
+        )
+        return self.register_identity_group(
+            group_ref,
+            observed_for_ref=association_ref,
+            identified_set_ref=identified_set_ref,
+            origin=origin,
+        )
+
+    def register_returned_identity(
+        self,
+        *,
+        output_ref: str,
+        instance_kind: str,
+        origin: SourceOrigin,
+    ) -> str:
+        set_ref = self._terms.set_ref_for_output(output_ref)
+        self._terms.require_instance_kind(set_ref, instance_kind)
+        association_ref, identified_set_ref = self._terms.identity_owner_for_set(set_ref)
+        return self._register_fact(
+            observed_for_ref=association_ref,
+            value_type=IdentifierType(identified_set_ref),
+            origin=origin,
+        )
+
+    def reference(
+        self,
+        item: ProviderObject,
+        *,
+        expected_type: ScalarType | None = None,
+        row_set_ref: str | None = None,
+        identity_input_ref: str | None = None,
+    ) -> str:
         kind = item.discriminator("kind")
         if kind == "fact":
-            return self._fact_reference(item)
+            return self._fact_reference(
+                item,
+                expected_type=expected_type or UnspecifiedScalarType(),
+                row_set_ref=row_set_ref,
+                identity_input_ref=identity_input_ref,
+            )
         if kind == "set_ref":
             return self._terms.set_ref(_required_text_field(item, "set_ref"))
         if kind == "group_ref":
@@ -827,7 +1455,9 @@ class _NestedExpressionParser:
             if denotation is None:
                 raise ValueError(f"input lacks denotation: {input_ref}")
             return input_ref
-        return self._intern_node(self._node(item, expression_id=""))
+        return self._intern_node(
+            self._node(item, expression_id="", row_set_ref=row_set_ref)
+        )
 
     def _intern_node(self, structural_node: ExpressionNode) -> str:
         existing_ref = self._expression_ref_by_value.get(structural_node)
@@ -839,22 +1469,62 @@ class _NestedExpressionParser:
         self._expression_ref_by_value[structural_node] = expression_id
         return expression_id
 
-    def _fact_reference(self, item: ProviderObject) -> str:
-        observed_for_ref = self._terms.owner_ref(
-            _required_text_field(item, "observed_for_ref")
+    def _fact_reference(
+        self,
+        item: ProviderObject,
+        *,
+        expected_type: ScalarType,
+        row_set_ref: str | None,
+        identity_input_ref: str | None,
+    ) -> str:
+        identity_contract = self._identity_fact_contract(
+            item,
+            row_set_ref=row_set_ref,
+            identity_input_ref=identity_input_ref,
         )
-        value_type_item = _provider_object(item.field("value_type"))
+        observed_for_ref = (
+            identity_contract[0]
+            if identity_contract is not None
+            else (
+                self._terms.owner_ref(_required_text_field(item, "observed_for_ref"))
+                if item.has_field("observed_for_ref")
+                else self._terms.set_ref(row_set_ref or _raise_missing_row_scope())
+            )
+        )
         origin = self._fact_origin(item)
-        value_type: ValueType
-        if value_type_item.discriminator("kind") == "identifier":
-            value_type = IdentifierType(self._identifier_set_ref(value_type_item))
-        else:
-            value_type = _scalar_type(value_type_item, origin_for=self._origin_for)
+        value_type = (
+            IdentifierType(identity_contract[1])
+            if identity_contract is not None
+            else expected_type
+        )
         return self._register_fact(
             observed_for_ref=observed_for_ref,
-            value_type=value_type,
+            value_type=_merge_fact_types(value_type, expected_type),
             origin=origin,
         )
+
+    def _identity_fact_contract(
+        self,
+        item: ProviderObject,
+        *,
+        row_set_ref: str | None,
+        identity_input_ref: str | None = None,
+    ) -> tuple[str, str] | None:
+        if not item.has_field("identity_path"):
+            return None
+        current_set_ref = self._terms.set_ref(row_set_ref or self._candidate_set_ref)
+        identity_path = _provider_object(item.field("identity_path"))
+        path_kind = _required_text_field(identity_path, "kind")
+        if path_kind == "candidate_instance":
+            return current_set_ref, current_set_ref
+        if path_kind != "related_instance":
+            raise ValueError(f"unknown identity path kind: {path_kind}")
+        association_ref = _required_text_field(identity_path, "association_ref")
+        identified_set_ref = self._terms.association_target(
+            association_ref,
+            from_set_ref=current_set_ref,
+        )
+        return association_ref, identified_set_ref
 
     def _fact_origin(self, item: ProviderObject) -> SourceOrigin:
         return self._origin_for(
@@ -868,29 +1538,45 @@ class _NestedExpressionParser:
         value_type: ScalarType,
         origin: SourceOrigin,
     ) -> str:
-        key = (observed_for_ref, value_type, origin)
-        existing = self._fact_ref_by_value.get(key)
-        if existing is not None:
+        key = (observed_for_ref, origin)
+        for existing in self._fact_refs_by_origin.get(key, ()):
+            index = next(
+                index for index, fact in enumerate(self._facts) if fact.id == existing
+            )
+            fact = self._facts[index]
+            try:
+                merged_type = _merge_fact_types(fact.value_type, value_type)
+            except ValueError:
+                continue
+            if merged_type != fact.value_type:
+                self._facts[index] = FactTerm(
+                    fact.id,
+                    fact.owner_ref,
+                    merged_type,
+                    fact.origin,
+                )
             return existing
         fact_ref = f"f{len(self._facts) + 1}"
         self._facts.append(FactTerm(fact_ref, observed_for_ref, value_type, origin))
-        self._fact_ref_by_value[key] = fact_ref
+        self._fact_refs_by_origin.setdefault(key, []).append(fact_ref)
         return fact_ref
-
-    def _identifier_set_ref(self, item: ProviderObject) -> str:
-        return self._terms.set_ref(_required_text_field(item, "set_ref"))
 
     def _node(
         self,
         item: ProviderObject,
         *,
         expression_id: str,
+        row_set_ref: str | None,
     ) -> ExpressionNode:
         kind = item.discriminator("kind")
         if kind in {"and", "or"}:
             operator = BooleanCompositionOperator(kind)
             arguments = tuple(
-                self.reference(value)
+                self.reference(
+                    value,
+                    expected_type=BooleanType(),
+                    row_set_ref=row_set_ref,
+                )
                 for value in _provider_object_array(item.field("arguments"))
             )
             return BooleanComposition(
@@ -900,7 +1586,13 @@ class _NestedExpressionParser:
             return BooleanComposition(
                 expression_id,
                 BooleanCompositionOperator.NOT,
-                (self.reference(_provider_object(item.field("argument"))),),
+                (
+                    self.reference(
+                        _provider_object(item.field("argument")),
+                        expected_type=BooleanType(),
+                        row_set_ref=row_set_ref,
+                    ),
+                ),
                 self._default_origin,
             )
         if kind == "input_comparison":
@@ -915,7 +1607,44 @@ class _NestedExpressionParser:
             denotation = self._denotation_by_input_ref.get(input_ref)
             if denotation is None:
                 raise ValueError(f"input lacks denotation: {input_ref}")
-            fact_ref = self.reference(fact_item)
+            if denotation.kind is InputDenotationKind.IDENTITY_REFERENCE:
+                operand_meaning = _required_text_field(
+                    input_item,
+                    "operand_meaning",
+                )
+                instance_kind = _required_text_field(input_item, "instance_kind")
+                if operand_meaning != denotation.operand_meaning:
+                    raise ValueError(
+                        "identity operand meaning conflicts with its declaration"
+                    )
+                if instance_kind != denotation.denoted_instance_kind:
+                    raise ValueError(
+                        "identity type conflicts with its declaration"
+                    )
+            identity_contract = self._identity_fact_contract(
+                fact_item,
+                row_set_ref=row_set_ref,
+                identity_input_ref=input_ref,
+            )
+            if denotation.kind is InputDenotationKind.IDENTITY_REFERENCE:
+                if identity_contract is None:
+                    raise ValueError("identity comparison lacks an identity path")
+                self._terms.require_instance_kind(
+                    identity_contract[1],
+                    instance_kind,
+                )
+            fact_type = self._comparison_fact_type(
+                input_ref,
+                identified_set_ref=(
+                    identity_contract[1] if identity_contract is not None else None
+                ),
+            )
+            fact_ref = self.reference(
+                fact_item,
+                expected_type=fact_type,
+                row_set_ref=row_set_ref,
+                identity_input_ref=input_ref,
+            )
             return Comparison(
                 expression_id,
                 comparison_operator,
@@ -927,19 +1656,61 @@ class _NestedExpressionParser:
             comparison_operator = ExpressionBinaryOperator(
                 _required_text_field(item, "operator")
             )
+            comparison_type: ScalarType = (
+                OrderableType()
+                if comparison_operator
+                in {
+                    ExpressionBinaryOperator.LT,
+                    ExpressionBinaryOperator.LTE,
+                    ExpressionBinaryOperator.GT,
+                    ExpressionBinaryOperator.GTE,
+                }
+                else TextType()
+                if comparison_operator is ExpressionBinaryOperator.CONTAINS
+                else UnspecifiedScalarType()
+            )
+            # Carry declared operand types across the comparison. An abstract
+            # orderable fact must inherit a numeric input/computation's constraint.
+            for operand_name in ("left", "right"):
+                operand = _provider_object(item.field(operand_name))
+                operand_kind = operand.discriminator("kind")
+                if operand_kind == "input_ref":
+                    input_ref = _required_text_field(operand, "input_ref")
+                    value_type = self._input_by_id[input_ref].value_type
+                    if not isinstance(value_type, (IdentifierType, CollectionType, TemporalScopeType)):
+                        comparison_type = value_type
+                        break
+                elif operand_kind in {"add", "subtract", "multiply", "divide", "negate"}:
+                    comparison_type = NumericType()
+                    break
             return Comparison(
                 expression_id,
                 comparison_operator,
-                self.reference(_provider_object(item.field("left"))),
-                self.reference(_provider_object(item.field("right"))),
+                self.reference(
+                    _provider_object(item.field("left")),
+                    expected_type=comparison_type,
+                    row_set_ref=row_set_ref,
+                ),
+                self.reference(
+                    _provider_object(item.field("right")),
+                    expected_type=comparison_type,
+                    row_set_ref=row_set_ref,
+                ),
                 self._default_origin,
             )
         if kind == "within":
             return Comparison(
                 expression_id,
                 ExpressionBinaryOperator.WITHIN,
-                self.reference(_provider_object(item.field("value"))),
-                self.reference(_provider_object(item.field("scope"))),
+                self.reference(
+                    _provider_object(item.field("value")),
+                    expected_type=TemporalPointType(),
+                    row_set_ref=row_set_ref,
+                ),
+                self.reference(
+                    _provider_object(item.field("scope")),
+                    row_set_ref=row_set_ref,
+                ),
                 self._default_origin,
             )
         if kind == "null_check":
@@ -949,7 +1720,10 @@ class _NestedExpressionParser:
             return NullCheck(
                 expression_id,
                 null_operator,
-                self.reference(_provider_object(item.field("argument"))),
+                self.reference(
+                    _provider_object(item.field("argument")),
+                    row_set_ref=row_set_ref,
+                ),
                 self._default_origin,
             )
         if kind in {"add", "subtract", "multiply", "divide"}:
@@ -957,8 +1731,16 @@ class _NestedExpressionParser:
                 expression_id,
                 ExpressionBinaryOperator(kind),
                 (
-                    self.reference(_provider_object(item.field("left"))),
-                    self.reference(_provider_object(item.field("right"))),
+                    self.reference(
+                        _provider_object(item.field("left")),
+                        expected_type=NumericType(),
+                        row_set_ref=row_set_ref,
+                    ),
+                    self.reference(
+                        _provider_object(item.field("right")),
+                        expected_type=NumericType(),
+                        row_set_ref=row_set_ref,
+                    ),
                 ),
                 self._default_origin,
             )
@@ -966,13 +1748,23 @@ class _NestedExpressionParser:
             return Arithmetic(
                 expression_id,
                 ExpressionUnaryOperator.NEGATE,
-                (self.reference(_provider_object(item.field("argument"))),),
+                (
+                    self.reference(
+                        _provider_object(item.field("argument")),
+                        expected_type=NumericType(),
+                        row_set_ref=row_set_ref,
+                    ),
+                ),
                 self._default_origin,
             )
         if kind == "temporal_bucket":
             return TemporalBucket(
                 expression_id,
-                self.reference(_provider_object(item.field("value"))),
+                self.reference(
+                    _provider_object(item.field("value")),
+                    expected_type=TemporalPointType(),
+                    row_set_ref=row_set_ref,
+                ),
                 TemporalGrain(_required_text_field(item, "grain")),
                 self._default_origin,
             )
@@ -982,13 +1774,26 @@ class _NestedExpressionParser:
             filter_ref = (
                 None
                 if filter_value is None
-                else self.reference(_provider_object(filter_value))
+                else self.reference(
+                    _provider_object(filter_value),
+                    expected_type=BooleanType(),
+                )
             )
             distinct = _required_bool_field(item, "distinct_argument")
+            aggregate_argument_types: dict[AggregateFunction, ScalarType] = {
+                AggregateFunction.SUM: NumericType(),
+                AggregateFunction.AVERAGE: NumericType(),
+                AggregateFunction.MINIMUM: OrderableType(),
+                AggregateFunction.MAXIMUM: OrderableType(),
+            }
+            argument_type = aggregate_argument_types.get(function)
             return Aggregate(
                 expression_id,
                 function,
-                self.reference(_provider_object(item.field("argument"))),
+                self.reference(
+                    _provider_object(item.field("argument")),
+                    expected_type=argument_type,
+                ),
                 filter_ref,
                 distinct,
                 self._default_origin,
@@ -1004,7 +1809,33 @@ class _NestedExpressionParser:
                 quantifier,
                 over_set_ref,
                 associations,
-                self.reference(_provider_object(item.field("condition"))),
+                self.reference(
+                    _provider_object(item.field("condition")),
+                    expected_type=BooleanType(),
+                    row_set_ref=over_set_ref,
+                ),
+                self._default_origin,
+            )
+        if kind == "related_row":
+            related_set_ref = self._terms.set_ref(_required_text_field(item, "set_ref"))
+            condition_value = item.field("condition")
+            condition_ref = (
+                None
+                if condition_value is None
+                else self.reference(
+                    _provider_object(condition_value),
+                    expected_type=BooleanType(),
+                    row_set_ref=related_set_ref,
+                )
+            )
+            return RelatedRow(
+                expression_id,
+                related_set_ref,
+                self._terms.direct_association_refs(
+                    from_set_ref=self._candidate_set_ref,
+                    to_set_ref=related_set_ref,
+                ),
+                condition_ref,
                 self._default_origin,
             )
         if kind == "coverage":
@@ -1012,8 +1843,9 @@ class _NestedExpressionParser:
             required = self._terms.set_ref(
                 _required_text_field(item, "required_member_set_ref")
             )
+            observation_value = _provider_object(item.field("observation"))
             observation = self._terms.set_ref(
-                _required_text_field(item, "observation_set_ref")
+                _required_text_field(observation_value, "set_ref")
             )
             candidate_path = _unique_association_path(
                 self._terms.associations,
@@ -1029,9 +1861,13 @@ class _NestedExpressionParser:
             required_member_condition = (
                 None
                 if required_member_condition_value is None
-                else self.reference(_provider_object(required_member_condition_value))
+                else self.reference(
+                    _provider_object(required_member_condition_value),
+                    expected_type=BooleanType(),
+                    row_set_ref=required,
+                )
             )
-            return Coverage(
+            coverage = Coverage(
                 expression_id,
                 candidate,
                 required,
@@ -1039,10 +1875,98 @@ class _NestedExpressionParser:
                 candidate_path,
                 dimension_path,
                 required_member_condition,
-                self.reference(_provider_object(item.field("observation_condition"))),
+                self.reference(
+                    _provider_object(observation_value.field("condition")),
+                    expected_type=BooleanType(),
+                    row_set_ref=observation,
+                ),
+                self._default_origin,
+            )
+            candidate_condition_value = item.field("candidate_condition")
+            if candidate_condition_value is None:
+                return coverage
+            candidate_condition_ref = self.reference(
+                _provider_object(candidate_condition_value),
+                expected_type=BooleanType(),
+                row_set_ref=candidate,
+            )
+            coverage_ref = self._intern_node(coverage)
+            return BooleanComposition(
+                expression_id,
+                BooleanCompositionOperator.AND,
+                (candidate_condition_ref, coverage_ref),
                 self._default_origin,
             )
         raise ValueError(f"unknown expression kind: {kind}")
+
+    def _comparison_fact_type(
+        self,
+        input_ref: str,
+        *,
+        identified_set_ref: str | None,
+    ) -> ScalarType:
+        denotation = self._denotation_by_input_ref[input_ref]
+        if denotation.kind is not InputDenotationKind.IDENTITY_REFERENCE:
+            value_type = self._input_by_id[input_ref].value_type
+            return (
+                value_type.element_type
+                if isinstance(value_type, CollectionType)
+                else value_type
+            )
+        if identified_set_ref is None:
+            raise ValueError("identity comparison lacks identified_set_ref")
+        return IdentifierType(self._terms.set_ref(identified_set_ref))
+
+
+def _merge_fact_types(left: ScalarType, right: ScalarType) -> ScalarType:
+    if left == right:
+        return left
+    if isinstance(left, UnspecifiedScalarType):
+        return right
+    if isinstance(right, UnspecifiedScalarType):
+        return left
+    if isinstance(left, OrderableType):
+        return _merge_orderable_type(right)
+    if isinstance(right, OrderableType):
+        return _merge_orderable_type(left)
+    if isinstance(left, NumericType) and isinstance(
+        right,
+        (IntegerType, DecimalType),
+    ):
+        return right
+    if isinstance(right, NumericType) and isinstance(
+        left,
+        (IntegerType, DecimalType),
+    ):
+        return left
+    if isinstance(left, TemporalPointType) and isinstance(
+        right,
+        (DateType, DateTimeType),
+    ):
+        return right
+    if isinstance(right, TemporalPointType) and isinstance(
+        left,
+        (DateType, DateTimeType),
+    ):
+        return left
+    raise ValueError("one observed fact has incompatible operator requirements")
+
+
+def _merge_orderable_type(value_type: ScalarType) -> ScalarType:
+    if isinstance(
+        value_type,
+        (
+            NumericType,
+            TemporalPointType,
+            IntegerType,
+            DecimalType,
+            DateType,
+            DateTimeType,
+            TextType,
+        ),
+    ):
+        return value_type
+    raise ValueError("one observed fact has incompatible operator requirements")
 
 
 def _unique_association_path(
@@ -1094,11 +2018,11 @@ def _selection(
     parsed = item.parse_as(output.SelectionOutput)
     if parsed.kind == "first_rank_with_ties":
         return FirstRankWithTies()
-    if parsed.kind == "take_with_boundary_ties":
+    if parsed.kind in {"take_with_boundary_ties", "position_with_ties"}:
         limit = _required(parsed.limit, field="selection.limit")
         if limit.discriminator("kind") != "input_ref":
             raise ValueError("take limit must reference an input")
-        return TakeWithBoundaryTies(expression_parser.reference(limit))
+        return (PositionWithTies if parsed.kind == "position_with_ties" else TakeWithBoundaryTies)(expression_parser.reference(limit))
     raise ValueError("unknown result selection")
 
 
@@ -1125,7 +2049,9 @@ def _frame_source_origin(
     item: (
         output.MeaningOriginOutput
         | output.GroupingMeaningOutput
-        | output.NonKeyFrameValueOutput
+        | output.ReturnedMeaningOutput
+        | output.ReturnedProjectionValueOutput
+        | output.UnreturnedOrderingMeaningOutput
     ),
     *,
     conversation_text_by_ref: Mapping[str, str],
@@ -1139,6 +2065,24 @@ def _frame_source_origin(
     return SourceOrigin(
         source=source,
         meaning=item.meaning.strip(),
+        resolved_input_ref=resolved_input_ref,
+    )
+
+
+def _frame_row_source_origin(
+    item: output.FrameRowSourceOutput,
+    *,
+    conversation_text_by_ref: Mapping[str, str],
+) -> SourceOrigin:
+    source, resolved_input_ref = _frame_origin(item.origin)
+    if (
+        source is SourceOriginKind.CONVERSATION_RESOLUTION
+        and resolved_input_ref not in conversation_text_by_ref
+    ):
+        raise ValueError("unknown conversation resolved input reference")
+    return SourceOrigin(
+        source=source,
+        meaning=item.instance_kind.strip(),
         resolved_input_ref=resolved_input_ref,
     )
 
@@ -1184,7 +2128,7 @@ def _scalar_type(
         return BooleanType()
     if kind == "integer":
         return IntegerType()
-    if kind in {"text", "property_value"}:
+    if kind in {"text", "categorical_value"}:
         return TextType()
     if kind == "date":
         return DateType()
@@ -1238,22 +2182,16 @@ def _measure(
     raise ValueError(f"unknown measure: {kind}")
 
 
-class _InputInterner:
+class _InputCollector:
     def __init__(
         self,
         *,
         question_context_texts: tuple[str, ...],
         conversation_text_by_ref: Mapping[str, str],
-        existing_inputs: tuple[InputTerm, ...] = (),
     ) -> None:
         self._question_context_texts = question_context_texts
         self._conversation_text_by_ref = conversation_text_by_ref
-        self._inputs = list(existing_inputs)
-        self._ref_by_origin = {item.origin: item.id for item in existing_inputs}
-        if tuple(item.id for item in existing_inputs) != tuple(
-            f"i{index}" for index in range(1, len(existing_inputs) + 1)
-        ):
-            raise ValueError("existing input IDs are not canonical")
+        self._inputs: list[InputTerm] = []
 
     @property
     def inputs(self) -> tuple[InputTerm, ...]:
@@ -1286,15 +2224,22 @@ class _InputInterner:
         origin: output.FrameOriginOutput,
     ) -> str:
         parsed_operands = _input_operand(operands)
-        operand = (
-            parsed_operands[0]
-            if len(parsed_operands) == 1
-            else parsed_operands
-        )
+        operand = parsed_operands[0] if len(parsed_operands) == 1 else parsed_operands
         input_value_type = (
             value_type if isinstance(operand, str) else CollectionType(value_type)
         )
         source, resolved_input_ref = _frame_origin(origin)
+        if source is SourceOriginKind.CONVERSATION_RESOLUTION:
+            resolved_ref = resolved_input_ref
+            if (
+                resolved_ref is None
+                or resolved_ref not in self._conversation_text_by_ref
+            ):
+                raise ValueError("unknown conversation resolved input reference")
+            if parsed_operands != (self._conversation_text_by_ref[resolved_ref],):
+                raise ValueError(
+                    "conversation input operand must copy its resolved value"
+                )
         return self._reference(
             source=source,
             meaning=meaning.strip(),
@@ -1312,13 +2257,6 @@ class _InputInterner:
         operand: str | tuple[str, ...],
         value_type: ValueType,
     ) -> str:
-        if source is SourceOriginKind.CONVERSATION_RESOLUTION:
-            resolved_ref = resolved_input_ref
-            if (
-                resolved_ref is None
-                or resolved_ref not in self._conversation_text_by_ref
-            ):
-                raise ValueError("unknown conversation resolved input reference")
         origin = SourceOrigin(
             source=source,
             meaning=meaning,
@@ -1326,12 +2264,6 @@ class _InputInterner:
         )
         if not input_operand_matches_value_type(operand, value_type):
             raise ValueError("input operand does not match its declared value type")
-        existing = self._ref_by_origin.get(origin)
-        if existing is not None:
-            existing_input = self.input_by_id[existing]
-            if existing_input.value_type != value_type:
-                raise ValueError("one supplied input has conflicting value types")
-            return existing
         input_ref = f"i{len(self._inputs) + 1}"
         self._inputs.append(
             InputTerm(
@@ -1341,7 +2273,6 @@ class _InputInterner:
                 value_type=value_type,
             )
         )
-        self._ref_by_origin[origin] = input_ref
         return input_ref
 
 
@@ -1412,6 +2343,10 @@ def _required_text_field(item: ProviderObject, field: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field} must be text")
     return value
+
+
+def _raise_missing_row_scope() -> str:
+    raise ValueError("row-scoped fact requires an enclosing row")
 
 
 def _optional_text_field(item: ProviderObject, field: str) -> str | None:

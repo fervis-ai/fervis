@@ -1,0 +1,24 @@
+id: grouped_empty_average_has_no_groups
+description: An empty grouped input has no groups; it does not attempt a scalar empty average.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_grouped_empty_average_is_undefined_not_no_data
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: rows
+      rows: []
+      field_types: {group_id: string, amount: decimal}
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  operations:
+    - id: avg_rows
+      output_relation: result
+      spec:
+        kind: aggregate
+        input_relation: rows
+        group_by: [group_id]
+        aggregations:
+          - {function: avg, input_field: amount, output_field: avg_amount}
+expect:
+  result_contains:
+    result: {rows: [], grain_keys: [group_id], completeness_status: complete}

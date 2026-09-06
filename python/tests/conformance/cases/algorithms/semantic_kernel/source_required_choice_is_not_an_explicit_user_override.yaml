@@ -1,13 +1,14 @@
 id: source_required_choice_is_not_an_explicit_user_override
-description: A source-required finite choice configures invocation but cannot override an excluded ordinary-business state.
+description: A source-required finite choice configures invocation but cannot override
+  an excluded ordinary-business state.
 kind: algorithm
 algorithm: semantic.source_binding
 input:
   mode: explicit_override_from_application_owners
   application_owner_refs:
-    - source_required:source_sales.state
+  - source_required:source_sales.state
   boolean_requirement_refs: []
-  matched_excluded_role: SUPERSEDED_DELETED_OR_NON_CURRENT_ARTIFACT
+  baseline_included: false
 expect:
   result_contains:
     explicit_user_override_applies: false
