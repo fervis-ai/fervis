@@ -38,22 +38,24 @@ def _field_row_path(
     return ""
 
 
-def _ancestor_row_path_ids(
+def _row_context_path_ids(
     row_path_id: str,
     *,
     row_paths: tuple[RowPath, ...],
 ) -> tuple[str, ...]:
+    """Visible row domains: immediate parent context followed by local fields.
+
+    Higher ancestors remain separate relations. Flattening them here would lose
+    their ownership when multiple ancestor rows expose the same field name.
+    """
     by_id = {item.id: item for item in row_paths}
     by_path = {item.path: item for item in row_paths}
     current = by_id.get(row_path_id)
-    output: list[str] = []
-    while current is not None and current.parent_path:
+    if current is not None and current.path:
         parent = by_path.get(current.parent_path)
-        if parent is None:
-            break
-        output.append(parent.id)
-        current = parent
-    return tuple(output)
+        if parent is not None:
+            return (parent.id, row_path_id)
+    return (row_path_id,)
 
 
 def _field_ids(

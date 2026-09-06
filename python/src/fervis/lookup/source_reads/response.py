@@ -109,7 +109,7 @@ def endpoint_response_body(result: dict[str, Any], *, endpoint_name: str) -> Any
 def extract_row_source_rows(
     body: Any, *, row_source: RowSource
 ) -> tuple[dict[str, Any], ...]:
-    if not row_source.parent_row_path:
+    if not row_source.parent_row_path and row_source.parent_row_cardinality is None:
         return extract_response_rows(
             body,
             row_source.row_path,

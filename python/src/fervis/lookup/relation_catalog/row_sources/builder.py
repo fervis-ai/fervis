@@ -28,11 +28,10 @@ from fervis.lookup.answer_program.relations import (
 
 from .field_paths import (
     _allowed_roles,
-    _ancestor_row_path_ids,
+    _row_context_path_ids,
     _field_fact_refs,
     _field_ids,
     _field_label,
-    _field_public_id,
     _field_row_path,
     _field_row_path_id,
     _opaque_id,
@@ -295,11 +294,13 @@ def _parent_row_cardinality(
     *,
     row_paths: tuple[RowPath, ...],
 ) -> RowCardinality | None:
-    if not row_path.parent_path:
+    if not row_path.path:
         return None
     for candidate in row_paths:
         if candidate.path == row_path.parent_path:
             return candidate.cardinality
+    if not row_path.parent_path:
+        return None
     raise ValueError(f"row path {row_path.id} references unknown parent row path")
 
 
@@ -388,6 +389,10 @@ def _row_source_entity_references(
     )
     references: list[RowSourceEntityReference] = []
     for reference in read.entity_references:
+        required_refs = (*tuple(component.local_field_ref for component in reference.components),
+                         *reference.context_field_refs)
+        if not all(ref in field_ids for ref in required_refs):
+            continue
         if not _entity_reference_belongs_to_row_path(
             reference,
             row_path_id=row_path_id,
@@ -444,8 +449,9 @@ def _entity_reference_belongs_to_row_path(
     required_refs = (*component_refs, *reference.context_field_refs)
     if any(field_ref not in fields_by_ref for field_ref in required_refs):
         return False
+    visible_paths = set(_row_context_path_ids(row_path_id, row_paths=row_paths))
     return all(
-        _field_row_path_id(fields_by_ref[field_ref], row_paths=row_paths) == row_path_id
+        _field_row_path_id(fields_by_ref[field_ref], row_paths=row_paths) in visible_paths
         for field_ref in component_refs
     )
 
@@ -557,7 +563,7 @@ def _selected_api_fields_for_source(
     row_path_id: str,
     row_paths: tuple[RowPath, ...],
 ) -> tuple[CatalogField, ...]:
-    ancestor_ids = _ancestor_row_path_ids(row_path_id, row_paths=row_paths)
+    ancestor_ids = _row_context_path_ids(row_path_id, row_paths=row_paths)[:-1]
     local_fields = tuple(
         field
         for field in fields
@@ -565,14 +571,16 @@ def _selected_api_fields_for_source(
     )
     if not ancestor_ids:
         return local_fields
-    local_field_ids = {
-        _field_public_id(field, row_paths=row_paths) for field in local_fields
-    }
+    def container(field: CatalogField) -> str:
+        owner_path = _field_row_path(field, row_paths=row_paths)
+        return _relative_field_path(field.path, owner_path).split(".", 1)[0]
+
+    local_containers = {container(field) for field in local_fields}
     ancestor_fields = tuple(
         field
         for field in fields
         if _field_row_path_id(field, row_paths=row_paths) in ancestor_ids
-        and _field_public_id(field, row_paths=row_paths) not in local_field_ids
+        and container(field) not in local_containers
     )
     return (*ancestor_fields, *local_fields)
 
