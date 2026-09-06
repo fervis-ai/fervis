@@ -37,6 +37,59 @@ class OccurrenceScope:
     def for_source(self, source_ref: str) -> tuple[ReadOccurrence, ...]:
         return tuple(item for item in self.occurrences if item.source_ref == source_ref)
 
+    def choice_included(
+        self, request, choice, *, source_ref: str, occurrence_ref: str
+    ) -> bool:
+        return choice.baseline_included or (
+            choice.explicit_user_override_applies
+            and any(
+                self.owner_applies(
+                    request, owner, source_ref=source_ref, occurrence_ref=occurrence_ref
+                )
+                for owner in choice.selection_requirement_refs
+            )
+        )
+
+    def applications_for(
+        self, request, plan, *, branch_id: str, occurrence: ReadOccurrence
+    ):
+        """The invocation applications actually allocated to one logical read."""
+        allocated = []
+        for application in plan.invocation_applications:
+            if (
+                application.branch_id != branch_id
+                or application.source_ref != occurrence.source_ref
+            ):
+                continue
+            if not self.owner_applies(
+                request,
+                application.owner_ref,
+                source_ref=occurrence.source_ref,
+                occurrence_ref=occurrence.id,
+            ):
+                continue
+            choices = (
+                choice
+                for branch in plan.subject_binding.branch_realizations
+                if branch.branch_id == branch_id
+                for review in branch.surface_reviews
+                if review.owner_set_ref is None
+                or self.for_set(review.owner_set_ref).id == occurrence.id
+                for choice in review.choice_reviews
+                if choice.choice_ref == application.value_ref
+            )
+            if all(
+                self.choice_included(
+                    request,
+                    choice,
+                    source_ref=occurrence.source_ref,
+                    occurrence_ref=occurrence.id,
+                )
+                for choice in choices
+            ):
+                allocated.append(application)
+        return tuple(allocated)
+
     def owner_applies(
         self, request, owner_ref: str | None, *, source_ref: str, occurrence_ref: str
     ) -> bool:

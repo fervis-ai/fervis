@@ -1225,18 +1225,8 @@ def _choice_included_for_occurrence(
     branch_id: str,
     occurrence_ref: str,
 ) -> bool:
-    return choice.baseline_included or (
-        choice.explicit_user_override_applies
-        and any(
-            _owner_applies_to_occurrence(
-                builder,
-                owner,
-                branch_id=branch_id,
-                source_ref=source_ref,
-                occurrence_ref=occurrence_ref,
-            )
-            for owner in choice.selection_requirement_refs
-        )
+    return builder.occurrence_scopes[branch_id].choice_included(
+        builder.verified.request, choice, source_ref=source_ref, occurrence_ref=occurrence_ref,
     )
 
 
@@ -1249,37 +1239,12 @@ def _source_parameter_binding_sets(
 ) -> ParamBindingSetAlternatives:
     source = builder.verified.request.source_catalog.source(source_ref)
     groups_by_target: dict[str, list[tuple[str, ParamBindingSetAlternatives]]] = {}
-    for application in builder.verified.binding_plan.invocation_applications:
-        if application.branch_id != branch_id or application.source_ref != source_ref:
-            continue
-        if not _owner_applies_to_occurrence(
-            builder,
-            application.owner_ref,
-            branch_id=branch_id,
-            source_ref=source_ref,
-            occurrence_ref=occurrence_ref,
-        ):
-            continue
-        membership_choices = tuple(
-            choice
-            for branch in builder.verified.binding_plan.subject_binding.branch_realizations
-            if branch.branch_id == branch_id
-            for review in branch.surface_reviews
-            if review.owner_set_ref is None or builder.occurrence_scopes[branch_id].for_set(review.owner_set_ref).id == occurrence_ref
-            for choice in review.choice_reviews
-            if choice.choice_ref == application.value_ref
-        )
-        if membership_choices and not all(
-            _choice_included_for_occurrence(
-                builder,
-                choice,
-                source_ref=source_ref,
-                branch_id=branch_id,
-                occurrence_ref=occurrence_ref,
-            )
-            for choice in membership_choices
-        ):
-            continue
+    scope = builder.occurrence_scopes[branch_id]
+    occurrence = next(item for item in scope.occurrences if item.id == occurrence_ref)
+    for application in scope.applications_for(
+        builder.verified.request, builder.verified.binding_plan,
+        branch_id=branch_id, occurrence=occurrence,
+    ):
         for target in application.target_applications:
             param = next(
                 item for item in source.params if item.param_ref == target.target_ref

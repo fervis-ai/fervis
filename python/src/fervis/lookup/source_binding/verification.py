@@ -344,15 +344,19 @@ def _verify_invocation_completeness(
     for application in plan.invocation_applications:
         if application.owner_ref is not None and not request.invocation_preserves_population(application.owner_ref, branch_id=application.branch_id):
             failed.append(application.owner_ref)
+    from fervis.lookup.source_binding.occurrences import occurrence_scope
+
     for branch in request.strategy.branches:
-        applied = {
-            target.target_ref
-            for application in plan.invocation_applications
-            if application.branch_id == branch.branch_id
-            for target in application.target_applications
-        }
-        for source_ref in branch.source_refs:
-            source = request.source_catalog.source(source_ref)
+        scope = occurrence_scope(request, plan, branch.branch_id)
+        for occurrence in scope.occurrences:
+            applied = {
+                target.target_ref
+                for application in scope.applications_for(
+                    request, plan, branch_id=branch.branch_id, occurrence=occurrence
+                )
+                for target in application.target_applications
+            }
+            source = request.source_catalog.source(occurrence.source_ref)
             missing = {
                 param.param_ref
                 for param in source.params
