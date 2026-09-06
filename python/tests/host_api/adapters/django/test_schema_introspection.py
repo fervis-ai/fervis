@@ -63,7 +63,7 @@ def test_foreign_key_path_param_targets_the_related_candidate_key() -> None:
     target = path_param_entity_target(ShiftRecord, param_name="staff_id")
 
     assert target is not None
-    assert target.entity_kind == "staff"
+    assert target.entity_kind == Staff._meta.label_lower
     assert target.key_id == "primary_key"
     assert target.component_id == "staff_id"
     authority = path_param_candidate_key_authority(
@@ -71,7 +71,7 @@ def test_foreign_key_path_param_targets_the_related_candidate_key() -> None:
         param_name="staff_id",
     )
     assert authority is not None
-    assert authority.entity_kind == "staff"
+    assert authority.entity_kind == Staff._meta.label_lower
     assert authority.key_id == "primary_key"
     assert authority.components[0].component_id == "staff_id"
 
@@ -156,9 +156,9 @@ def test_plain_response_serializer_derives_keys_and_references_from_model_contex
         model_context=Sale,
     )
 
-    assert keys[0].entity_kind == "sale"
+    assert keys[0].entity_kind == Sale._meta.label_lower
     assert keys[0].components[0].field_path == "sale_id"
-    assert references[0].target_entity_kind == "location"
+    assert references[0].target_entity_kind == Location._meta.label_lower
     assert references[0].components[0].local_field_path == "location_id"
 
     inspection = inspect_response_serializer(
@@ -166,7 +166,7 @@ def test_plain_response_serializer_derives_keys_and_references_from_model_contex
         model_context=Sale,
     )
     authority = inspection.candidate_key_authorities[0]
-    assert authority.entity_kind == "location"
+    assert authority.entity_kind == Location._meta.label_lower
     assert authority.key_id == "primary_key"
     assert authority.components[0].type == "uuid"
 
@@ -196,7 +196,7 @@ def test_nested_many_serializer_declares_its_own_row_identity() -> None:
             tuple(component.field_path for component in key.components),
         )
         for key in inspection.candidate_keys
-    ) == (("location", "primary_key", ("data.location_id",)),)
+    ) == ((Location._meta.label_lower, "primary_key", ("data.location_id",)),)
 
 
 def test_method_field_name_does_not_override_declared_relation_structure():
@@ -233,7 +233,7 @@ def test_method_field_name_does_not_override_declared_relation_structure():
 
     references = entity_references_from_serializer(SaleSerializer)
 
-    assert tuple(reference.target_entity_kind for reference in references) == ("staff",)
+    assert tuple(reference.target_entity_kind for reference in references) == (Staff._meta.label_lower,)
 
 
 def test_relation_keys_include_only_total_declared_uniqueness():
@@ -340,12 +340,12 @@ def test_flattened_related_key_remains_outside_the_owning_relation_key():
         for key in keys
     ) == (
         (
-            "shift_compensation",
+            ShiftCompensation._meta.label_lower,
             "primary_key",
             ("shift_compensation_id",),
         ),
         (
-            "shift_compensation",
+            ShiftCompensation._meta.label_lower,
             "unique_compensation_closure",
             ("shift_record_id", "closure_version"),
         ),
@@ -384,7 +384,7 @@ def test_nested_to_one_key_is_a_reference_not_a_second_relation_key():
     assert inspection.relation_model is Staff
     assert tuple(
         (key.entity_kind, key.key_id) for key in inspection.candidate_keys
-    ) == (("staff", "primary_key"),)
+    ) == ((Staff._meta.label_lower, "primary_key"),)
     assert tuple(
         (
             reference.target_entity_kind,
@@ -395,7 +395,7 @@ def test_nested_to_one_key_is_a_reference_not_a_second_relation_key():
         for reference in inspection.entity_references
     ) == (
         (
-            "area",
+            Area._meta.label_lower,
             "primary_key",
             "default_area.area_id",
             ("default_area.name",),
@@ -431,7 +431,7 @@ def test_foreign_key_reference_targets_the_declared_unique_key():
         model_context=Sale,
     )
 
-    assert references[0].target_entity_kind == "location"
+    assert references[0].target_entity_kind == Location._meta.label_lower
     assert references[0].target_key_id == "unique_code"
     assert references[0].components[0].target_component_id == "code"
     assert references[0].components[0].local_field_path == "location_code"
@@ -454,7 +454,7 @@ def test_slug_related_query_parameter_targets_the_declared_unique_key():
     params = query_params_from_serializer(QuerySerializer)
 
     assert params[0].entity_target is not None
-    assert params[0].entity_target.entity_kind == "location"
+    assert params[0].entity_target.entity_kind == Location._meta.label_lower
     assert params[0].entity_target.key_id == "unique_code"
     assert params[0].entity_target.component_id == "code"
 
@@ -504,7 +504,7 @@ def test_scalar_query_parameter_targets_declared_foreign_key_filter() -> None:
     )
 
     assert params[0].entity_target is not None
-    assert params[0].entity_target.entity_kind == "location"
+    assert params[0].entity_target.entity_kind == Location._meta.label_lower
     assert params[0].entity_target.key_id == "primary_key"
     assert params[0].entity_target.component_id == "location_id"
 

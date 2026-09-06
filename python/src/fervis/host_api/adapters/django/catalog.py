@@ -11,6 +11,7 @@ from importlib.util import find_spec
 from types import SimpleNamespace
 from typing import Any
 
+from django.db.models import Field
 from django.urls import URLPattern, URLResolver, get_resolver
 from rest_framework import mixins
 from rest_framework.filters import OrderingFilter
@@ -233,6 +234,7 @@ def _build_contract(
         query_params=query_params,
     )
     path_param_names = tuple(_path_param_names(path))
+    path_fields = _declared_path_parameter_fields(view_class, path_param_names)
     path_params = tuple(
         ParameterContract(
             name=name,
@@ -243,6 +245,7 @@ def _build_contract(
             entity_target=path_param_entity_target(
                 response_model,
                 param_name=name,
+                declared_field=path_fields.get(name),
             ),
         )
         for name in path_param_names
@@ -251,7 +254,7 @@ def _build_contract(
         authority
         for name in path_param_names
         for authority in (
-            path_param_candidate_key_authority(response_model, param_name=name),
+            path_param_candidate_key_authority(response_model, param_name=name, declared_field=path_fields.get(name)),
         )
         if authority is not None
     )
@@ -875,3 +878,15 @@ def _tags_for(*, path: str, view_class: type) -> tuple[str, ...]:
     return tuple(
         sorted({part.lower() for part in re.split(r"[^a-zA-Z0-9]+", raw) if part})
     )
+
+
+def _declared_path_parameter_fields(view_class: type, names: tuple[str, ...]) -> dict[str, Field]:
+    declaration = getattr(view_class, "fervis_path_parameter_fields", {})
+    if not isinstance(declaration, Mapping):
+        raise ValueError("path parameter fields must be a mapping")
+    fields: dict[str, Field] = {}
+    for name, field in declaration.items():
+        if name not in names or not isinstance(field, Field):
+            raise ValueError("path parameter declaration must name a route parameter and model field")
+        fields[name] = field
+    return fields

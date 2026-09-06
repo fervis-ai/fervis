@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import GenericAlias, NoneType, UnionType
@@ -671,8 +670,9 @@ def path_param_entity_target(
     model: type | None,
     *,
     param_name: str,
+    declared_field: models.Field | None = None,
 ) -> EntityKeyComponentTargetContract | None:
-    identity = _path_param_identity(model, param_name=param_name)
+    identity = _path_param_identity(model, param_name=param_name, declared_field=declared_field)
     if identity is None:
         return None
     target_model, target_field = identity
@@ -687,8 +687,9 @@ def path_param_candidate_key_authority(
     model: type | None,
     *,
     param_name: str,
+    declared_field: models.Field | None = None,
 ) -> CandidateKeyAuthorityContract | None:
-    identity = _path_param_identity(model, param_name=param_name)
+    identity = _path_param_identity(model, param_name=param_name, declared_field=declared_field)
     if identity is None:
         return None
     target_model, target_field = identity
@@ -708,7 +709,13 @@ def _path_param_identity(
     model: type | None,
     *,
     param_name: str,
+    declared_field: models.Field | None = None,
 ) -> tuple[type, models.Field] | None:
+    if declared_field is not None:
+        identity = _model_field_identity(declared_field)
+        if identity is None:
+            raise ValueError("declared path parameter field is not an identity key")
+        return identity
     if not isinstance(model, type):
         return None
     meta = getattr(model, "_meta", None)
@@ -1101,15 +1108,7 @@ def _related_model(field: models.Field | None) -> type | None:
 
 
 def _model_identity_type(model: type) -> str:
-    object_name = str(
-        getattr(getattr(model, "_meta", None), "object_name", "")
-        or getattr(model, "__name__", "")
-    )
-    return "_".join(_camel_words(object_name).split()) or str(
-        getattr(getattr(model, "_meta", None), "model_name", "") or ""
-    )
-
-
-def _camel_words(value: str) -> str:
-    parts = re.findall(r"[A-Z]+(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|\d+", str(value or ""))
-    return " ".join(part.lower() for part in parts if part)
+    meta = getattr(model, "_meta", None)
+    if not isinstance(meta, Options):
+        raise ValueError("model identity requires Django model metadata")
+    return str(meta.label_lower)

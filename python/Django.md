@@ -104,7 +104,7 @@ class ObservationListView(ListAPIView):
     fervis_relation_metadata = {
         "entityReferences": [{
             "referenceId": "category_reference",
-            "targetEntityKind": "category",
+            "targetEntityKind": "inventory.category",
             "targetKeyId": "unique_code",
             "components": [{
                 "targetComponentId": "code",
@@ -119,3 +119,28 @@ These declarations supplement inferred ORM metadata. They must describe actual
 stable keys and references; they do not create database constraints or fields.
 Paths address the serializer's response fields before pagination wrapping.
 Unknown field paths and malformed declarations fail catalog construction.
+
+Django identities use the model's qualified `app_label.model_name` (for example,
+`inventory.category`). This distinguishes equal class names in different apps.
+Explicit references to inferred Django keys must use that qualified identity
+kind. App labels therefore form part of the identity contract.
+
+A path parameter may address a different model from its response rows. Declare
+its actual model field instead of relying on same-name inference:
+
+```python
+class CustomerOrdersView(ListAPIView):
+    serializer_class = OrderSerializer
+    fervis_path_parameter_fields = {
+        "customer_id": Customer._meta.get_field("customer_id"),
+    }
+```
+
+The declaration changes path-key authority only; returned foreign keys retain
+their own model identities. Unknown path parameters and fields that do not
+identify a key are rejected.
+
+The qualified-identity change requires refreshed catalogs and re-grounding of
+previous unqualified identities. Existing `buyer` evidence must not be aliased
+automatically to either `accounts.buyer` or `store.buyer`. No database schema
+migration is required.

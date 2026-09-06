@@ -68,7 +68,7 @@ def test_catalog_uses_declared_filter_metadata_without_calling_get_queryset() ->
     )
     assert SaleListView.get_queryset_calls == 0
     assert location_param.entity_target is not None
-    assert location_param.entity_target.entity_kind == "location"
+    assert location_param.entity_target.entity_kind == Location._meta.label_lower
     assert location_param.entity_target.key_id == "primary_key"
     assert location_param.entity_target.component_id == "location_id"
     assert contract.response_cardinality == "many"
