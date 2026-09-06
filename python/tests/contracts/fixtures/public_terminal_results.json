@@ -1,0 +1,22 @@
+{
+  "impossible": {
+    "kind": "impossible",
+    "message": "The requested observation is unavailable.",
+    "blockedRequirements": [{"requiredFor": "a requested measure"}]
+  },
+  "no_data": {
+    "kind": "no_data",
+    "message": "No matching data was found.",
+    "emptyRelation": {"relationId": "observations"}
+  },
+  "undefined": {
+    "kind": "undefined",
+    "message": "division_by_zero",
+    "operation": {"reasonCode": "division_by_zero"}
+  },
+  "partial": {
+    "kind": "partial",
+    "outputs": [{"key": "known", "valueKind": "number", "value": {"kind": "number", "value": "3"}, "displayValue": "3"}],
+    "facts": [{"kind": "impossible", "requestedFactId": "fact_1", "message": "The requested observation is unavailable.", "blockedRequirements": [{"requiredFor": "a requested measure"}]}]
+  }
+}

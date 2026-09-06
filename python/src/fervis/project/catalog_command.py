@@ -93,10 +93,10 @@ def _catalog_payload(
     blocked_sources = [
         {
             "source": source["name"],
-            "reason": "one_or_more_endpoints_not_read_eligible",
+            "reason": "no_read_endpoints" if not source["endpoint_count"] else "one_or_more_endpoints_not_read_eligible",
         }
         for source in sources
-        if any(
+        if not source["endpoint_count"] or any(
             not bool(endpoint["eligible"])
             for endpoint in _items(source.get("endpoints"))
             if isinstance(endpoint, dict)

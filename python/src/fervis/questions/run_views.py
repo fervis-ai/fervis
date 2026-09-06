@@ -18,6 +18,7 @@ from fervis.run_work.contracts import run_wall_clock_duration_ms
 
 from .projection import QuestionRunStatus
 from .clarification_state import pending_clarification_ids
+from .result_data import delivery_result_data, terminal_result_message
 
 
 @dataclass(frozen=True)
@@ -203,17 +204,22 @@ def _status(run: RunView, work: RunWorkSnapshot) -> QuestionRunStatus:
 
 
 def _answer_text(run: RunView) -> str | None:
-    for answer in run.answers:
-        for presentation in answer.presentations:
-            if presentation.value:
-                return presentation.value
-    values = tuple(
-        output.value
-        for answer in run.answers
-        for output in answer.outputs
-        if output.value
-    )
+    presentation = next((item.value for answer in run.answers for item in answer.presentations if item.value), None)
+    values = [presentation] if presentation else [
+        output.value for answer in run.answers for output in answer.outputs if output.value
+    ]
+    values.extend(str(fact["message"]) for fact in _terminal_facts(run) if fact.get("message"))
     return "\n".join(values) if values else None
+
+
+def _terminal_facts(run: RunView) -> list[dict[str, object]]:
+    return [
+        {**(delivery_result_data(result.terminal_payload) or {}),
+         "kind": result.result_kind, "requestedFactId": fact.fact_key,
+         "message": terminal_result_message(result.result_kind, result.terminal_payload or {})}
+        for fact in run.requested_facts for result in fact.fact_results
+        if result.terminal_payload is not None
+    ]
 
 
 def _result_data(run: RunView) -> dict[str, object] | None:
@@ -237,7 +243,14 @@ def _result_data(run: RunView) -> dict[str, object] | None:
         for answer in run.answers
         for output in answer.outputs
     ]
-    return {"kind": "answer", "outputs": outputs} if outputs else None
+    terminal = _terminal_facts(run)
+    if outputs and not terminal:
+        return {"kind": "answer", "outputs": outputs}
+    if len(terminal) == 1 and not outputs:
+        return {key: value for key, value in terminal[0].items() if key != "requestedFactId"}
+    if terminal:
+        return {"kind": "partial", "outputs": outputs, "facts": terminal}
+    return None
 
 
 def _pending_clarification_requests(

@@ -1,4 +1,4 @@
-import type { ClarificationOption, ClarificationRequest, RunPayload, RunStatus } from "../fervis-api/contracts";
+import type { ClarificationOption, ClarificationRequest, RunPayload, RunStatus, TerminalResultData } from "../fervis-api/contracts";
 import { formatTriggerKind } from "./textFormat";
 
 export function failMissingOption(): ClarificationOption {
@@ -65,13 +65,24 @@ function completedRunRenderable(run: RunPayload): boolean {
 }
 
 export function completedAnswerText(run: RunPayload): string | null {
-  if (run.answer !== null) {
+  if (run.answer !== null && run.answer.trim() !== "") {
     return run.answer;
   }
-  if (run.resultData?.kind !== "answer" || run.resultData.outputs.length === 0) {
-    return null;
+  const result = run.resultData;
+  if (result?.kind === "answer" || result?.kind === "partial") {
+    const answer = result.outputs.map((output) => output.displayValue).join(", ");
+    const values = answer ? [answer] : [];
+    if (result.kind === "partial") values.push(...result.facts.map(terminalResultText));
+    return values.length > 0 ? values.join("\n") : null;
   }
-  return run.resultData.outputs.map((output) => output.displayValue).join(", ");
+  if (result?.kind === "impossible" || result?.kind === "no_data" || result?.kind === "undefined") {
+    return terminalResultText(result);
+  }
+  return null;
+}
+
+function terminalResultText(result: TerminalResultData): string {
+  return result.message;
 }
 
 export function askPlaceholder(status: RunStatus): string {

@@ -52,6 +52,7 @@ from fervis.lookup.outcomes.model import (
     Undefined,
 )
 from fervis.lookup.outcomes.terminal_details import fact_result_terminal_details
+from fervis.lookup.outcomes.presentation import terminal_message
 from fervis.lookup.answer_rendering import RenderedFact
 from fervis.lookup.answer_program.result_projection import EntityKeyValue, ResultValue
 from fervis.lookup.question_contract import InputTerm, RequestedFact
@@ -528,7 +529,7 @@ def _terminal_fact_results(
 def _terminal_fact_result_payload(
     fact_result: FactResult,
 ) -> dict[str, object]:
-    return dict(fact_result_terminal_details(fact_result) or {})
+    return {**dict(fact_result_terminal_details(fact_result) or {}), "message": terminal_message(fact_result.outcome)}
 
 
 def _execution_proofs(

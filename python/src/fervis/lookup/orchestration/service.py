@@ -27,9 +27,9 @@ from fervis.model_io.backbone.factory import (
 from fervis.observability.query import ObservabilityQueryPort
 from fervis.lookup.lineage.steps import LineageRuntimeStepSink
 from fervis.lookup.orchestration.limits import RunLimitTracker
+from fervis.questions.result_data import delivery_result_data
 from fervis.lookup.orchestration.result import (
     PlannerRunResult,
-    delivery_result_data,
 )
 from fervis.lookup.orchestration.host_runtime import (
     HostRelationDataAccess,

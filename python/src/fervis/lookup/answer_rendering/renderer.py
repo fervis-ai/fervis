@@ -12,15 +12,11 @@ from fervis.lookup.answer_program.result_projection import (
     ResultValue,
     ScalarResultOutput,
 )
-from fervis.lookup.clarification import render_clarification_question
+from fervis.lookup.outcomes.presentation import terminal_message
 from fervis.lookup.outcomes.model import (
     AnswerResult,
     FactResult,
-    Impossible,
-    NeedsClarification,
-    NoData,
     ResultOutcome,
-    Undefined,
 )
 from fervis.lookup.outcomes.terminal_details import fact_result_terminal_details
 from fervis.lookup.canonical_data import RuntimeValue
@@ -42,7 +38,7 @@ def render_fact_result(result: FactResult) -> RenderedFact:
         )
     return RenderedFact(
         kind=outcome.kind,
-        message=_terminal_message(outcome),
+        message=terminal_message(outcome),
         details=_terminal_details(outcome),
         proof_refs=outcome.proof_refs,
     )
@@ -195,36 +191,6 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
-def _terminal_message(outcome: ResultOutcome) -> str:
-    if isinstance(outcome, NeedsClarification):
-        return _clarification_message(outcome)
-    if isinstance(outcome, Impossible):
-        return _impossible_message(outcome)
-    if isinstance(outcome, NoData):
-        return "No matching data was found."
-    if isinstance(outcome, Undefined):
-        return outcome.operation.reason_code.value
-    return ""
-
-
-def _clarification_message(outcome: NeedsClarification) -> str:
-    questions = [render_clarification_question(item) for item in outcome.clarifications]
-    return "\n".join(questions) if questions else "Can you clarify the requested value?"
-
-
-def _impossible_message(outcome: Impossible) -> str:
-    blocked = [
-        item.required_for or item.fact_ref or item.requested_fact_id
-        for item in outcome.blocked_requirements
-        if item.required_for or item.fact_ref or item.requested_fact_id
-    ]
-    if not blocked:
-        return "I cannot answer that from the available API evidence."
-    return (
-        "I cannot answer "
-        + "; ".join(str(item) for item in blocked)
-        + " from the available API evidence."
-    )
 
 
 def _terminal_details(outcome: ResultOutcome) -> Mapping[str, RuntimeValue] | None:

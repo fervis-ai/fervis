@@ -6,7 +6,8 @@ import type {
   ClarificationOption,
   ClarificationRequest,
   ClarificationSubject,
-  ResultData
+  ResultData,
+  TerminalResultData
 } from "../contracts";
 import {
   expectArray,
@@ -43,7 +44,40 @@ export function decodeResultData(raw: unknown): ResultData {
       details: { clarifications }
     };
   }
+  if (kind === "impossible" || kind === "no_data" || kind === "undefined") {
+    return decodeTerminalResult(object);
+  }
+  if (kind === "partial") {
+    return {
+      kind,
+      outputs: expectArray(object.outputs, "resultData.outputs").map(decodeAnswerOutput),
+      facts: expectArray(object.facts, "resultData.facts").map((rawFact) => {
+        const fact = expectObject(rawFact, "terminal fact");
+        return {
+          ...decodeTerminalResult(fact),
+          requestedFactId: expectString(fact.requestedFactId, "terminal fact.requestedFactId")
+        };
+      })
+    };
+  }
   throw new Error(`unsupported resultData.kind: ${kind}`);
+}
+
+function decodeTerminalResult(object: Record<string, unknown>): TerminalResultData {
+  const kind = expectString(object.kind, "terminal result.kind");
+  const message = expectString(object.message, "terminal result.message");
+  if (message.trim() === "") throw new Error("terminal result.message must not be empty");
+  if (kind === "impossible") {
+    return { kind, message, blockedRequirements: expectArray(object.blockedRequirements, "blockedRequirements")
+      .map((value) => expectObject(value, "blocked requirement")) };
+  }
+  if (kind === "no_data") {
+    return { kind, message, emptyRelation: expectObject(object.emptyRelation, "emptyRelation") };
+  }
+  if (kind === "undefined") {
+    return { kind, message, operation: expectObject(object.operation, "operation") };
+  }
+  throw new Error(`unsupported terminal result.kind: ${kind}`);
 }
 
 function decodeAnswerOutput(raw: unknown): AnswerOutput {

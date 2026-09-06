@@ -356,6 +356,7 @@ class FactResultView:
     proof: ExecutionProofView | None = None
     memory_artifacts: tuple[MemoryArtifactView, ...] = ()
 
+    terminal_payload: dict[str, object] | None = None
 
 @dataclass(frozen=True)
 class RequestedFactView:

@@ -169,7 +169,20 @@ export type RunIdentity =
 
 export type RunPayload = RunPayloadBase & RunIdentity;
 
-export type ResultData = AnswerResultData | ClarificationResultData | null;
+export type ResultData = AnswerResultData | ClarificationResultData | TerminalResultData | PartialResultData | null;
+
+export type TerminalResultData =
+  | { readonly kind: "impossible"; readonly message: string; readonly blockedRequirements: readonly Readonly<Record<string, unknown>>[] }
+  | { readonly kind: "no_data"; readonly message: string; readonly emptyRelation: Readonly<Record<string, unknown>> }
+  | { readonly kind: "undefined"; readonly message: string; readonly operation: Readonly<Record<string, unknown>> };
+
+export type TerminalFactData = TerminalResultData & { readonly requestedFactId: string };
+
+export interface PartialResultData {
+  readonly kind: "partial";
+  readonly outputs: readonly AnswerOutput[];
+  readonly facts: readonly TerminalFactData[];
+}
 
 export interface AnswerResultData {
   readonly kind: "answer";

@@ -73,13 +73,14 @@ def _cached_endpoint_contracts(
     sources: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...],
 ) -> tuple[EndpointContract, ...]:
     contracts: list[EndpointContract] = []
-    for _source_name, app_modules, path_prefixes in sources:
+    for source_name, app_modules, path_prefixes in sources:
         _walk_patterns(
             get_resolver().url_patterns,
             "",
             contracts,
             app_modules=app_modules,
             path_prefixes=path_prefixes,
+            source_namespace_path=(source_name,),
         )
     return tuple(sorted(contracts, key=lambda item: item.path_template))
 

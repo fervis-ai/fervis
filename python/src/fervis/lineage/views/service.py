@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable
 
+from fervis.lineage.enums import FactResultKind
 from fervis.lineage.proof_summary import (
     proof_applied_inputs,
     proof_computation_link_labels,
@@ -407,6 +408,7 @@ def _fact_result_view(
         fact_result_id=fact_result.fact_result_id,
         produced_by_step_id=fact_result.produced_by_step_id,
         result_kind=fact_result.result_kind.value,
+        terminal_payload=dict(fact_result.payload_json or {}) if fact_result.result_kind is not FactResultKind.ANSWERED else None,
         steps=_steps_for_fact_result(fact_result, proof_row=proof_row, steps=steps),
         proof=_proof_view(
             proof_row,
