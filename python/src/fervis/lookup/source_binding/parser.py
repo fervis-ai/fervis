@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 
 from fervis.lookup.available_sources import SourceChoiceSurfaceKind
+from fervis.lookup.provider_contract import ProviderObject
 from fervis.lookup.source_binding.occurrences import OccurrenceScope, occurrence_scope
 from fervis.lookup.answer_program.values import ValueProjectionKind
 from fervis.lookup.source_binding.param_binding_sets import (
@@ -31,6 +32,7 @@ from fervis.lookup.source_binding.model import (
     SetRealization,
     SourceBindingPlan,
     SourceRealization,
+    SourceRealizationUnavailable,
     SourceMechanic,
     SourceMechanicKind,
     SubjectObligationBinding,
@@ -54,7 +56,14 @@ def compile_source_realization(
     payload: dict[str, object],
     *,
     request: SemanticSourceBindingRequest,
-) -> SourceRealization:
+) -> SourceRealization | SourceRealizationUnavailable:
+    if payload.get("kind") == "unavailable_source_realization":
+        unavailable = output.SourceRealizationUnavailableOutput.parse(payload)
+        allowed_requirements = {ref.token for ref in request.index.source_requirement_refs}
+        if not set(unavailable.unmet_requirement_refs) <= allowed_requirements:
+            raise ValueError("unavailable realization references an undeclared requirement")
+        return SourceRealizationUnavailable(request.index.requested_fact_id,
+                                           unavailable.unmet_requirement_refs, unavailable.explanation)
     parsed = output.SourceRealizationOutput.parse(payload)
     from fervis.lookup.source_binding.association_choices import (
         AssociationChoice, association_choices, association_endpoints,
@@ -201,24 +210,7 @@ def compile_source_binding_plan(
         expected=branch_ids,
         label="resolved input application branch",
     )
-    ordinary_applications = tuple(
-        _resolved_input_application(
-            item,
-            branch_id=branch_id,
-            application_ref=f"application_{index}",
-            request=request,
-        )
-        for index, (branch_id, item) in enumerate(
-            (
-                (branch_id, item)
-                for branch_id, applications in (
-                    parsed.resolved_input_applications.items()
-                )
-                for item in applications
-            ),
-            start=1,
-        )
-    )
+    ordinary_applications = _resolved_input_applications(parsed.resolved_input_applications, request=request)
     finite_choice_applications = _finite_choice_applications(
         parsed.finite_choice_applications,
         request=request,
@@ -893,6 +885,39 @@ def _association_realization(
             relation_evidence_ref=relation_ref,
         ),
     )
+
+
+def _resolved_input_applications(
+    values: dict[str, tuple[ProviderObject, ...]],
+    *, request: SemanticSourceBindingRequest,
+) -> tuple[InvocationValueApplication, ...]:
+    applications: list[InvocationValueApplication] = []
+    applied = set()
+    unapplied = set()
+    for branch_id, items in values.items():
+        for raw in items:
+            value = raw
+            kind = value.discriminator("kind")
+            if kind == "no_request_application":
+                decision = value.parse_as(output.UnappliedInputOutput)
+                key = (branch_id, decision.owner_ref, decision.value_ref)
+                if decision.value_ref not in request.unapplied_input_value_refs_for_owner(decision.owner_ref, branch_id=branch_id):
+                    raise ValueError("unapplied input references an unavailable owner or value")
+                _text(decision.mapping_basis)
+                if key in unapplied:
+                    raise ValueError("input repeats its non-application decision")
+                unapplied.add(key)
+            elif kind == "request_application":
+                item = value.parse_as(output.ResolvedInputApplicationOutput)
+                applied.add((branch_id, item.owner_ref, item.value_ref))
+                applications.append(_resolved_input_application(
+                    item, branch_id=branch_id, application_ref=f"application_{len(applications) + 1}", request=request,
+                ))
+            else:
+                raise ValueError("unknown input application decision")
+    if applied.intersection(unapplied):
+        raise ValueError("input is both applied and unapplied for one owner")
+    return tuple(applications)
 
 
 def _resolved_input_application(

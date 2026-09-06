@@ -16,9 +16,10 @@ def test_shared_endpoint_projection_is_a_satisfiable_choice():
     request = SimpleNamespace(
         invocation_application_owner_refs=("time_requirement",),
         direct_value_options_for_owner=lambda owner, branch_id: options,
+        unapplied_input_value_refs_for_owner=lambda owner, branch_id: ("period",),
     )
     schema = _branch_resolved_input_applications_schema(request, branch_id="scope")
-    value = [{"mapping_basis": "The declared period bounds this report.",
+    value = [{"kind": "request_application", "mapping_basis": "The declared period bounds this report.",
               "owner_ref": "time_requirement", "value_ref": "period",
               "value_component": "TEMPORAL_START", "target_ref": "report.query.start_date"}]
     assert list(Draft7Validator(schema).iter_errors(value)) == []

@@ -466,10 +466,11 @@ def _semantic_compilation_impossible_result(
 ) -> LookupResult:
     from fervis.lookup.outcomes.model import BlockedRequirement, BlockedRequirementKind, FactResult, Impossible
     blocked = tuple(BlockedRequirement(
-        id=f"{fact.id}:unavailable_source", kind=BlockedRequirementKind.COMPLETE_EVIDENCE_PATH,
-        requested_fact_id=fact.id, fact_ref=fact.id, required_for=fact.origin.meaning,
+        id=f"{ref}:unavailable_source", kind=BlockedRequirementKind.COMPLETE_EVIDENCE_PATH,
+        requested_fact_id=fact.id, fact_ref=ref, required_for=fact.origin.meaning,
         reviewed_read_ids=outcome.reviewed_read_ids, proof_refs=(outcome.source_contract_snapshot.ref,),
-    ) for fact in outcome.question_contract.requested_facts if fact.id in outcome.blocked_fact_ids)
+    ) for fact in outcome.question_contract.requested_facts if fact.id in outcome.blocked_fact_ids
+      for ref in (tuple(item for item in outcome.failed_requirement_refs if item.startswith(f"{fact.id}:")) or (fact.id,)))
     return _synthesize_result(
         request=state.request, ports=state.ports,
         fact_result=FactResult(outcome=Impossible(blocked_requirements=blocked,

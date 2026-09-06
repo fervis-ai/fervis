@@ -788,7 +788,7 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
     invocation_payload["fact_bindings"] = {}
     invocation_payload["resolved_input_applications"] = {
         branch_id: [
-            {
+            {"kind": "request_application",
                 "mapping_basis": "The request parameter enforces staff identity.",
                 "owner_ref": boolean.requirement_ref,
                 "value_ref": identity_option.value_ref,
@@ -880,7 +880,7 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
     supplied_payload = deepcopy(payload)
     supplied_payload["resolved_input_applications"] = {
         branch_id: [
-            {
+            {"kind": "request_application",
                 "mapping_basis": "Supply the required scope.",
                 "owner_ref": required_owner,
                 "value_ref": required_option.value_ref,

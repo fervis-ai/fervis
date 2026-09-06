@@ -61,6 +61,10 @@ CALENDAR_MAX_ROWS = 366
 _MISSING = object()
 
 
+def _finite_choices(value_type: RowSourceValueType, choices: tuple[str, ...]) -> tuple[str, ...]:
+    return choices or (("false", "true") if value_type is RowSourceValueType.BOOLEAN else ())
+
+
 @dataclass(frozen=True)
 class RowSourceField:
     id: str
@@ -78,9 +82,7 @@ class RowSourceField:
 
     @property
     def finite_choices(self) -> tuple[str, ...]:
-        return self.choices or (
-            ("false", "true") if self.type is RowSourceValueType.BOOLEAN else ()
-        )
+        return _finite_choices(self.type, self.choices)
 
     @property
     def can_carry_lookup_text(self) -> bool:
@@ -107,6 +109,10 @@ class RowSourceParam:
     default_source: str = ""
     entity_target: EntityKeyComponentTarget | None = None
     semantics: ParameterSemantics = ParameterSemantics.OPAQUE_QUERY_PARAM
+
+    @property
+    def finite_choices(self) -> tuple[str, ...]:
+        return _finite_choices(self.type, self.choices)
 
     @property
     def accepts_lookup_text(self) -> bool:

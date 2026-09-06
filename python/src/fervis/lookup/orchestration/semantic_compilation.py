@@ -100,6 +100,7 @@ from fervis.lookup.source_binding import (
     SemanticSourceBindingTurnPrompt,
     SemanticSourceRealizationTurnPrompt,
     compile_source_realization,
+    SourceRealizationUnavailable,
     SourceStrategyVerificationFailure,
     VerifiedSourceStrategy,
     verify_source_strategy,
@@ -161,6 +162,7 @@ class SemanticCompilationImpossible:
     blocked_fact_ids: tuple[str, ...]
     source_contract_snapshot: SourceContractSnapshot
     reviewed_read_ids: tuple[str, ...]
+    failed_requirement_refs: tuple[str, ...] = ()
 
 
 SemanticCompilationOutcome = (
@@ -728,6 +730,14 @@ def _select_bind_and_compile(
             request=request,
             on_turn=on_turn,
         ).result
+        if isinstance(realization, SourceRealizationUnavailable):
+            return SemanticCompilationImpossible(
+                question_contract=contract, canonical_values=canonical_values,
+                blocked_fact_ids=(index.requested_fact_id,),
+                source_contract_snapshot=source_catalog.contract_snapshot,
+                reviewed_read_ids=tuple(read.id for read in catalog_selection.relation_catalog.reads),
+                failed_requirement_refs=realization.unmet_requirement_refs,
+            )
         source_binding_request = realization.request
         clarification = source_binding_clarification(source_binding_request)
         if clarification is not None:

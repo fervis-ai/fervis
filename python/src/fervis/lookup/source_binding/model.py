@@ -246,6 +246,21 @@ class SourceBindingPlan:
 
 
 @dataclass(frozen=True)
+class SourceRealizationUnavailable:
+    requested_fact_id: str
+    unmet_requirement_refs: tuple[str, ...]
+    explanation: str
+
+    def __post_init__(self) -> None:
+        if not self.unmet_requirement_refs or len(set(self.unmet_requirement_refs)) != len(self.unmet_requirement_refs):
+            raise ValueError("unavailable realization requires unique unmet requirements")
+        if any(FactLocalRef.from_token(ref).requested_fact_id != self.requested_fact_id for ref in self.unmet_requirement_refs):
+            raise ValueError("unavailable realization references another requested fact")
+        if not self.explanation.strip():
+            raise ValueError("unavailable realization requires an explanation")
+
+
+@dataclass(frozen=True)
 class SourceRealization:
     request: SemanticSourceBindingRequest
     set_bindings: dict[str, tuple[SetRealization, ...]]
@@ -312,7 +327,7 @@ class SemanticSourceBindingRequest:
                 or (
                     ref not in self.index.observed_fact_refs
                     and any((row_source_type_supports_semantic_type(param.type, self.index.value_type(ref))
-                            or (param.choices and self._choice_surface_supports_fact(param.type, fact_ref=ref.token)))
+                            or (param.finite_choices and self._choice_surface_supports_fact(param.type, fact_ref=ref.token)))
                             and self._parameter_controls_rows(source.id, param.param_ref)
                             for param in source.params)
                 )
@@ -882,6 +897,14 @@ class SemanticSourceBindingRequest:
             and option.value_ref not in boolean_literal_refs
         )
 
+    def unapplied_input_value_refs_for_owner(self, owner_ref: str, *, branch_id: str) -> tuple[str, ...]:
+        """Resolved values an owner may leave to deterministic row evaluation."""
+        refs = {option.value_ref for option in self.direct_value_options_for_owner(owner_ref, branch_id=branch_id)}
+        if owner_ref in {item.requirement_ref for item in self.index.boolean_requirements}:
+            canonical_refs = {value.canonical_value_id for value in self.canonical_values}
+            refs.update(canonical_refs.intersection(self.requirement_value_refs(owner_ref)))
+        return tuple(sorted(refs))
+
     def required_invocation_target_refs(
         self,
         owner_ref: str,
@@ -1148,7 +1171,7 @@ def source_binding_clarification(
                         target_ref=param.param_ref,
                         label=param.description or param.name,
                         value_type=param.type.value,
-                        allowed_values=tuple(str(item) for item in param.choices),
+                        allowed_values=tuple(str(item) for item in param.finite_choices),
                         evidence_refs=(
                             request.source_catalog.contract_snapshot.ref,
                             source_ref,
@@ -1172,7 +1195,7 @@ def source_required_inputs_are_satisfiable(
 
     return all(
         not requires_caller_supplied_input(param)
-        or bool(param.choices)
+        or bool(param.finite_choices)
         or any(
             compatible_fact_value_projections(
                 value,

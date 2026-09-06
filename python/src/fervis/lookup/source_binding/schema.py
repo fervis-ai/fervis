@@ -17,6 +17,18 @@ from fervis.lookup.source_binding.model import (
 )
 
 
+def build_unavailable_source_realization_schema(requirement_refs: tuple[str, ...]) -> dict[str, object]:
+    refs = tuple(dict.fromkeys(requirement_refs))
+    if not refs:
+        raise ValueError("unavailable realization requires a declared requirement scope")
+    return output.SourceRealizationUnavailableOutput.schema({
+        "kind": {"enum": ["unavailable_source_realization"]},
+        "unmet_requirement_refs": {"type": "array", "minItems": 1, "maxItems": len(refs),
+                                  "items": {"enum": list(refs)}},
+        "explanation": {"type": "string", "minLength": 1},
+    })
+
+
 def build_semantic_source_realization_schema(
     request: SemanticSourceBindingRequest,
 ) -> dict[str, object]:
@@ -183,6 +195,14 @@ def _resolved_input_applications_schema(
     )
 
 
+def unapplied_input_application_schema(owner_ref: str, value_ref: str) -> dict[str, object]:
+    return output.UnappliedInputOutput.schema({
+        "kind": {"enum": ["no_request_application"]},
+        "mapping_basis": _text(), "owner_ref": {"enum": [owner_ref]},
+        "value_ref": {"enum": [value_ref]},
+    })
+
+
 def _branch_resolved_input_applications_schema(
     request: SemanticSourceBindingRequest,
     *,
@@ -191,6 +211,7 @@ def _branch_resolved_input_applications_schema(
     variants = [
         output.ResolvedInputApplicationOutput.schema(
             {
+                "kind": {"enum": ["request_application"]},
                 "mapping_basis": _text(),
                 "owner_ref": {"enum": [owner_ref]},
                 "value_ref": {"enum": [option.value_ref]},
@@ -204,6 +225,11 @@ def _branch_resolved_input_applications_schema(
             branch_id=branch_id,
         )
     ]
+    variants.extend(
+        unapplied_input_application_schema(owner_ref, value_ref)
+        for owner_ref in request.invocation_application_owner_refs
+        for value_ref in request.unapplied_input_value_refs_for_owner(owner_ref, branch_id=branch_id)
+    )
     # Multiple response row paths can expose the same endpoint parameter.
     # The authored value/target projection is still one legal choice.
     variants = list({repr(variant): variant for variant in variants}.values())
@@ -383,4 +409,5 @@ def _text() -> dict[str, object]:
 __all__ = [
     "build_semantic_source_binding_schema",
     "build_semantic_source_realization_schema",
+    "build_unavailable_source_realization_schema",
 ]

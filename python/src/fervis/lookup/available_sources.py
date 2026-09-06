@@ -165,7 +165,7 @@ class AvailableSourceCatalog:
             _parameter_choice_surface(source, param)
             for source in self.sources
             for param in source.params
-            if param.choices
+            if param.finite_choices
         ) + tuple(
             _field_choice_surface(source, field)
             for source in self.sources
@@ -226,7 +226,7 @@ def _parameter_choice_surface(
             label=(param.choice_labels or {}).get(str(value), str(value)),
             declared_type=param.type,
         )
-        for position, value in enumerate(param.choices)
+        for position, value in enumerate(param.finite_choices)
     )
     return SourceChoiceSurface(
         surface_ref=surface_ref,

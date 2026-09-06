@@ -8,6 +8,7 @@ from fervis.lookup.available_sources import SourceChoiceSurfaceKind, SourceField
 from fervis.lookup.source_binding.schema import (
     build_semantic_source_binding_schema,
     build_semantic_source_realization_schema,
+    build_unavailable_source_realization_schema,
 )
 from fervis.lookup.source_binding.subject_obligations import (
     NORMAL_INSTANCE_EXCLUDED_STATE_ROLES,
@@ -229,6 +230,23 @@ class _SourcePromptBase(TurnPromptBase):
 
 
 
+SOURCE_REALIZATION_OUTCOME_INSTRUCTION = (
+    "Use submit_source_realization only when the shown rows, fields, and relationships semantically realize every required set and fact. "
+    "If they do not, use report_unavailable_source_realization and identify the unmet requirement refs. "
+    "Candidate rows may contain extra members when the shown categories or filters can isolate the requested population; ordinary membership and input application are bound next. "
+    "Do not substitute a different population or field merely because it is the only structurally compatible choice. "
+    "A count or other summary on parent rows does not make those rows instances of the summarized population."
+)
+
+
+def unavailable_source_realization_tool_spec(requirement_refs: tuple[str, ...]):
+    return required_tool_spec(
+        tool_name="report_unavailable_source_realization",
+        tool_description="Report semantic requirements that the available source candidates cannot realize.",
+        input_schema=build_unavailable_source_realization_schema(requirement_refs),
+    )
+
+
 class SemanticSourceRealizationTurnPrompt(_SourcePromptBase):
     turn_name = "source realization"
     turn_task = "select source rows, fields, and declared relationships for the semantic contract"
@@ -241,7 +259,7 @@ class SemanticSourceRealizationTurnPrompt(_SourcePromptBase):
             "Each identity identifies its declared entity kind. A primary key identifies the source row; an entity-reference key identifies the referenced entity.",
             "Every observed fact requires one field_ref. A fact about a set uses that set's chosen rows. A referenced identity cannot supply scalar fields of the referenced entity.",
             "Bind a qualification-only fact whenever a returned field expresses it. Leave it unbound only when source predicate mechanics can realize it. Input application and ordinary-instance membership are bound in the next step.",
-            "Return set_bindings, fact_bindings, and association_bindings. Do not write request inputs or subject-state reviews.",
+            SOURCE_REALIZATION_OUTCOME_INSTRUCTION,
         )),)
 
     def _requirements_payload(self):
@@ -264,14 +282,27 @@ class SemanticSourceRealizationTurnPrompt(_SourcePromptBase):
 
     def response_contract(self):
         return ProviderResponseContract(provider_schema={
-            "submit_source_realization": build_semantic_source_realization_schema(self.request),
+            spec.name: spec.input_schema for spec in self.tool_contract().tool_specs
         })
 
     def tool_contract(self):
-        return ProviderToolContract(tool_specs=(required_tool_spec(
-            tool_name="submit_source_realization", tool_description="Submit source row and field realizations.",
-            input_schema=build_semantic_source_realization_schema(self.request),
-        ),))
+        return ProviderToolContract(tool_specs=(
+            required_tool_spec(
+                tool_name="submit_source_realization", tool_description="Submit source row and field realizations.",
+                input_schema=build_semantic_source_realization_schema(self.request),
+            ),
+            unavailable_source_realization_tool_spec(tuple(ref.token for ref in sorted(self.request.index.source_requirement_refs))),
+        ))
+
+
+SOURCE_INPUT_APPLICATION_INSTRUCTION = (
+    "Shown component and target options establish structural compatibility, not semantic meaning. "
+    "Apply a resolved input only to a request target whose declared meaning implements its owned predicate. "
+    "Leave it unapplied when returned facts or returned choices realize that predicate; "
+    "do not add an unrelated request filter merely to consume an input. "
+    "Choose kind=no_request_application when the value needs no direct API application, or kind=request_application for a semantic request-target binding. "
+    "Choose this kind before writing mapping_basis. Returned-fact evaluation and finite-choice applications remain available."
+)
 
 
 class SemanticSourceBindingTurnPrompt(_SourcePromptBase):
@@ -302,9 +333,9 @@ class SemanticSourceBindingTurnPrompt(_SourcePromptBase):
             builder.instruction_block(
                 "Resolved input application",
                 (
-                    "resolved_input_applications has one shown branch key. Each item applies one resolved input value and one of its shown compatible components to one request target in that branch.",
-                    "Write mapping_basis before owner_ref, value_ref, value_component, and target_ref.",
-                    "Each selected branch must apply every fact-local resolved input that owns an explicit population constraint and exposes a compatible component and request target.",
+                    "resolved_input_applications has one shown branch key. Each item chooses whether one resolved input value needs a direct request application in that branch.",
+                    "Write kind first, then mapping_basis, owner_ref, and value_ref. Only request_application includes value_component and target_ref.",
+                    SOURCE_INPUT_APPLICATION_INSTRUCTION,
                     "The same resolved value may be applied to more than one target when the selected computation requires each application.",
                     "Use each target at most once.",
                     "A Boolean requirement without resolved input applications is evaluated from its returned fact bindings.",
