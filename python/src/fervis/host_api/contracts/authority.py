@@ -8,6 +8,7 @@ import json
 from typing import Any, Literal, Mapping
 
 from fervis.host_api.contracts.credentials import DelegatedReadCredential
+from fervis.host_api.contracts.request_origin import normalize_request_origin
 
 
 ReadContextScheme = Literal[
@@ -18,7 +19,7 @@ ReadContextScheme = Literal[
     "delegated_capability",
 ]
 
-_READ_CONTEXT_REF_KEYS = frozenset({"scheme", "key", "tenant_key"})
+_READ_CONTEXT_REF_KEYS = frozenset({"scheme", "key", "tenant_key", "origin"})
 
 
 @dataclass(frozen=True)
@@ -28,17 +29,20 @@ class ReadContextRef:
     scheme: ReadContextScheme
     key: str | None = None
     tenant_key: str | None = None
+    origin: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "scheme", _read_context_scheme(self.scheme))
         object.__setattr__(self, "key", _optional_string(self.key))
         object.__setattr__(self, "tenant_key", _optional_string(self.tenant_key))
+        object.__setattr__(self, "origin", normalize_request_origin(self.origin))
 
     def to_storage_dict(self) -> dict[str, str | None]:
         return {
             "scheme": self.scheme,
             "key": self.key,
             "tenant_key": self.tenant_key,
+            **({"origin": self.origin} if self.origin is not None else {}),
         }
 
     def matches_storage_dict(self, value: Mapping[str, Any]) -> bool:
@@ -60,6 +64,7 @@ class ReadContextRef:
             scheme=_read_context_scheme(value.get("scheme")),
             key=value.get("key"),
             tenant_key=value.get("tenant_key"),
+            origin=value.get("origin"),
         )
 
 

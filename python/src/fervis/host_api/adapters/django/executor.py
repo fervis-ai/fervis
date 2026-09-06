@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlsplit
+
+from fervis.host_api.contracts.request_origin import (
+    in_process_request_origin,
+    request_origin_headers,
+)
 
 from django.core.serializers.json import DjangoJSONEncoder
 from rest_framework.test import APIClient
@@ -31,6 +37,7 @@ def execute_get_endpoint(
     query_params: dict[str, Any] | None = None,
     page_policy: dict[str, Any] | None = None,
     transport_overlay: ReadTransportOverlay | None = None,
+    origin: str | None = None,
 ) -> EndpointExecutionResult:
     contract = get_endpoint_contract(
         endpoint_name,
@@ -56,6 +63,7 @@ def execute_get_endpoint(
             query_params=params,
             headers=prepared.headers or {},
             cookies=prepared.cookies or {},
+            origin=origin,
         ),
     )
 
@@ -67,11 +75,21 @@ def _get_page(
     query_params: dict[str, Any],
     headers: dict[str, str],
     cookies: dict[str, str],
+    origin: str | None = None,
 ) -> tuple[int, Any]:
     client = _client_for(user)
     for name, value in cookies.items():
         client.cookies[name] = value
-    response = client.get(url, query_params, headers=headers)
+    origin = in_process_request_origin(origin)
+    parsed = urlsplit(origin)
+    response = client.get(
+        url,
+        query_params,
+        headers=request_origin_headers(headers, origin),
+        secure=parsed.scheme == "https",
+        SERVER_NAME=parsed.hostname,
+        SERVER_PORT=str(parsed.port or (443 if parsed.scheme == "https" else 80)),
+    )
     body = response.data if hasattr(response, "data") else {}
     return response.status_code, _json_safe(body)
 

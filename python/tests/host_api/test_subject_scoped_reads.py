@@ -116,7 +116,7 @@ def test_django_adapter_executes_read_with_resolved_subject(monkeypatch) -> None
 
     adapter = django_adapter_module.DjangoHostApiAdapter(sources=())
     result = adapter.execute_read(
-        authority=_authority(scheme="django_principal", key="user_1"),
+        authority=_authority(scheme="django_principal", key="user_1", origin="https://api.example.test:8443"),
         invocation=ReadInvocation(
             endpoint_name="get_order",
             path_params={"order_id": "ord_1"},
@@ -130,6 +130,7 @@ def test_django_adapter_executes_read_with_resolved_subject(monkeypatch) -> None
         {
             "endpoint_name": "get_order",
             "user": resolved_user,
+            "origin": "https://api.example.test:8443",
             "sources": (),
             "path_params": {"order_id": "ord_1"},
             "query_params": {"store": "abc"},
@@ -822,6 +823,7 @@ def _authority(
     key,
     tenant_id: str = "tenant_1",
     tenant_key: str | None = "tenant_1",
+    origin: str | None = None,
 ) -> ReadAuthority:
     return ReadAuthority(
         tenant_id=tenant_id,
@@ -829,6 +831,7 @@ def _authority(
             scheme=scheme,
             key=key,
             tenant_key=tenant_key,
+            origin=origin,
         ),
     )
 

@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from io import BytesIO, StringIO
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
+
+from fervis.host_api.contracts.request_origin import (
+    in_process_request_origin,
+    request_origin_headers,
+)
 
 from ..response_body import response_body
 from ..runtime_output import suppress_host_output
@@ -28,6 +33,7 @@ class FlaskInProcessReadTransport:
         principal: object | None = None,
         headers: dict[str, str] | None = None,
         cookies: dict[str, str] | None = None,
+        origin: str | None = None,
     ) -> tuple[int, Any]:
         environ = _wsgi_environ(
             method="GET",
@@ -35,6 +41,7 @@ class FlaskInProcessReadTransport:
             query_params=query_params,
             headers=dict(headers or {}),
             cookies=dict(cookies or {}),
+            origin=origin,
         )
         with suppress_host_output():
             response = _dispatch_request(self.app, environ, principal=principal)
@@ -63,17 +70,21 @@ def _wsgi_environ(
     query_params: dict[str, Any],
     headers: dict[str, str],
     cookies: dict[str, str],
+    origin: str | None = None,
 ) -> dict[str, Any]:
+    origin = in_process_request_origin(origin)
+    parsed = urlsplit(origin)
+    headers = request_origin_headers(headers, origin)
     environ = {
         "REQUEST_METHOD": method,
         "SCRIPT_NAME": "",
         "PATH_INFO": path,
         "QUERY_STRING": urlencode(query_params, doseq=True),
-        "SERVER_NAME": "localhost",
-        "SERVER_PORT": "80",
+        "SERVER_NAME": parsed.hostname,
+        "SERVER_PORT": str(parsed.port or (443 if parsed.scheme == "https" else 80)),
         "SERVER_PROTOCOL": "HTTP/1.1",
         "wsgi.version": (1, 0),
-        "wsgi.url_scheme": "http",
+        "wsgi.url_scheme": parsed.scheme,
         "wsgi.input": BytesIO(b""),
         "wsgi.errors": StringIO(),
         "wsgi.multithread": False,

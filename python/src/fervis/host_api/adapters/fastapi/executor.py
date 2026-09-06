@@ -10,6 +10,11 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from fervis.host_api.contracts.request_origin import (
+    in_process_request_origin,
+    request_origin_headers,
+)
+
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -61,6 +66,7 @@ class FastAPIApplicationRuntime:
         page_policy: dict[str, Any] | None = None,
         dependency_override: FastAPIDependencyOverride | None = None,
         transport_overlay: ReadTransportOverlay | None = None,
+        origin: str | None = None,
     ) -> EndpointExecutionResult:
         with self._lock, project_import_context(self._project_root):
             if self._closed:
@@ -80,6 +86,7 @@ class FastAPIApplicationRuntime:
                     contract=contract,
                     prepared=prepared,
                     page_policy=page_policy,
+                    origin=origin,
                 )
                 return event_loop.run_until_complete(execution)
 
@@ -149,6 +156,7 @@ async def _execute_asgi_get(
     contract: EndpointContract,
     prepared: PreparedGet,
     page_policy: dict[str, Any] | None,
+    origin: str | None = None,
 ) -> EndpointExecutionResult:
     client.cookies.clear()
     client.cookies.update(prepared.cookies or {})
@@ -162,6 +170,7 @@ async def _execute_asgi_get(
                 url,
                 params,
                 headers=prepared.headers or {},
+                origin=origin,
             ),
         )
     finally:
@@ -174,12 +183,14 @@ async def _get_page(
     query_params: dict[str, Any],
     *,
     headers: dict[str, str],
+    origin: str | None = None,
 ) -> tuple[int, Any]:
+    origin = in_process_request_origin(origin)
     with suppress_host_output():
         response = await client.get(
-            url,
+            origin + url,
             params=query_params,
-            headers=headers,
+            headers=request_origin_headers(headers, origin),
         )
     return response.status_code, response_body(response)
 
