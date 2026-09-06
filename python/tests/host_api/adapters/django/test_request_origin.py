@@ -27,7 +27,7 @@ urlpatterns = [path("resources/", OriginView.as_view())]
     ROOT_URLCONF=__name__, ALLOWED_HOSTS=["api.example.test", "localhost"]
 )
 def test_native_read_preserves_https_authority_and_nondefault_port():
-    status, body = _get_page(
+    page = _get_page(
         user=SimpleNamespace(is_authenticated=True),
         url="/resources/",
         query_params={},
@@ -35,21 +35,21 @@ def test_native_read_preserves_https_authority_and_nondefault_port():
         cookies={},
         origin="https://api.example.test:8443",
     )
-    assert status == 200
-    assert body == {"url": "https://api.example.test:8443/resources/1/"}
+    assert page.status == 200
+    assert page.body == {"url": "https://api.example.test:8443/resources/1/"}
 
 
 @override_settings(ROOT_URLCONF=__name__, ALLOWED_HOSTS=[], DEBUG=True)
 def test_cli_without_inbound_request_uses_local_origin():
-    status, body = _get_page(
+    page = _get_page(
         user=SimpleNamespace(is_authenticated=True),
         url="/resources/",
         query_params={},
         headers={},
         cookies={},
     )
-    assert status == 200
-    assert body == {"url": "http://localhost/resources/1/"}
+    assert page.status == 200
+    assert page.body == {"url": "http://localhost/resources/1/"}
 
 
 @override_settings(ALLOWED_HOSTS=["api.example.test"])

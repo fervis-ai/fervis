@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from fervis.lookup.answer_program.model import AnswerProgram
@@ -118,6 +118,29 @@ def run_answer_program_execution(
         step_id=execution_step_id(ports),
     )
     try:
+        from fervis.lookup.orchestration.execution_sources import (
+            prepare_execution_catalog,
+        )
+
+        current_catalog = prepare_execution_catalog(
+            run_id=request.run_id,
+            catalog=environment.execution_catalog,
+            program=program,
+            data_access_port=ports.data_access_port,
+            lineage_step_sink=ports.lineage_step_sink,
+            allowed_read_ids=environment.authorized_sources.allowed_read_ids
+            if environment.authorized_sources is not None
+            else None,
+        )
+        environment = replace(
+            environment,
+            catalog=current_catalog,
+            authorized_sources=replace(
+                environment.authorized_sources, relation_catalog=current_catalog
+            )
+            if environment.authorized_sources is not None
+            else None,
+        )
         execution = invoke_answer_program(
             program=program,
             bindings=bindings,

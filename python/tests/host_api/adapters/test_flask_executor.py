@@ -104,10 +104,8 @@ def test_flask_executor_returns_non_json_body_without_crashing(tmp_path: Path) -
     )
 
     assert result.response_status == 200
-    assert result.response_body == {
-        "contentType": "text/plain; charset=utf-8",
-        "text": "ready",
-    }
+    assert result.response_format.value == "text"
+    assert result.response_body == "ready"
 
 
 def _sources() -> tuple[FlaskAppSource, ...]:

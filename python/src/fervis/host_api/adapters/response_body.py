@@ -4,25 +4,29 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from fervis.host_api.contracts.response_page import ResponsePage, ResponseFormat
 
 
-def response_body(response: object) -> Any:
-    try:
-        json_body = _response_json(response)
-        if json_body is not None:
-            return _json_safe(json_body)
-    except ValueError:
-        pass
-    content = getattr(response, "content", b"")
-    text = str(getattr(response, "text", "") or "")
-    if not content and not text:
-        text = _response_text(response)
-    if not content and not text:
-        return None
-    return {
-        "contentType": _content_type(response),
-        "text": text,
-    }
+def response_page(response: object) -> ResponsePage:
+    status = int(getattr(response, "status_code"))
+    media_type = _content_type(response).split(";", 1)[0].strip().lower()
+    if (
+        not media_type
+        or media_type == "application/json"
+        or media_type.endswith("+json")
+    ):
+        try:
+            return ResponsePage(
+                status, _json_safe(_response_json(response)), ResponseFormat.JSON
+            )
+        except ValueError:
+            pass
+    text = str(getattr(response, "text", "") or "") or _response_text(response)
+    return ResponsePage(
+        status,
+        text if text else None,
+        ResponseFormat.TEXT if text else ResponseFormat.EMPTY,
+    )
 
 
 def _response_json(response: object) -> Any:
@@ -54,6 +58,13 @@ def _response_text(response: object) -> str:
         if isinstance(value, bytes):
             return value.decode("utf-8", errors="replace")
         return str(value or "")
+    content = getattr(response, "content", None)
+    if isinstance(content, bytes):
+        return content.decode(
+            getattr(response, "charset", None) or "utf-8", errors="replace"
+        )
+    if isinstance(content, str):
+        return content
     return ""
 
 

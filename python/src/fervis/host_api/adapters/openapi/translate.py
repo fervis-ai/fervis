@@ -152,6 +152,7 @@ def _parameters(
         if parameter.location == source
     )
 
+
 def _response_fields(schema: dict[str, Any]) -> tuple[ResponseFieldContract, ...]:
     fields: list[ResponseFieldContract] = []
     _collect_response_fields(_row_schema(schema), fields=fields, prefix="")
@@ -202,7 +203,7 @@ def _object_properties(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _response_cardinality(schema: dict[str, Any]) -> str:
-    return "many" if schema.get("type") == "array" else "one"
+    return {"array": "many", "object": "one"}.get(str(schema.get("type")), "unknown")
 
 
 def _schema_properties(schema: dict[str, Any]) -> dict[str, Any]:

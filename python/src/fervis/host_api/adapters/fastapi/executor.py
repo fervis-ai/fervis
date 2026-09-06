@@ -8,6 +8,7 @@ from contextlib import AsyncExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
+from fervis.host_api.contracts.response_page import ResponsePage
 from typing import Any
 
 from fervis.host_api.contracts.request_origin import (
@@ -32,7 +33,7 @@ from fervis.host_api.contracts.ports import (
 )
 from fervis.project.importing import project_import_context
 
-from ..response_body import response_body
+from ..response_body import response_page
 from ..runtime_output import suppress_host_output
 
 
@@ -184,7 +185,7 @@ async def _get_page(
     *,
     headers: dict[str, str],
     origin: str | None = None,
-) -> tuple[int, Any]:
+) -> ResponsePage:
     origin = in_process_request_origin(origin)
     with suppress_host_output():
         response = await client.get(
@@ -192,7 +193,7 @@ async def _get_page(
             params=query_params,
             headers=request_origin_headers(headers, origin),
         )
-    return response.status_code, response_body(response)
+    return response_page(response)
 
 
 @contextmanager

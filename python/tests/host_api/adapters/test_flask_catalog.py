@@ -206,7 +206,8 @@ def test_plain_flask_json_route_without_contract_does_not_become_lookup_read(
 
     assert contracts[0].response_schema_source == "missing"
     assert contracts[0].response_fields == ()
-    assert catalog.reads == ()
+    assert len(catalog.reads) == 1
+    assert catalog.reads[0].row_paths == ()
 
 
 def test_empty_plain_flask_json_route_remains_route_only(
@@ -238,7 +239,8 @@ def test_empty_plain_flask_json_route_remains_route_only(
     catalog = relation_catalog_from_endpoint_contracts(contracts)
 
     assert contracts[0].response_schema_source == "missing"
-    assert catalog.reads == ()
+    assert len(catalog.reads) == 1
+    assert catalog.reads[0].row_paths == ()
 
 
 def test_flask_catalog_enriches_routes_from_openapi_document(

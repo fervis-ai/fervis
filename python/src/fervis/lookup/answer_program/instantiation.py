@@ -81,6 +81,14 @@ class ExecutionEnvironment:
     expression_values: Mapping[str, RuntimeValue] | None = None
     expression_types: Mapping[str, str] | None = None
 
+    @property
+    def execution_catalog(self) -> RelationCatalog:
+        return (
+            self.authorized_sources.relation_catalog
+            if self.authorized_sources is not None
+            else self.catalog
+        )
+
 
 @dataclass(frozen=True)
 class ExecutionProofNode:
@@ -215,11 +223,7 @@ def instantiate_answer_program(
 
     if not program.fact_template:
         raise VerificationError("answer program requires persisted fact template")
-    catalog = (
-        environment.authorized_sources.relation_catalog
-        if environment.authorized_sources is not None
-        else environment.catalog
-    )
+    catalog = environment.execution_catalog
     verify_program_compatibility(
         program,
         catalog=catalog,
@@ -405,7 +409,11 @@ def _instantiate_operations(
         )
         if isinstance(spec.selection, (Take, AtPosition)):
             limit_inputs = _resolve_expression_inputs(
-                (spec.selection.limit if isinstance(spec.selection, Take) else spec.selection.position),
+                (
+                    spec.selection.limit
+                    if isinstance(spec.selection, Take)
+                    else spec.selection.position
+                ),
                 bindings=bindings,
                 operation_id=operation.id,
             )
@@ -600,10 +608,16 @@ def _execution_proof_graph(
                 kind=ProofNodeKind.OPERATION,
             )
         )
-        for node_id in dict.fromkeys(ref.node_id for ref in operation_node_output_refs(operation.spec)):
-            edges.append(ExecutionProofEdge(
-                source=f"operation:{node_id}", target=operation_node_id, role=ProofEdgeRole.INPUT,
-            ))
+        for node_id in dict.fromkeys(
+            ref.node_id for ref in operation_node_output_refs(operation.spec)
+        ):
+            edges.append(
+                ExecutionProofEdge(
+                    source=f"operation:{node_id}",
+                    target=operation_node_id,
+                    role=ProofEdgeRole.INPUT,
+                )
+            )
         for input_relation in operation.input_relation_ids:
             edges.append(
                 ExecutionProofEdge(

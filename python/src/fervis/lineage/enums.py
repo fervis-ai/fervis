@@ -116,6 +116,12 @@ class RuntimeErrorKind(StrEnum):
     INFRASTRUCTURE_FAILED = "infrastructure_failed"
 
 
+class SourceInspectionPhase(StrEnum):
+    CONTINUATION = "continuation"
+    SEMANTIC = "semantic"
+    EXECUTION = "execution"
+
+
 class RunStepKind(StrEnum):
     MODEL_TURN = "model_turn"
     DETERMINISTIC = "deterministic"
@@ -126,6 +132,7 @@ class RunStepKey(StrEnum):
     QUESTION_CONTRACT = "question_contract"
     QUERY_ENRICHMENT = "query_enrichment"
     CATALOG_SELECTION = "catalog_selection"
+    SOURCE_INSPECTION = "source_inspection"
     GROUNDING = "grounding"
     READ_ELIGIBILITY = "read_eligibility"
     PLAN_SELECTION = "plan_selection"

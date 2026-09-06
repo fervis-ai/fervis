@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing_extensions import assert_never
 
 from fervis.lookup.contract_codec import canonical_contract_fingerprint
@@ -110,6 +110,7 @@ def build_program_compatibility(
                 fingerprint=_current_source_fingerprint(
                     key,
                     row_sources=row_sources,
+                    program=program,
                 ),
             )
             for key in requirements.source_keys
@@ -149,6 +150,7 @@ def verify_program_compatibility(
             current_fingerprint = _current_source_fingerprint(
                 SourceContractKey(kind=pin.kind, source_id=pin.source_id),
                 row_sources=row_sources,
+                program=program,
             )
         except (KeyError, StopIteration) as exc:
             raise VerificationError("incompatible_source_contract") from exc
@@ -202,5 +204,23 @@ def _current_source_fingerprint(
     key: SourceContractKey,
     *,
     row_sources: RowSourceCatalog,
+    program: AnswerProgram,
 ) -> str:
-    return canonical_contract_fingerprint(row_sources.source(key.source_id))
+    source = row_sources.source(key.source_id)
+    if key.kind is SourceContractKind.CATALOG_READ:
+        required_fields = {
+            field.field_id
+            for relation in program.relations
+            if relation.source.row_source_id == key.source_id
+            for field in relation.fields
+        }
+        # Pin the executable projection, not unrelated observed columns or
+        # generated display labels. Keep invocation and identity contracts.
+        source = replace(
+            source,
+            fields=tuple(
+                field for field in source.fields if field.id in required_fields
+            ),
+            label="",
+        )
+    return canonical_contract_fingerprint(source)

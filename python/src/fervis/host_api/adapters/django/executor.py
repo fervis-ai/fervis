@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
+from fervis.host_api.contracts.response_page import ResponsePage
+from fervis.host_api.adapters.response_body import response_page
 from urllib.parse import urlsplit
 
 from fervis.host_api.contracts.request_origin import (
@@ -11,7 +12,6 @@ from fervis.host_api.contracts.request_origin import (
     request_origin_headers,
 )
 
-from django.core.serializers.json import DjangoJSONEncoder
 from rest_framework.test import APIClient
 
 from fervis.host_api.adapters.get_execution import (
@@ -76,7 +76,7 @@ def _get_page(
     headers: dict[str, str],
     cookies: dict[str, str],
     origin: str | None = None,
-) -> tuple[int, Any]:
+) -> ResponsePage:
     client = _client_for(user)
     for name, value in cookies.items():
         client.cookies[name] = value
@@ -90,15 +90,10 @@ def _get_page(
         SERVER_NAME=parsed.hostname,
         SERVER_PORT=str(parsed.port or (443 if parsed.scheme == "https" else 80)),
     )
-    body = response.data if hasattr(response, "data") else {}
-    return response.status_code, _json_safe(body)
+    return response_page(response)
 
 
 def _client_for(user: Any) -> APIClient:
     client = APIClient()
     client.force_authenticate(user=user)
     return client
-
-
-def _json_safe(value: Any) -> Any:
-    return json.loads(json.dumps(value, cls=DjangoJSONEncoder))

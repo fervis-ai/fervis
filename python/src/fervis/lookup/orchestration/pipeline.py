@@ -1,7 +1,7 @@
 """Lookup runtime pipeline."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from fervis.model_io.turns import ModelTurnPurpose
@@ -235,23 +235,46 @@ def _run_compile_question_execution(
     return _run_semantic_compile_question(state)
 
 
-def _run_semantic_compile_question(state: _LookupPipelineState) -> LookupResult:
+def _run_semantic_compile_question(
+    state: _LookupPipelineState, *, catalog=None
+) -> LookupResult:
     limit_failure = _limit_before_next_model_turn(state.ports, state.request.run_id)
     if limit_failure is not None:
         return limit_failure
     state.full_catalog = parse_relation_catalog(
-        state.ports.relation_catalog_port.build_relation_catalog()
+        catalog
+        if catalog is not None
+        else state.ports.relation_catalog_port.build_relation_catalog()
     )
     recorder = _SemanticTurnRecorder(
         state=state,
-        next_turn=2 if state.conversation_turn is not None else 1,
-        usage={},
-        turn_numbers={},
+        next_turn=max(
+            (
+                number
+                for numbers in (state.semantic_turn_numbers or {}).values()
+                for number in numbers
+            ),
+            default=1 if state.conversation_turn is not None else 0,
+        )
+        + 1,
+        usage=dict(state.semantic_usage or {}),
+        turn_numbers={
+            purpose: list(numbers)
+            for purpose, numbers in (state.semantic_turn_numbers or {}).items()
+        },
     )
 
+    from fervis.lookup.lineage.representation import RepresentationInspectionAudit
+
+    inspection = RepresentationInspectionAudit(
+        run_id=state.request.run_id, sink=state.ports.lineage_step_sink
+    )
     try:
         outcome = compile_semantic_question(
-            _semantic_compilation_request(state),
+            replace(
+                _semantic_compilation_request(state),
+                representation_observer=inspection.observe,
+            ),
             on_turn=recorder,
         )
     except _RunLimitReached as exc:
@@ -271,6 +294,8 @@ def _run_semantic_compile_question(state: _LookupPipelineState) -> LookupResult:
             message=str(exc),
             usage=recorder.usage,
         )
+    finally:
+        inspection.flush()
     state.semantic_usage = recorder.usage
     state.semantic_turn_numbers = recorder.turn_numbers
     if isinstance(outcome, SemanticCompilationClarification):
@@ -364,7 +389,7 @@ def _run_semantic_execution_phase(state: _LookupPipelineState) -> LookupResult:
     if compiled is None:
         raise VerificationError("semantic execution requires compiled facts")
     execution_sources = AuthorizedExecutionSources.from_program(
-        full_catalog=state.full_catalog,
+        full_catalog=compiled.catalog_selection.relation_catalog,
         program=compiled.compilation.answer_program,
     )
     question_turns = (state.semantic_turn_numbers or {}).get(
@@ -445,9 +470,7 @@ def _semantic_compilation_clarification_result(
         status=RunStatus.NEEDS_CLARIFICATION,
         usage=state.semantic_usage or {},
         question_contract=outcome.question_contract,
-        grounded_values=tuple(
-            value.typed_value for value in outcome.canonical_values
-        ),
+        grounded_values=tuple(value.typed_value for value in outcome.canonical_values),
         question_contract_step_id=(
             model_turn_step_id(
                 state.ports,
@@ -462,20 +485,48 @@ def _semantic_compilation_clarification_result(
 
 
 def _semantic_compilation_impossible_result(
-    state: _LookupPipelineState, outcome: SemanticCompilationImpossible,
+    state: _LookupPipelineState,
+    outcome: SemanticCompilationImpossible,
 ) -> LookupResult:
-    from fervis.lookup.outcomes.model import BlockedRequirement, BlockedRequirementKind, FactResult, Impossible
-    blocked = tuple(BlockedRequirement(
-        id=f"{ref}:unavailable_source", kind=BlockedRequirementKind.COMPLETE_EVIDENCE_PATH,
-        requested_fact_id=fact.id, fact_ref=ref, required_for=fact.origin.meaning,
-        reviewed_read_ids=outcome.reviewed_read_ids, proof_refs=(outcome.source_contract_snapshot.ref,),
-    ) for fact in outcome.question_contract.requested_facts if fact.id in outcome.blocked_fact_ids
-      for ref in (tuple(item for item in outcome.failed_requirement_refs if item.startswith(f"{fact.id}:")) or (fact.id,)))
+    from fervis.lookup.outcomes.model import (
+        BlockedRequirement,
+        BlockedRequirementKind,
+        FactResult,
+        Impossible,
+    )
+
+    blocked = tuple(
+        BlockedRequirement(
+            id=f"{ref}:unavailable_source",
+            kind=BlockedRequirementKind.COMPLETE_EVIDENCE_PATH,
+            requested_fact_id=fact.id,
+            fact_ref=ref,
+            required_for=fact.origin.meaning,
+            reviewed_read_ids=outcome.reviewed_read_ids,
+            proof_refs=(outcome.source_contract_snapshot.ref,),
+        )
+        for fact in outcome.question_contract.requested_facts
+        if fact.id in outcome.blocked_fact_ids
+        for ref in (
+            tuple(
+                item
+                for item in outcome.failed_requirement_refs
+                if item.startswith(f"{fact.id}:")
+            )
+            or (fact.id,)
+        )
+    )
     return _synthesize_result(
-        request=state.request, ports=state.ports,
-        fact_result=FactResult(outcome=Impossible(blocked_requirements=blocked,
-                                                proof_refs=(outcome.source_contract_snapshot.ref,))),
-        status=RunStatus.COMPLETED, usage=state.semantic_usage or {},
+        request=state.request,
+        ports=state.ports,
+        fact_result=FactResult(
+            outcome=Impossible(
+                blocked_requirements=blocked,
+                proof_refs=(outcome.source_contract_snapshot.ref,),
+            )
+        ),
+        status=RunStatus.COMPLETED,
+        usage=state.semantic_usage or {},
         question_contract=outcome.question_contract,
         grounded_values=tuple(value.typed_value for value in outcome.canonical_values),
     )
@@ -717,6 +768,39 @@ def _run_continue_prior_request_program(
             message="callable prior frame arguments could not be bound",
             usage=_phase_usage(state),
         )
+    from fervis.lineage.enums import SourceInspectionPhase
+    from fervis.lookup.orchestration.execution_sources import prepare_execution_catalog
+
+    try:
+        state.full_catalog = prepare_execution_catalog(
+            run_id=state.request.run_id,
+            catalog=state.full_catalog,
+            program=prepared.program,
+            data_access_port=state.ports.data_access_port,
+            lineage_step_sink=state.ports.lineage_step_sink,
+            inspection_phase=SourceInspectionPhase.CONTINUATION,
+        )
+    except ValueError as exc:
+        return _runtime_error_terminal(
+            state,
+            error_code=ErrorCode.PROGRAM_EXECUTION_FAILED,
+            message=str(exc),
+            usage=_phase_usage(state),
+        )
+    from fervis.lookup.answer_program.compatibility import verify_program_compatibility
+
+    try:
+        verify_program_compatibility(
+            prepared.program,
+            catalog=state.full_catalog,
+            memory_relations=state.memory.relations,
+        )
+    except VerificationError as exc:
+        if str(exc) != "incompatible_source_contract":
+            raise
+        # A changed source invalidates the cached implementation, not the
+        # current question. Recompile against this run's inspected catalog.
+        return _run_semantic_compile_question(state, catalog=state.full_catalog)
     execution_sources = AuthorizedExecutionSources.from_program(
         full_catalog=state.full_catalog,
         program=prepared.program,

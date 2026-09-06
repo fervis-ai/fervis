@@ -154,9 +154,7 @@ def _walk_patterns(
                 url_name=pattern.name,
                 view_class=view_class,
                 converters=pattern_converters,
-                get_action=(
-                    getattr(pattern.callback, "actions", {}) or {}
-                ).get("get"),
+                get_action=(getattr(pattern.callback, "actions", {}) or {}).get("get"),
                 source_namespace_path=source_namespace_path,
             )
         )
@@ -198,8 +196,12 @@ def _build_contract(
     declared_keys, declared_references = relation_metadata_from_public_value(
         getattr(view_class, "fervis_relation_metadata", {})
     )
-    candidate_keys = tuple(dict.fromkeys((*response_inspection.candidate_keys, *declared_keys)))
-    entity_references = tuple(dict.fromkeys((*response_inspection.entity_references, *declared_references)))
+    candidate_keys = tuple(
+        dict.fromkeys((*response_inspection.candidate_keys, *declared_keys))
+    )
+    entity_references = tuple(
+        dict.fromkeys((*response_inspection.entity_references, *declared_references))
+    )
     optional_projection_params = optional_full_response_projection_param_names(
         response_serializer_class,
         query_params=query_params,
@@ -255,7 +257,9 @@ def _build_contract(
         authority
         for name in path_param_names
         for authority in (
-            path_param_candidate_key_authority(response_model, param_name=name, declared_field=path_fields.get(name)),
+            path_param_candidate_key_authority(
+                response_model, param_name=name, declared_field=path_fields.get(name)
+            ),
         )
         if authority is not None
     )
@@ -341,7 +345,9 @@ def _response_cardinality(
         return "one"
     supports_list = issubclass(view_class, mixins.ListModelMixin)
     supports_retrieve = issubclass(view_class, mixins.RetrieveModelMixin)
-    return "many" if supports_list and not supports_retrieve else "one"
+    if supports_list and not supports_retrieve:
+        return "many"
+    return "one" if supports_retrieve else "unknown"
 
 
 def _get_response_serializer_class(view_class: type) -> type | None:
@@ -424,11 +430,25 @@ def _with_framework_param_semantics(
     ):
         raise ValueError("invalid parameter semantics declaration")
     response_shape_param_names = _response_shape_param_names_from_framework(
-        query_params, response_fields=response_fields, view_class=view_class,
+        query_params,
+        response_fields=response_fields,
+        view_class=view_class,
     )
-    return tuple(replace(param, semantics=declared.get(param.name, param.semantics or (
-        ParameterSemantics.RESPONSE_SHAPE.value if param.name in response_shape_param_names else ""
-    ))) for param in query_params)
+    return tuple(
+        replace(
+            param,
+            semantics=declared.get(
+                param.name,
+                param.semantics
+                or (
+                    ParameterSemantics.RESPONSE_SHAPE.value
+                    if param.name in response_shape_param_names
+                    else ""
+                ),
+            ),
+        )
+        for param in query_params
+    )
 
 
 def _response_shape_param_names_from_framework(
@@ -881,13 +901,17 @@ def _tags_for(*, path: str, view_class: type) -> tuple[str, ...]:
     )
 
 
-def _declared_path_parameter_fields(view_class: type, names: tuple[str, ...]) -> dict[str, Field]:
+def _declared_path_parameter_fields(
+    view_class: type, names: tuple[str, ...]
+) -> dict[str, Field]:
     declaration = getattr(view_class, "fervis_path_parameter_fields", {})
     if not isinstance(declaration, Mapping):
         raise ValueError("path parameter fields must be a mapping")
     fields: dict[str, Field] = {}
     for name, field in declaration.items():
         if name not in names or not isinstance(field, Field):
-            raise ValueError("path parameter declaration must name a route parameter and model field")
+            raise ValueError(
+                "path parameter declaration must name a route parameter and model field"
+            )
         fields[name] = field
     return fields

@@ -60,7 +60,13 @@ def _validate_endpoint_contracts(contracts: tuple[EndpointContract, ...]) -> Non
 
 
 def _endpoint_read(contract: EndpointContract) -> EndpointRead:
-    row_paths = _row_paths(contract)
+    row_paths = (
+        _row_paths(contract)
+        if contract.response_fields
+        or contract.pagination is not None
+        or contract.response_cardinality in {"one", "many"}
+        else ()
+    )
     fields = tuple(
         field
         for item in contract.response_fields
@@ -211,7 +217,14 @@ def _entity_reference(
 
 
 def _source_metadata(contract: EndpointContract) -> dict[str, object]:
-    return {"description": contract.docstring}
+    return {
+        "description": contract.docstring,
+        **(
+            {"representation_authority": "unobserved"}
+            if not contract.response_fields
+            else {}
+        ),
+    }
 
 
 def _catalog_endpoint_metadata(
@@ -290,9 +303,13 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
             path="data",
             cardinality=RowCardinality.MANY,
         )
-    for field in sorted(contract.response_fields, key=lambda item: (
-        _catalog_path(contract, str(item.path or "")).count("."), str(item.path or "")
-    )):
+    for field in sorted(
+        contract.response_fields,
+        key=lambda item: (
+            _catalog_path(contract, str(item.path or "")).count("."),
+            str(item.path or ""),
+        ),
+    ):
         path = _catalog_path(contract, str(field.path or ""))
         if not path:
             continue
@@ -322,9 +339,13 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
             )
     # Object containers can be flattened into an ancestor row. Parent links
     # refer to that declared row, not to an undeclared lexical container.
-    return tuple(replace(paths[key], parent_path=_field_row_path(
-        _parent_row_path(paths[key].path), paths
-    )) for key in sorted(paths))
+    return tuple(
+        replace(
+            paths[key],
+            parent_path=_field_row_path(_parent_row_path(paths[key].path), paths),
+        )
+        for key in sorted(paths)
+    )
 
 
 def _field_has_descendants(contract: EndpointContract, field_path: str) -> bool:
@@ -393,9 +414,7 @@ def _response_envelope(contract: EndpointContract) -> ResponseEnvelopeMetadata:
             else ""
         ),
         count_path=(
-            f"pagination.{TOTAL_COUNT_FIELD}"
-            if contract.pagination is not None
-            else ""
+            f"pagination.{TOTAL_COUNT_FIELD}" if contract.pagination is not None else ""
         ),
     )
 

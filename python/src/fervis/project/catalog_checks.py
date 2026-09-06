@@ -146,7 +146,7 @@ def _catalog_contract_checks(
                 status="failed",
                 message=(
                     f"{framework_label} sources produced no lookup-readable GET "
-                    "endpoints with response fields."
+                    "endpoints."
                 ),
                 fix=edit_config_action(),
             )
@@ -174,13 +174,13 @@ def _catalog_contract_checks(
         checks.append(
             DoctorCheck(
                 id="source.response_schema",
-                status="failed",
+                status="skipped",
                 message=(
                     f"{count} exposed endpoint"
                     f"{'' if count == 1 else 's'} "
-                    f"{'has' if count == 1 else 'have'} no response fields."
+                    f"{'has' if count == 1 else 'have'} no declared response fields. "
+                    "Selected JSON responses can be inspected at runtime."
                 ),
-                fix=edit_config_action(),
             )
         )
     else:
@@ -197,6 +197,12 @@ def _catalog_contract_checks(
 def _response_conformance_check(
     results: tuple[ResponseConformanceResult, ...],
 ) -> DoctorCheck:
+    if not results:
+        return DoctorCheck(
+            id="source.response_conformance",
+            status="skipped",
+            message="No declared response representations to probe.",
+        )
     failures = tuple(result for result in results if result.status == "failed")
     if failures:
         first = failures[0]

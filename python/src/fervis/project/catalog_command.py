@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fervis.interfaces.agent.actions import (
-    add_schema_metadata_action,
     run_init_action,
 )
 from fervis.host_api.contracts import EndpointContract
@@ -93,10 +92,13 @@ def _catalog_payload(
     blocked_sources = [
         {
             "source": source["name"],
-            "reason": "no_read_endpoints" if not source["endpoint_count"] else "one_or_more_endpoints_not_read_eligible",
+            "reason": "no_read_endpoints"
+            if not source["endpoint_count"]
+            else "one_or_more_endpoints_not_read_eligible",
         }
         for source in sources
-        if not source["endpoint_count"] or any(
+        if not source["endpoint_count"]
+        or any(
             not bool(endpoint["eligible"])
             for endpoint in _items(source.get("endpoints"))
             if isinstance(endpoint, dict)
@@ -244,34 +246,25 @@ def _endpoint_payload(contract: EndpointContract) -> dict[str, object]:
 
 
 def _endpoint_readiness(contract: EndpointContract) -> dict[str, object]:
-    if contract.supports_lookup_read():
-        quality = (
-            "schema_backed"
-            if contract.response_schema_source != "missing"
-            else "documented"
-        )
+    if not contract.supports_lookup_read():
         return {
-            "quality": quality,
-            "eligible": True,
-            "blocked_reason": None,
+            "quality": "route_only",
+            "eligible": False,
+            "blocked_reason": "read_method_not_supported",
             "next_actions": [],
         }
-    reason = "response_schema_missing"
-    framework_kind = (
-        contract.catalog_endpoint.framework_kind
-        if contract.catalog_endpoint is not None
-        else ""
+    quality = (
+        "runtime_inspection"
+        if not contract.response_fields
+        else "schema_backed"
+        if contract.response_schema_source != "missing"
+        else "documented"
     )
     return {
-        "quality": "route_only",
-        "eligible": False,
-        "blocked_reason": reason,
-        "next_actions": [
-            add_schema_metadata_action(
-                contract.endpoint_name,
-                framework_kind=framework_kind,
-            )
-        ],
+        "quality": quality,
+        "eligible": True,
+        "blocked_reason": None,
+        "next_actions": [],
     }
 
 

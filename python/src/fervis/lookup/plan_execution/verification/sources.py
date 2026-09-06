@@ -112,8 +112,11 @@ def _verify_source(
     if kind == SourceKind.API_READ:
         if not source.read_id:
             raise VerificationError("api_read source requires read_id")
-        if allowed_read_ids is not None and source.read_id not in allowed_read_ids:
-            raise VerificationError("relation uses source outside selected catalog")
+        from fervis.lookup.plan_execution.authorized_sources import (
+            require_read_in_scope,
+        )
+
+        require_read_in_scope(source.read_id, allowed_read_ids)
         if not any(
             item.kind == RowSourceKind.API_READ and item.read_id == source.read_id
             for item in row_sources.sources
@@ -228,8 +231,12 @@ def _verify_api_relation_catalog_refs(
                         f"relation {relation.id} field role is not allowed"
                     )
             if row_source_field.declared_entity_kind:
-                if {key.entity_kind for key in row_source.candidate_keys} != {row_source_field.declared_entity_kind}:
-                    raise VerificationError("row class contradicts its declared entity authority")
+                if {key.entity_kind for key in row_source.candidate_keys} != {
+                    row_source_field.declared_entity_kind
+                }:
+                    raise VerificationError(
+                        "row class contradicts its declared entity authority"
+                    )
                 continue
             _verify_field_requirements(
                 relation=relation,

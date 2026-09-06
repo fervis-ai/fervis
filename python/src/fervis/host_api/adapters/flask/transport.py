@@ -9,6 +9,7 @@ context before Flask request hooks run.
 from __future__ import annotations
 
 from io import BytesIO, StringIO
+from fervis.host_api.contracts.response_page import ResponsePage
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
@@ -17,7 +18,7 @@ from fervis.host_api.contracts.request_origin import (
     request_origin_headers,
 )
 
-from ..response_body import response_body
+from ..response_body import response_page
 from ..runtime_output import suppress_host_output
 
 
@@ -34,7 +35,7 @@ class FlaskInProcessReadTransport:
         headers: dict[str, str] | None = None,
         cookies: dict[str, str] | None = None,
         origin: str | None = None,
-    ) -> tuple[int, Any]:
+    ) -> ResponsePage:
         environ = _wsgi_environ(
             method="GET",
             path=url,
@@ -45,7 +46,7 @@ class FlaskInProcessReadTransport:
         )
         with suppress_host_output():
             response = _dispatch_request(self.app, environ, principal=principal)
-        return response.status_code, response_body(response)
+        return response_page(response)
 
 
 def _dispatch_request(

@@ -469,7 +469,14 @@ def test_django_lineage_recorder_persists_source_read_without_response_body() ->
     assert SourceRead.objects.filter(source_read_id="source_read_1").count() == 1
 
 
-def test_django_lineage_recorder_persists_read_eligibility_resolver_read() -> None:
+@pytest.mark.parametrize(
+    ("step_key", "kind"),
+    [
+        (RunStepKey.READ_ELIGIBILITY, RunStepKind.MODEL_TURN),
+        (RunStepKey.SOURCE_INSPECTION, RunStepKind.DETERMINISTIC),
+    ],
+)
+def test_django_lineage_recorder_persists_planning_read(step_key, kind) -> None:
     recorder: LineageRecorderPort = DjangoLineageRecorder()
     _record_run_spine(recorder)
     _record_catalog_endpoint(recorder)
@@ -478,8 +485,8 @@ def test_django_lineage_recorder_persists_read_eligibility_resolver_read() -> No
             step_id="step_read_eligibility",
             run_id="run_1",
             sequence=1,
-            step_key=RunStepKey.READ_ELIGIBILITY,
-            kind=RunStepKind.MODEL_TURN,
+            step_key=step_key,
+            kind=kind,
         )
     )
 
@@ -499,7 +506,7 @@ def test_django_lineage_recorder_persists_read_eligibility_resolver_read() -> No
     source_read = SourceRead.objects.select_related("step").get(
         source_read_id="source_read_resolver"
     )
-    assert source_read.step.step_key == RunStepKey.READ_ELIGIBILITY.value
+    assert source_read.step.step_key == step_key.value
 
 
 def test_django_lineage_recorder_rejects_source_read_endpoint_from_other_run() -> None:
@@ -1924,3 +1931,55 @@ def _answer_proof_graph_payload() -> dict[str, object]:
             },
         ),
     )
+
+
+def test_inspection_phases_have_distinct_immutable_lineage():
+    from fervis.lineage.enums import SourceInspectionPhase
+    from fervis.lookup.lineage.representation import RepresentationInspectionAudit
+    from fervis.lookup.lineage.steps import LineageRuntimeStepSink
+    from fervis.lookup.relation_catalog import EndpointRead, CatalogEndpointMetadata
+
+    recorder = DjangoLineageRecorder()
+    _record_run_spine(recorder)
+    sink = LineageRuntimeStepSink(run_id="run_1", recorder=recorder)
+    for phase, names in (
+        (SourceInspectionPhase.CONTINUATION, ("a",)),
+        (SourceInspectionPhase.SEMANTIC, ("b", "c")),
+    ):
+        audit = RepresentationInspectionAudit(run_id="run_1", sink=sink, phase=phase)
+        for name in names:
+            read = EndpointRead(
+                name,
+                name,
+                resource_names=("items",),
+                catalog_endpoint=CatalogEndpointMetadata(
+                    catalog_endpoint_key=name,
+                    endpoint_name=name,
+                    framework_kind="fastapi",
+                    source_namespace_kind="fastapi_app",
+                    source_namespace_path=("test",),
+                    route_method="GET",
+                    route_path_template=f"/{name}",
+                    handler_ref="test.items",
+                ),
+            )
+            audit.observe(
+                read,
+                {
+                    "responseStatus": 200,
+                    "responseFormat": "json",
+                    "responseBody": [{"name": name}],
+                },
+            )
+        audit.flush()
+    steps = list(
+        RunStep.objects.filter(
+            run_id="run_1", step_key=RunStepKey.SOURCE_INSPECTION.value
+        )
+    )
+    assert len(steps) == 2
+    assert sorted(step.output_summary_json["inspectedReadCount"] for step in steps) == [
+        1,
+        2,
+    ]
+    assert SourceRead.objects.filter(run_id="run_1").count() == 3

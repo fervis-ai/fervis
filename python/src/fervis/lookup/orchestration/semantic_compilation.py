@@ -91,7 +91,11 @@ from fervis.lookup.relation_catalog.selection import (
 )
 from fervis.lookup.semantic_turn import SemanticTurnResult, generate_semantic_turn
 from fervis.lookup.semantic_turn import SemanticTurnGenerationError
-from fervis.lookup.source_binding.membership import SourceMembershipTurnPrompt, membership_surfaces, parse_source_membership
+from fervis.lookup.source_binding.membership import (
+    SourceMembershipTurnPrompt,
+    membership_surfaces,
+    parse_source_membership,
+)
 from fervis.lookup.source_binding.parser import empty_input_binding_payload
 from fervis.lookup.source_binding import (
     CatalogProvidedValue,
@@ -137,6 +141,7 @@ class SemanticCompilationRequest:
     conversation_context: dict[str, Any]
     host: HostPromptContext
     clarification_responses: tuple[ClarificationOwnerResponse, ...] = ()
+    representation_observer: Callable | None = None
 
 
 @dataclass(frozen=True)
@@ -166,7 +171,9 @@ class SemanticCompilationImpossible:
 
 
 SemanticCompilationOutcome = (
-    SemanticCompilationSuccess | SemanticCompilationClarification | SemanticCompilationImpossible
+    SemanticCompilationSuccess
+    | SemanticCompilationClarification
+    | SemanticCompilationImpossible
 )
 
 
@@ -378,6 +385,7 @@ class SemanticCompilationTurnError(Exception):
 
 @dataclass(frozen=True)
 class _GroundedQuestion:
+    full_catalog: RelationCatalog
     parsed: ParsedSemanticQuestionContract
     catalog_selection: CatalogSelectionResult
     answer_sources: RowSourceCatalog
@@ -409,6 +417,7 @@ def compile_semantic_question(
         context=context,
         on_turn=on_turn,
     )
+    request = replace(request, full_catalog=grounded.full_catalog)
     indexes = grounded.parsed.semantic_indexes
     contract = grounded.parsed.contract
     inputs = {item.id: item for item in contract.inputs}
@@ -518,11 +527,14 @@ def _recall_and_ground(
         if task.input_use_ref not in certified_use_refs
     )
     from fervis.lookup.query_enrichment.semantic import semantic_recall_requirements
+
     query_request = SemanticQueryEnrichmentRequest(
         recall_buckets=recall_buckets,
         reference_tasks=reference_tasks,
         resource_names=_resource_names(request.full_catalog),
-        requirements=tuple(item for index in indexes for item in semantic_recall_requirements(index)),
+        requirements=tuple(
+            item for index in indexes for item in semantic_recall_requirements(index)
+        ),
     )
     query_turn = _turn(
         ModelTurnPurpose.QUERY_ENRICHMENT,
@@ -542,6 +554,27 @@ def _recall_and_ground(
             resource_matches=query_result.recall_bucket_matches,
             max_reads_per_fact=request.max_catalog_reads_per_fact,
         )
+    )
+    from fervis.lookup.source_reads.representation import (
+        inspect_selected_representations,
+    )
+
+    observed_catalog = inspect_selected_representations(
+        request.full_catalog,
+        read_ids=catalog_selection.selected_read_ids,
+        data_access_port=request.data_access_port,
+        on_response=request.representation_observer,
+    )
+    request = replace(request, full_catalog=observed_catalog)
+    selected_ids = set(catalog_selection.selected_read_ids)
+    catalog_selection = replace(
+        catalog_selection,
+        relation_catalog=replace(
+            catalog_selection.relation_catalog,
+            reads=tuple(
+                read for read in observed_catalog.reads if read.id in selected_ids
+            ),
+        ),
     )
     answer_sources = build_row_source_catalog(
         catalog_selection.relation_catalog,
@@ -610,6 +643,7 @@ def _recall_and_ground(
     )
 
     return _GroundedQuestion(
+        full_catalog=request.full_catalog,
         parsed=parsed_question,
         catalog_selection=catalog_selection,
         answer_sources=answer_sources,
@@ -683,12 +717,18 @@ def _select_bind_and_compile(
         request=request,
         on_turn=on_turn,
     )
-    blocked = tuple(strategy.requested_fact_id for strategy in strategies if not strategy.branches)
+    blocked = tuple(
+        strategy.requested_fact_id for strategy in strategies if not strategy.branches
+    )
     if blocked:
         return SemanticCompilationImpossible(
-            question_contract=contract, canonical_values=canonical_values,
-            blocked_fact_ids=blocked, source_contract_snapshot=source_catalog.contract_snapshot,
-            reviewed_read_ids=tuple(read.id for read in catalog_selection.relation_catalog.reads),
+            question_contract=contract,
+            canonical_values=canonical_values,
+            blocked_fact_ids=blocked,
+            source_contract_snapshot=source_catalog.contract_snapshot,
+            reviewed_read_ids=tuple(
+                read.id for read in catalog_selection.relation_catalog.reads
+            ),
         )
     strategy_by_fact = {item.requested_fact_id: item for item in strategies}
     verified: list[VerifiedSourceStrategy] = []
@@ -726,16 +766,21 @@ def _select_bind_and_compile(
             ModelTurnPurpose.SOURCE_REALIZATION,
             prompt=SemanticSourceRealizationTurnPrompt(source_binding_request),
             context=context,
-            parse=lambda payload, current=source_binding_request: compile_source_realization(payload, request=current),
+            parse=lambda payload, current=source_binding_request: (
+                compile_source_realization(payload, request=current)
+            ),
             request=request,
             on_turn=on_turn,
         ).result
         if isinstance(realization, SourceRealizationUnavailable):
             return SemanticCompilationImpossible(
-                question_contract=contract, canonical_values=canonical_values,
+                question_contract=contract,
+                canonical_values=canonical_values,
                 blocked_fact_ids=(index.requested_fact_id,),
                 source_contract_snapshot=source_catalog.contract_snapshot,
-                reviewed_read_ids=tuple(read.id for read in catalog_selection.relation_catalog.reads),
+                reviewed_read_ids=tuple(
+                    read.id for read in catalog_selection.relation_catalog.reads
+                ),
                 failed_requirement_refs=realization.unmet_requirement_refs,
             )
         source_binding_request = realization.request
@@ -749,22 +794,34 @@ def _select_bind_and_compile(
         surfaces = membership_surfaces(realization)
         if any(surfaces.values()):
             membership = _turn(
-                ModelTurnPurpose.SOURCE_BINDING, prompt=SourceMembershipTurnPrompt(realization),
-                context=context, parse=lambda payload, current=realization: parse_source_membership(payload, realization=current),
-                request=request, on_turn=on_turn,
+                ModelTurnPurpose.SOURCE_BINDING,
+                prompt=SourceMembershipTurnPrompt(realization),
+                context=context,
+                parse=lambda payload, current=realization: parse_source_membership(
+                    payload, realization=current
+                ),
+                request=request,
+                on_turn=on_turn,
             ).result
         else:
-            membership = parse_source_membership({branch:{} for branch in surfaces}, realization=realization)
+            membership = parse_source_membership(
+                {branch: {} for branch in surfaces}, realization=realization
+            )
         empty_payload = empty_input_binding_payload(membership.realization.request)
         if empty_payload is not None:
-            bound_plan = compile_source_binding_plan(empty_payload, membership=membership)
+            bound_plan = compile_source_binding_plan(
+                empty_payload, membership=membership
+            )
         else:
             bound_plan = _turn(
                 ModelTurnPurpose.SOURCE_BINDING,
                 prompt=SemanticSourceBindingTurnPrompt(membership),
                 context=context,
-                parse=lambda payload, current=membership: compile_source_binding_plan(payload, membership=current),
-                request=request, on_turn=on_turn,
+                parse=lambda payload, current=membership: compile_source_binding_plan(
+                    payload, membership=current
+                ),
+                request=request,
+                on_turn=on_turn,
             ).result
         verification = verify_source_strategy(
             bound_plan,
@@ -896,20 +953,54 @@ def _catalog_literal_type(value_type: str) -> LiteralType:
     return LiteralType.STRING
 
 
-def _executable_relation_catalog(catalog: RelationCatalog, *, values: tuple[FactValue, ...]) -> RelationCatalog:
-    from fervis.lookup.relation_catalog.selection.results import relation_catalog_for_read_ids
+def _executable_relation_catalog(
+    catalog: RelationCatalog, *, values: tuple[FactValue, ...]
+) -> RelationCatalog:
+    from fervis.lookup.relation_catalog.selection.results import (
+        relation_catalog_for_read_ids,
+    )
+
     sources = build_api_row_source_catalog(catalog)
-    executable = {source.read_id for source in sources.sources
-                  if source_required_inputs_are_satisfiable(source, values=values)}
-    return relation_catalog_for_read_ids(catalog, read_ids=tuple(read.id for read in catalog.reads if read.id in executable))
+    executable = {
+        source.read_id
+        for source in sources.sources
+        if source_required_inputs_are_satisfiable(source, values=values)
+    }
+    return relation_catalog_for_read_ids(
+        catalog,
+        read_ids=tuple(read.id for read in catalog.reads if read.id in executable),
+    )
 
 
-def _bound_recall_selection(selection: CatalogSelectionResult, *, full_catalog: RelationCatalog, values: tuple[FactValue, ...]) -> CatalogSelectionResult:
-    executable = {read.id for read in _executable_relation_catalog(full_catalog, values=values).reads}
-    return replace(selection, requested_fact_selections=tuple(
-        replace(fact, unselected_positive_read_ids=tuple(ref for ref in fact.unselected_positive_read_ids if ref in executable))
-        for fact in selection.requested_fact_selections
-    ))
+def _bound_recall_selection(
+    selection: CatalogSelectionResult,
+    *,
+    full_catalog: RelationCatalog,
+    values: tuple[FactValue, ...],
+) -> CatalogSelectionResult:
+    executable = {
+        read.id
+        for read in _executable_relation_catalog(full_catalog, values=values).reads
+    }
+    from fervis.lookup.source_reads.representation import can_inspect_representation
+
+    executable.update(
+        read.id for read in full_catalog.reads if can_inspect_representation(read)
+    )
+    return replace(
+        selection,
+        requested_fact_selections=tuple(
+            replace(
+                fact,
+                unselected_positive_read_ids=tuple(
+                    ref
+                    for ref in fact.unselected_positive_read_ids
+                    if ref in executable
+                ),
+            )
+            for fact in selection.requested_fact_selections
+        ),
+    )
 
 
 def _prepare_source_candidates(
@@ -924,7 +1015,8 @@ def _prepare_source_candidates(
     on_turn: SemanticTurnObserver | None,
 ):
     initial_catalog_selection = _bound_recall_selection(
-        initial_catalog_selection, full_catalog=request.full_catalog,
+        initial_catalog_selection,
+        full_catalog=request.full_catalog,
         values=tuple(value.typed_value for value in canonical_values),
     )
     batches = [initial_catalog_selection]
@@ -975,6 +1067,25 @@ def _prepare_source_candidates(
         )
         if next_batch is None:
             return result
+        from fervis.lookup.source_reads.representation import (
+            inspect_selected_representations,
+        )
+
+        inspected = inspect_selected_representations(
+            request.full_catalog,
+            read_ids=next_batch.selected_read_ids,
+            data_access_port=request.data_access_port,
+            on_response=request.representation_observer,
+        )
+        request = replace(request, full_catalog=inspected)
+        next_ids = set(next_batch.selected_read_ids)
+        next_batch = replace(
+            next_batch,
+            relation_catalog=replace(
+                next_batch.relation_catalog,
+                reads=tuple(read for read in inspected.reads if read.id in next_ids),
+            ),
+        )
         next_request = SemanticReadEligibilityRequest(
             indexes=indexes,
             source_catalog=build_api_row_source_catalog(next_batch.relation_catalog),

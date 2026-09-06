@@ -66,10 +66,8 @@ def test_fastapi_executor_preserves_non_json_response_body(tmp_path: Path) -> No
 
     assert result.endpoint_name == "get_plain_error"
     assert result.response_status == 403
-    assert result.response_body == {
-        "contentType": "text/plain; charset=utf-8",
-        "text": "forbidden",
-    }
+    assert result.response_format.value == "text"
+    assert result.response_body == "forbidden"
 
 
 def test_fastapi_executor_runs_the_host_application_lifespan(tmp_path: Path) -> None:

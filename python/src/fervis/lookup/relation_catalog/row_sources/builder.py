@@ -96,17 +96,26 @@ def _with_declared_entity_kind(source: RowSource) -> RowSource:
     kinds = {key.entity_kind for key in source.candidate_keys}
     if len(kinds) != 1:
         return source
-    kind, = kinds
+    (kind,) = kinds
     field_id = "metadata:entity_kind"
     if any(field.id == field_id for field in source.fields):
         raise ValueError("source field collides with declared entity metadata")
-    return replace(source, fields=(*source.fields, RowSourceField(
-        id=field_id, field_ref=f"source_metadata:{source.id}:entity_kind",
-        label="Declared entity class of this row", type=RowSourceValueType.STRING,
-        allowed_roles=(FieldBindingRole.OUTPUT, FieldBindingRole.PREDICATE),
-        choices=(kind,), declared_entity_kind=kind,
-        description="Fixed row-class value supplied by the source's declared candidate-key entity kind.",
-    )))
+    return replace(
+        source,
+        fields=(
+            *source.fields,
+            RowSourceField(
+                id=field_id,
+                field_ref=f"source_metadata:{source.id}:entity_kind",
+                label="Declared entity class of this row",
+                type=RowSourceValueType.STRING,
+                allowed_roles=(FieldBindingRole.OUTPUT, FieldBindingRole.PREDICATE),
+                choices=(kind,),
+                declared_entity_kind=kind,
+                description="Fixed row-class value supplied by the source's declared candidate-key entity kind.",
+            ),
+        ),
+    )
 
 
 def row_source_ids_for_read_ids(
@@ -181,6 +190,8 @@ def _api_row_sources(
 ) -> tuple[RowSource, ...]:
     row_paths = read.row_paths or ()
     if not row_paths:
+        if not read.fields:
+            return ()
         return _api_row_sources_for_path(
             read,
             row_path_id="root",
@@ -389,8 +400,10 @@ def _row_source_entity_references(
     )
     references: list[RowSourceEntityReference] = []
     for reference in read.entity_references:
-        required_refs = (*tuple(component.local_field_ref for component in reference.components),
-                         *reference.context_field_refs)
+        required_refs = (
+            *tuple(component.local_field_ref for component in reference.components),
+            *reference.context_field_refs,
+        )
         if not all(ref in field_ids for ref in required_refs):
             continue
         if not _entity_reference_belongs_to_row_path(
@@ -451,7 +464,8 @@ def _entity_reference_belongs_to_row_path(
         return False
     visible_paths = set(_row_context_path_ids(row_path_id, row_paths=row_paths))
     return all(
-        _field_row_path_id(fields_by_ref[field_ref], row_paths=row_paths) in visible_paths
+        _field_row_path_id(fields_by_ref[field_ref], row_paths=row_paths)
+        in visible_paths
         for field_ref in component_refs
     )
 
@@ -571,6 +585,7 @@ def _selected_api_fields_for_source(
     )
     if not ancestor_ids:
         return local_fields
+
     def container(field: CatalogField) -> str:
         owner_path = _field_row_path(field, row_paths=row_paths)
         return _relative_field_path(field.path, owner_path).split(".", 1)[0]
@@ -781,7 +796,9 @@ def _memory_row_source(relation: "RelationRows") -> RowSource:
                 id=field_id,
                 field_ref=field_id,
                 label=field_id,
-                type=row_source_value_type((relation.field_types or {}).get(field_id, "unknown")),
+                type=row_source_value_type(
+                    (relation.field_types or {}).get(field_id, "unknown")
+                ),
                 allowed_roles=_memory_roles(field_id, relation=relation),
             )
             for field_id in field_ids

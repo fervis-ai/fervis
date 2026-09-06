@@ -30,8 +30,12 @@ fervis doctor
 
 If `doctor` blocks, follow every reported `next_actions` item, then rerun `fervis doctor` until it passes.
 
-Fervis inspects the live FastAPI routes and their declared response models. It
-does not require a generated OpenAPI document.
+Fervis discovers the live FastAPI routes and uses their declared response models
+when present. Selected routes without response models can be inspected at runtime
+under the caller's authority, provided the read needs no additional invocation
+inputs and returns JSON objects or arrays of objects. Observed values do not
+establish keys, relationships, or closed enums. Existing declared contracts remain
+authoritative.
 
 If the host API uses a FastAPI dependency for the current user:
 
@@ -48,7 +52,8 @@ Then:
 
 ```bash
 fervis doctor
-fervis runtime ask "How many orders happened this month?"
+fervis runtime ask "How many orders happened this month?" \
+  --tenant-id <tenant-id> --principal-id <principal-id> --wait
 ```
 
 Only run `runtime ask` after `fervis doctor` passes.

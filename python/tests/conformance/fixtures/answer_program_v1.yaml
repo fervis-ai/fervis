@@ -663,7 +663,7 @@ programs:
                     $enum: SourceContractKind
                     value: catalog_read
                   source_id: rs_c9f84da27ca2f8d1
-                  fingerprint: cbd5b34acb360f4360860465922136a9639ea10a5cf7dd96078eb2d54ad7f2a7
+                  fingerprint: 5a362e29babacb174a7cd4eb5b8b74e21f576460d2bab873167079ff93acdfe5
   direct_invocation:
     schema_revision: 13
     program:
@@ -725,7 +725,7 @@ programs:
                 fields:
                   kind: {$enum: SourceContractKind, value: catalog_read}
                   source_id: rs_c9f84da27ca2f8d1
-                  fingerprint: cbd5b34acb360f4360860465922136a9639ea10a5cf7dd96078eb2d54ad7f2a7
+                  fingerprint: 5a362e29babacb174a7cd4eb5b8b74e21f576460d2bab873167079ff93acdfe5
   memory_backed:
     schema_revision: 13
     program:

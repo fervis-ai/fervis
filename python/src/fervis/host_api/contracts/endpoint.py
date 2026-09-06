@@ -458,7 +458,7 @@ class EndpointContract:
     pagination: PaginationContract | None = None
     query_schema_source: str = "missing"
     response_schema_source: str = "missing"
-    response_cardinality: str = "one"
+    response_cardinality: str = "unknown"
     tags: tuple[str, ...] = field(default_factory=tuple)
     resource_names: tuple[str, ...] = field(default_factory=tuple)
     candidate_keys: tuple[CandidateKeyContract, ...] = field(default_factory=tuple)
@@ -504,7 +504,8 @@ class EndpointContract:
                 raise ValueError("endpoint entity reference references unknown field")
 
     def supports_lookup_read(self) -> bool:
-        return bool(self.response_fields)
+        """Read capability is independent of declared response representation."""
+        return self.method.upper() == "GET"
 
     def to_public_dict(
         self,
@@ -527,9 +528,7 @@ class EndpointContract:
                 "public": self.public_access,
             },
             "pagination": (
-                None
-                if self.pagination is None
-                else self.pagination.to_public_dict()
+                None if self.pagination is None else self.pagination.to_public_dict()
             ),
             "schemaSources": {
                 "query": self.query_schema_source,

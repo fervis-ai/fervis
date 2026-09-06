@@ -50,11 +50,9 @@ def test_wsgi_native_origin_controls_generated_links(origin):
     def resources():
         return {"url": url_for("resources", _external=True)}
 
-    status, body = FlaskInProcessReadTransport(app).get(
-        "/resources/", {}, origin=origin
-    )
-    assert status == 200
-    assert body == {"url": origin + "/resources/"}
+    page = FlaskInProcessReadTransport(app).get("/resources/", {}, origin=origin)
+    assert page.status == 200
+    assert page.body == {"url": origin + "/resources/"}
 
 
 @pytest.mark.parametrize(

@@ -112,3 +112,12 @@ def _project_catalog(
             if not fact.read_id or fact.read_id in selected
         ),
     )
+
+
+def require_read_in_scope(
+    read_id: str, allowed_read_ids: frozenset[str] | None
+) -> None:
+    from fervis.lookup.plan_execution.errors import VerificationError
+
+    if allowed_read_ids is not None and read_id not in allowed_read_ids:
+        raise VerificationError("relation uses source outside selected catalog")
