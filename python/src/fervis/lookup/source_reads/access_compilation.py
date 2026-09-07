@@ -178,15 +178,27 @@ def expand_read_access(program: _Program, access: ReadAccessCatalog) -> _Program
     # Existing operation order is preserved; prerequisite filters precede their consumers.
     operations = []
     emitted = set()
+    active = set()
 
     def ensure(ref):
-        relation = original_sources.get(ref)
+        if ref in emitted:
+            return
+        if ref in active:
+            raise VerificationError("access prerequisite relations form a cycle")
+        relation = completed.get(ref) or original_sources.get(ref)
         if relation is None:
             return
-        expand(relation)
-        if ref in inserted_operations and ref not in emitted:
-            operations.append(inserted_operations[ref])
-            emitted.add(ref)
+        active.add(ref)
+        relation = expand(relation)
+        inserted = inserted_operations.get(ref)
+        if inserted is not None:
+            for parent_ref in inserted.input_relation_ids:
+                ensure(parent_ref)
+            operations.append(inserted)
+        elif relation.source.argument_relation_id:
+            ensure(relation.source.argument_relation_id)
+        active.remove(ref)
+        emitted.add(ref)
 
     for operation in program.operations:
         for ref in operation.input_relation_ids:

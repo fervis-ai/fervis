@@ -397,8 +397,11 @@ def _run_semantic_execution_phase(state: _LookupPipelineState) -> LookupResult:
     compiled = state.semantic_compilation
     if compiled is None:
         raise VerificationError("semantic execution requires compiled facts")
+    from fervis.lookup.orchestration.execution_sources import execution_catalog_with_observed_sources
     execution_sources = AuthorizedExecutionSources.from_program(
-        full_catalog=compiled.catalog_selection.relation_catalog,
+        full_catalog=execution_catalog_with_observed_sources(
+            state.full_catalog, compiled.catalog_selection.relation_catalog,
+        ),
         program=compiled.compilation.answer_program,
     )
     question_turns = (state.semantic_turn_numbers or {}).get(

@@ -103,15 +103,12 @@ def _project_catalog(
     catalog: RelationCatalog,
     read_ids: tuple[str, ...],
 ) -> RelationCatalog:
-    selected = set(read_ids)
-    return RelationCatalog(
-        reads=tuple(read for read in catalog.reads if read.id in selected),
-        facts=tuple(
-            fact
-            for fact in catalog.facts
-            if not fact.read_id or fact.read_id in selected
-        ),
-    )
+    from fervis.lookup.relation_catalog.selection.results import relation_catalog_for_read_ids
+    from fervis.lookup.plan_execution.errors import VerificationError
+    try:
+        return relation_catalog_for_read_ids(catalog, read_ids=read_ids)
+    except KeyError as exc:
+        raise VerificationError("program references an unavailable source catalog definition") from exc
 
 
 def require_read_in_scope(

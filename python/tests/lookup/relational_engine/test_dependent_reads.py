@@ -826,3 +826,84 @@ def test_access_mapping_expands_requests_and_preserves_supplied_scope(fixed_pare
             else [("instruments", {"facility_id": 2, "zone": "south"})]
         ),
     ]
+
+
+def test_recursive_access_emits_intermediate_argument_filters():
+    from fervis.lookup.answer_program.model import RelationProgram
+    from fervis.lookup.answer_program.api_reads import ApiReadSession
+    from fervis.lookup.source_reads.access_model import ReadAccessCatalog, ReadDependency, AccessArgument
+    from fervis.lookup.source_reads.access_compilation import expand_read_access
+    from fervis.lookup.source_reads.access_execution import execute_access_program
+    catalog = RelationCatalog(reads=(
+        _read('facilities', paired=True),
+        _read('instruments', params=(
+            CatalogParam('facility_id', 'facility_id', 'path', 'integer', required=True),
+            CatalogParam('zone', 'zone', 'query', 'string', default='north', semantics='response_shape'),
+        )),
+        _read('samples', params=(CatalogParam('instrument_id', 'instrument_id', 'path', 'integer', required=True),)),
+    ))
+    sources = build_api_row_source_catalog(catalog).sources
+    facility, instrument, sample = sources
+    access = ReadAccessCatalog(sources, (
+        ReadDependency(instrument.id, facility.id, (
+            AccessArgument('facility_id', 'facilities.id'), AccessArgument('zone', 'facilities.zone'),
+        ), 'The same parent row supplies the argument tuple.'),
+        ReadDependency(sample.id, instrument.id, (AccessArgument('instrument_id', 'instruments.id'),),
+                       'Every sample belongs to a listed instrument.'),
+    ))
+    program = expand_read_access(RelationProgram(relations=(Relation(
+        'samples', RelationSource(SourceKind.API_READ, read_id='samples', row_source_id=sample.id),
+        (RelationField(sample.fields[0].id, (FieldBindingRole.OUTPUT,)),),
+    ),)), access)
+    calls = []
+    class Port:
+        def read(self, *, endpoint_name, args):
+            calls.append((endpoint_name, args))
+            if endpoint_name == 'facilities':
+                rows = [{'id': 1, 'zone': 'north'}, {'id': 2, 'zone': 'south'}]
+            elif endpoint_name == 'instruments':
+                assert args == {'zone': 'north', 'facility_id': 1}
+                rows = [{'id': 10}]
+            else:
+                assert args == {'instrument_id': 10}
+                rows = [{'id': 100}]
+            return {'responseStatus': 200, 'responseBody': rows}
+    result = execute_access_program(program, catalog=catalog, read_session=ApiReadSession(Port()))
+    assert result.row_context.rows_for_relation('samples') == ({sample.fields[0].id: 100},)
+    assert [name for name, _ in calls] == ['facilities', 'instruments', 'samples']
+
+
+@pytest.mark.parametrize('inspected_child', [False, True])
+def test_pipeline_retains_operational_parent_outside_semantic_selection(monkeypatch, inspected_child):
+    from types import SimpleNamespace
+    from fervis.lookup.orchestration import pipeline
+    from fervis.lookup.relation_catalog.selection.model import CatalogSelectionResult
+    program, bindings, catalog = _program()
+    child = catalog.read('instruments')
+    full = replace(catalog, reads=(catalog.read('facilities'),
+        replace(child, fields=(), row_paths=(), candidate_keys=()) if inspected_child else child))
+    selection = CatalogSelectionResult(replace(catalog, reads=(child,)), (), ('instruments',))
+    calls = []
+    class Port:
+        def read(self, *, endpoint_name, args):
+            calls.append((endpoint_name, dict(args)))
+            rows = [{'id': 1}, {'id': 2}] if endpoint_name == 'facilities' else [{'id': args['facility_id'] * 10}]
+            return {'responseStatus': 200, 'responseBody': rows}
+    port = Port()
+    def execute(**kwargs):
+        return invoke_answer_program(program=kwargs['program'], bindings=kwargs['bindings'],
+            environment=kwargs['environment'], ports=RuntimePorts(data_access_port=port, memory=LookupMemory()))
+    monkeypatch.setattr(pipeline, 'run_answer_program_execution', execute)
+    state = SimpleNamespace(
+        semantic_compilation=SimpleNamespace(catalog_selection=selection, canonical_values=(),
+            compilation=SimpleNamespace(answer_program=program, initial_bindings=bindings)),
+        full_catalog=full, semantic_turn_numbers={}, semantic_usage={}, memory=LookupMemory(),
+        ports=SimpleNamespace(data_access_port=port, lineage_step_sink=None, lineage_required=False,
+                              program_invocation_binding=None),
+        request=SimpleNamespace(authority_ref='', runtime_values=None),
+        conversation_resolution=None, compiled_conversation_resolution=None,
+    )
+    result = pipeline._run_semantic_execution_phase(state)
+    assert result.issue is None
+    assert result.fact_result.outcome.projected_rows[0].values == {'fact_1.output_1': 2}
+    assert calls == [('facilities', {}), ('instruments', {'facility_id': 1}), ('instruments', {'facility_id': 2})]

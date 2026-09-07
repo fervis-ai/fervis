@@ -37,3 +37,19 @@ def prepare_execution_catalog(
         )
     finally:
         audit.flush()
+
+
+def execution_catalog_with_observed_sources(full_catalog, selected_catalog):
+    """Preserve discovered definitions without dropping operational prerequisites."""
+    from dataclasses import replace
+    from fervis.lookup.plan_execution.errors import VerificationError
+
+    full_ids = {read.id for read in full_catalog.reads}
+    if any(read.id not in full_ids for read in selected_catalog.reads):
+        raise VerificationError("selected source is absent from the current catalog")
+    observed = {read.id: read for read in selected_catalog.reads}
+    facts = {fact.ref: fact for fact in (*full_catalog.facts, *selected_catalog.facts)}
+    return replace(full_catalog,
+        reads=tuple(observed.get(read.id, read) for read in full_catalog.reads),
+        facts=tuple(facts.values()),
+    )
