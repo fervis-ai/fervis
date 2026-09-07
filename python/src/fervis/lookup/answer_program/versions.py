@@ -1,5 +1,5 @@
 """Current immutable program and execution compatibility versions."""
 
-ANSWER_PROGRAM_SCHEMA_REVISION = 13
-ANSWER_PROGRAM_COMPILER_VERSION = "fervis.answer_program.compiler@4"
+ANSWER_PROGRAM_SCHEMA_REVISION = 15
+ANSWER_PROGRAM_COMPILER_VERSION = "fervis.answer_program.compiler@7"
 FUNCTION_SEMANTIC_VERSION = "3"

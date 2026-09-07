@@ -145,7 +145,7 @@ def run_semantic_kernel_case(payload: dict[str, Any]) -> list[str]:
             subject=SubjectGuarantee(
                 requested_fact_id=fact_id,
                 subject_set_ref=str(request["subject_set_ref"]),
-                interpretation="normal_business_instance",
+                interpretation="resource_population",
                 proof_refs=("proof",),
             ),
         )

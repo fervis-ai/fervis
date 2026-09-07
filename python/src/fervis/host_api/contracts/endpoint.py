@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
+from fervis.host_api.contracts.population import ParameterPopulation
+
 from dataclasses import dataclass, field
 from fervis.types.enums import StrEnum
 from uuid import NAMESPACE_URL, uuid5
@@ -110,9 +112,11 @@ class ParameterContract:
     choices: tuple[str, ...] = ()
     choice_labels: dict[str, str] = field(default_factory=dict)
     default: ContractValue = None
+    default_is_known: bool = True
     source: str = "query"
     entity_target: EntityKeyComponentTargetContract | None = None
     semantics: str = ""
+    population: ParameterPopulation | None = None
 
     def to_public_dict(self) -> dict[str, ContractValue]:
         payload: dict[str, ContractValue] = {
@@ -126,10 +130,14 @@ class ParameterContract:
             payload["choices"] = list(self.choices)
         if self.choice_labels:
             payload["choiceLabels"] = dict(self.choice_labels)
+        if not self.default_is_known:
+            payload["defaultIsKnown"] = False
         if self.default is not None:
             payload["default"] = self.default
         if self.entity_target is not None:
             payload["entityTarget"] = self.entity_target.to_public_dict()
+        if self.population is not None:
+            payload["population"] = self.population.to_public_dict()
         if self.semantics:
             payload["semantics"] = self.semantics
         return payload
@@ -143,6 +151,7 @@ class ResponseFieldContract:
     description: str = ""
     choices: tuple[str, ...] = ()
     requires: dict[str, ContractValue] = field(default_factory=dict)
+    nullable: bool | None = None
 
     def to_public_dict(self) -> dict[str, ContractValue]:
         payload: dict[str, ContractValue] = {
@@ -153,6 +162,8 @@ class ResponseFieldContract:
         }
         if self.choices:
             payload["choices"] = list(self.choices)
+        if self.nullable is not None:
+            payload["nullable"] = self.nullable
         if self.requires:
             payload["requires"] = dict(self.requires)
         return payload

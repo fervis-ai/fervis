@@ -131,7 +131,7 @@ def run_memory_prior_answer_request_case(
         associations=(),
         facts=(),
         expressions=expressions,
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", output_ref, output_origin),),

@@ -73,15 +73,20 @@ class ProgramCompatibility:
 
 
 @dataclass(frozen=True)
-class AnswerProgram:
+class RelationProgram:
+    """A physical relation graph, independent of a factual answer contract."""
+    parameters: tuple[ParameterDeclaration, ...] = ()
+    relations: tuple[Relation, ...] = ()
+    operations: tuple[Operation, ...] = ()
+
+
+@dataclass(frozen=True)
+class AnswerProgram(RelationProgram):
     inputs: tuple[InputTerm, ...] = ()
     input_denotations: tuple[InputDenotation, ...] = ()
     fact_template: tuple[RequestedFact, ...] = ()
     fulfillment: tuple[FactFulfillment, ...] = ()
     relation_guarantees: tuple[RelationGuaranteeDeclaration, ...] = ()
-    parameters: tuple[ParameterDeclaration, ...] = ()
     capabilities: tuple[NarrowPopulationCapability, ...] = ()
-    relations: tuple[Relation, ...] = ()
-    operations: tuple[Operation, ...] = ()
     result_projection: ResultProjection = ResultProjection()
     compatibility: ProgramCompatibility = ProgramCompatibility()

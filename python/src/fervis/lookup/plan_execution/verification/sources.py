@@ -1,7 +1,7 @@
 """Source, relation, catalog, and expression checks for program verification."""
 
+from fervis.lookup.answer_program.model import RelationProgram
 from ._shared import (
-    AnswerProgram,
     AuthorizedExecutionSources,
     CatalogField,
     CatalogSelectionResult,
@@ -23,7 +23,7 @@ from fervis.lookup.answer_program.expression_instantiation import (
 
 
 def _verify_program_expression_targets(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     bindings,
     catalog: RelationCatalog | None,
@@ -39,7 +39,7 @@ def _verify_program_expression_targets(
 
 
 def _verify_required_source_params(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     row_sources: RowSourceCatalog,
 ) -> None:
@@ -78,7 +78,7 @@ def _verify_required_source_params(
 
 
 def _verify_sources(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     row_sources: RowSourceCatalog,
     allowed_read_ids: frozenset[str] | None = None,
@@ -230,6 +230,8 @@ def _verify_api_relation_catalog_refs(
                     raise VerificationError(
                         f"relation {relation.id} field role is not allowed"
                     )
+            if row_source_field.request_parameter_ref:
+                continue
             if row_source_field.declared_entity_kind:
                 if {key.entity_kind for key in row_source.candidate_keys} != {
                     row_source_field.declared_entity_kind
@@ -327,3 +329,32 @@ def _requirement_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value).strip().lower()
+
+
+def verify_dependent_argument_contracts(answer, *, relation_contracts, row_sources):
+    from fervis.lookup.answer_program.expressions import expression_references
+    from fervis.lookup.plan_execution.expression_schema import expression_value_type
+    from fervis.lookup.plan_execution.declared_values import (
+        declared_comparison_types_compatible, declared_kind, DeclaredValueKind,
+    )
+    from fervis.lookup.plan_execution.errors import RelationEngineError
+    for relation in answer.relations:
+        if not relation.source.argument_relation_id:
+            continue
+        parent = relation_contracts[relation.source.argument_relation_id]
+        source = _row_source_for_relation(relation, row_sources=row_sources)
+        for binding in relation.source.param_bindings:
+            references = expression_references(binding.value_expr)
+            if not references.fields:
+                continue
+            if any(ref.field_id not in parent.fields for ref in references.fields):
+                raise VerificationError('dependent argument references an unavailable parent field')
+            param = source.param(binding.param_id)
+            try:
+                value_type = expression_value_type(binding.value_expr,field_types=parent.field_types)
+                compatible = (declared_kind(value_type) is not DeclaredValueKind.RUNTIME
+                              and declared_comparison_types_compatible(value_type,param.type.value))
+            except RelationEngineError as exc:
+                raise VerificationError('dependent argument type cannot be established') from exc
+            if not compatible:
+                raise VerificationError('dependent argument has an incompatible parameter type')

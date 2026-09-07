@@ -8,7 +8,6 @@ from tests.lookup.relational_engine.test_scoped_compilation import employee_quer
 from tests.lookup.relational_engine.test_coverage_compilation import coverage_query
 from fervis.lookup.question_contract.model import Quantifier
 from fervis.lookup.source_binding.model import SourceRealization
-from fervis.lookup.source_binding.membership import parse_source_membership
 from fervis.lookup.source_binding.parser import compile_source_binding_plan
 from fervis.lookup.source_binding.schema import build_semantic_source_binding_schema
 from fervis.lookup.source_binding.verification import (
@@ -133,16 +132,14 @@ def test_production_binding_parses_relational_boolean_mechanics(shape):
         plan.fact_bindings,
         plan.association_bindings,
     )
-    membership = parse_source_membership({"branch": {}}, realization=realization)
+    membership = realization
     payload = {
         "resolved_input_applications": {"branch": []},
         "finite_choice_applications": {"branch": {}},
         "choice_requirement_applications": {"branch": {}},
     }
-    validate(
-        payload, build_semantic_source_binding_schema(membership.realization.request)
-    )
-    parsed = compile_source_binding_plan(payload, membership=membership)
-    verified = verify_source_strategy(parsed, request=membership.realization.request)
+    validate(payload, build_semantic_source_binding_schema(membership.request))
+    parsed = compile_source_binding_plan(payload, realization=membership)
+    verified = verify_source_strategy(parsed, request=membership.request)
     assert isinstance(verified, VerifiedSourceStrategy)
     assert compile_verified_source_strategy(verified).answer_program.operations

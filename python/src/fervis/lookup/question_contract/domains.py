@@ -49,28 +49,43 @@ def value_set_dependencies(index, ref: FactLocalRef | str) -> set[str]:
     )
 
 
-def value_population_dependencies(index, ref: FactLocalRef | str) -> set[str]:
+def value_population_dependencies(
+    index, ref: FactLocalRef | str, *, excluding: frozenset[FactLocalRef] = frozenset()
+) -> set[str]:
     """All consumed populations, including those bound inside scalar operators."""
-    if isinstance(ref, str):
+    if isinstance(ref, str) or ref in excluding:
         return set()
     if ref in index.term_by_ref:
         return value_set_dependencies(index, ref)
     node = index.expression_by_ref.get(ref)
     populations = set()
     if isinstance(node, (Quantify, RelatedRow)):
-        populations.add(index.fact_local_ref_by_local_id[
-            node.over_set_ref if isinstance(node, Quantify) else node.set_ref
-        ].token)
+        populations.add(
+            index.fact_local_ref_by_local_id[
+                node.over_set_ref if isinstance(node, Quantify) else node.set_ref
+            ].token
+        )
         for association in node.association_refs:
-            populations.update(value_set_dependencies(index, index.fact_local_ref_by_local_id[association]))
+            populations.update(
+                value_set_dependencies(
+                    index, index.fact_local_ref_by_local_id[association]
+                )
+            )
     if isinstance(node, Coverage):
-        populations.update(index.fact_local_ref_by_local_id[item].token for item in (
-            node.candidate_set_ref, node.required_dimension_set_ref, node.observation_set_ref
-        ))
-    return populations | set().union(*(
-        value_population_dependencies(index, child)
-        for child in index.direct_dependencies_by_ref.get(ref, ())
-    ))
+        populations.update(
+            index.fact_local_ref_by_local_id[item].token
+            for item in (
+                node.candidate_set_ref,
+                node.required_dimension_set_ref,
+                node.observation_set_ref,
+            )
+        )
+    return populations | set().union(
+        *(
+            value_population_dependencies(index, child, excluding=excluding)
+            for child in index.direct_dependencies_by_ref.get(ref, ())
+        )
+    )
 
 
 def relational_free_sets(index, node: Quantify | RelatedRow | Coverage) -> set[str]:

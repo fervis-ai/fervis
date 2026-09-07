@@ -172,13 +172,13 @@ def can_inspect_representation(read: EndpointRead) -> bool:
             or metadata.get("representation_authority") == "unobserved"
         )
         and metadata.get("representation_authority") != "observed_response"
-        and metadata.get("representation_status") != "unavailable"
+        and metadata.get("representation_status") not in {"unavailable", "read_failed"}
         and not any(requires_caller_supplied_input(param) for param in read.params)
     )
 
 
 def inspect_selected_representations(
-    catalog, *, read_ids, data_access_port, on_response=None
+    catalog, *, read_ids, data_access_port, on_response=None, on_failure=None
 ):
     """Inspect selected, directly invokable routes under the caller's read port."""
     selected = set(read_ids)
@@ -197,8 +197,20 @@ def inspect_selected_representations(
             }
         if on_response is not None:
             on_response(read, result)
-        # Transport failures remain failures, not semantic claims about absent data.
-        endpoint_response_body(result, endpoint_name=read.endpoint_name)
+        # Discovery may defer a failed candidate while inspecting other routes.
+        # Execution requires its selected read and keeps the default strict path.
+        from fervis.lookup.source_reads.response import EndpointResponseError
+        try:
+            endpoint_response_body(result, endpoint_name=read.endpoint_name)
+        except EndpointResponseError as exc:
+            if on_failure is None:
+                raise
+            on_failure(exc)
+            reads.append(replace(read, source_metadata={
+                **(read.source_metadata or {}), "representation_status": "read_failed",
+                "representation_failure": str(exc),
+            }))
+            continue
         try:
             observation = observe_read_representation(read, result)
         except ValueError as exc:

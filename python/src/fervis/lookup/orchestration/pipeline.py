@@ -265,6 +265,13 @@ def _run_semantic_compile_question(
     )
 
     from fervis.lookup.lineage.representation import RepresentationInspectionAudit
+    from fervis.lookup.lineage.source_read_buffer import SourceInspectionAudit
+    from fervis.lineage.enums import SourceInspectionPhase
+
+    identity_audit = SourceInspectionAudit(
+        run_id=state.request.run_id, sink=state.ports.lineage_step_sink,
+        phase=SourceInspectionPhase.IDENTITY,
+    )
 
     inspection = RepresentationInspectionAudit(
         run_id=state.request.run_id, sink=state.ports.lineage_step_sink
@@ -274,6 +281,7 @@ def _run_semantic_compile_question(
             replace(
                 _semantic_compilation_request(state),
                 representation_observer=inspection.observe,
+                identity_read_lineage=identity_audit.buffered.scope,
             ),
             on_turn=recorder,
         )
@@ -296,6 +304,7 @@ def _run_semantic_compile_question(
         )
     finally:
         inspection.flush()
+        identity_audit.flush()
     state.semantic_usage = recorder.usage
     state.semantic_turn_numbers = recorder.turn_numbers
     if isinstance(outcome, SemanticCompilationClarification):
@@ -549,10 +558,18 @@ def _run_continue_prior_request_execution(
         turn_numbers={},
     )
 
+    from fervis.lookup.lineage.source_read_buffer import SourceInspectionAudit
+    from fervis.lineage.enums import SourceInspectionPhase
+
+    identity_audit = SourceInspectionAudit(
+        run_id=state.request.run_id, sink=state.ports.lineage_step_sink,
+        phase=SourceInspectionPhase.CONTINUATION_IDENTITY,
+    )
     try:
         grounded_values = resolve_semantic_continuation_arguments(
             execution.frame,
-            _semantic_compilation_request(state),
+            replace(_semantic_compilation_request(state),
+                    identity_read_lineage=identity_audit.buffered.scope),
             on_turn=recorder,
         )
     except _RunLimitReached as exc:
@@ -572,6 +589,8 @@ def _run_continue_prior_request_execution(
             message=str(exc),
             usage=recorder.usage,
         )
+    finally:
+        identity_audit.flush()
     state.semantic_usage = recorder.usage
     state.semantic_turn_numbers = recorder.turn_numbers
     if isinstance(grounded_values, IdentityExecutionClarification):

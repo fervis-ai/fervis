@@ -181,10 +181,19 @@ def test_difference_of_independent_aggregates_uses_each_complete_population(
         else sum(range(1, left_count + 1)) - sum(range(3, right_count + 3))
     )
     if standalone:
-        expected = right_count if function is AggregateFunction.COUNT else sum(range(3, right_count + 3))
+        expected = (
+            right_count
+            if function is AggregateFunction.COUNT
+            else sum(range(3, right_count + 3))
+        )
     actual = (
-        [value for row in execution.fact_result.outcome.projected_rows for value in row.values.values()]
-        if standalone else list(execution.fact_result.outcome.scalars.values())
+        [
+            value
+            for row in execution.fact_result.outcome.projected_rows
+            for value in row.values.values()
+        ]
+        if standalone
+        else list(execution.fact_result.outcome.scalars.values())
     )
     assert actual == [Decimal(expected)]
     # Publishing the answer must be able to follow every aggregate operand
@@ -193,13 +202,19 @@ def test_difference_of_independent_aggregates_uses_each_complete_population(
     for edge in execution.proof_graph.edges:
         incoming.setdefault(edge.target, []).append(edge.source)
     reachable = set()
-    pending = [node.id for node in execution.proof_graph.nodes if node.kind.value == "answer_output"]
+    pending = [
+        node.id
+        for node in execution.proof_graph.nodes
+        if node.kind.value == "answer_output"
+    ]
     while pending:
         node = pending.pop()
         if node not in reachable:
             reachable.add(node)
             pending.extend(incoming.get(node, ()))
-    assert {f"relation:{relation.id}" for relation in compilation.answer_program.relations} <= reachable
+    assert {
+        f"relation:{relation.id}" for relation in compilation.answer_program.relations
+    } <= reachable
 
 
 def test_independent_scalar_domains_do_not_authorize_an_unrelated_row_projection():
@@ -221,7 +236,7 @@ def test_independent_scalar_domains_do_not_authorize_an_unrelated_row_projection
         (),
         (FactTerm("right_value", "right", DecimalType(UnitlessMeasure()), origin),),
         (),
-        Subject("left", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        Subject("left", InstanceInterpretation.RESOURCE_POPULATION),
         None,
         (),
         (RequestedOutput("value", "right_value", origin),),

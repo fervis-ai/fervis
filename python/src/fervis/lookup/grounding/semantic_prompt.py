@@ -69,6 +69,7 @@ class SemanticGroundingTurnPrompt(TurnPromptBase):
                     "After compatibility, review every resolver route of that type.",
                     "assessment_basis states whether the route returns a POSSIBLE_DENOTED_KIND and whether its shown request parameters can look up the operand under identifier_kind.",
                     "CAN_RESOLVE_LOOKUP_TEXT selects every caller-supplied request parameter used for that lookup and every returned-resource field used to verify the returned identity.",
+                    "ENUMERATE_COMPLETE_SOURCE uses a complete source traversal and compares the supplied text against the chosen returned verification fields. It uses empty lookup_request_params; a search parameter is not required when the complete rows can be read. This branch is available only when access is established.",
                     "CANNOT_RESOLVE_LOOKUP_TEXT selects empty lookup_request_params and returned_identity_verification_fields.",
                     "For PRIMARY_KEY, the selected request parameter accepts the canonical key and returned verification fields are canonical_result components. For DESCRIPTIVE, the selected request parameter searches the descriptive value and returned verification fields describe the returned resource itself.",
                 ),
@@ -114,6 +115,7 @@ class SemanticGroundingTurnPrompt(TurnPromptBase):
                 surface = resolver_option_surface_from_catalog(
                     self.request.resolver_catalog,
                     option,
+                    read_access=self.request.read_access,
                 )
                 route = surface.prompt_payload()
                 route["route_ref"] = route.pop("binding_option_id")

@@ -8,7 +8,8 @@ from typing import Mapping
 
 from fervis.lookup.answer_program.values import FactValue, LiteralType
 from fervis.lookup.canonical_data import EntityKeyValue
-from fervis.lookup.grounding.identity import IdentifierKind, InputBindingOption
+from fervis.lookup.grounding.identity import IdentifierKind, InputBindingOption, LookupTextResolutionDecision
+from fervis.lookup.source_reads.access_model import ReadAccessCatalog
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.question_contract import FactLocalRef, InputTerm, InputUseSite
 from fervis.lookup.semantic_types import (
@@ -68,9 +69,14 @@ class CompatibleIdentityRoute:
     identifier_kind: IdentifierKind
     lookup_request_param_refs: tuple[str, ...]
     returned_identity_verification_field_paths: tuple[str, ...]
+    resolution_method: LookupTextResolutionDecision = LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT
 
     def __post_init__(self) -> None:
-        if not self.option_id or not self.lookup_request_param_refs:
+        if self.resolution_method not in {LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT,LookupTextResolutionDecision.ENUMERATE_COMPLETE_SOURCE}:
+            raise ValueError('identity route has an invalid resolution method')
+        if bool(self.lookup_request_param_refs) != (self.resolution_method is LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT):
+            raise ValueError('identity route request parameters disagree with its method')
+        if not self.option_id:
             raise ValueError("compatible identity route is incomplete")
         if not self.returned_identity_verification_field_paths:
             raise ValueError("compatible identity route lacks identity verification")
@@ -173,6 +179,7 @@ class SemanticGroundingRequest:
     time_tasks: tuple[SemanticTimeGroundingTask, ...] = ()
     runtime_date: str = ""
     timezone: str = "timezone.utc"
+    read_access: ReadAccessCatalog = ReadAccessCatalog()
 
     def __post_init__(self) -> None:
         input_ids = tuple(item.id for item in self.inputs)

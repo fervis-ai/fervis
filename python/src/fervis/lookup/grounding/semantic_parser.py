@@ -78,7 +78,7 @@ def parse_semantic_grounding(
                 _required_text(route_review.assessment_basis)
                 resolution = route_review.resolution
                 decision = LookupTextResolutionDecision(resolution.decision)
-                if decision is LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT:
+                if decision in {LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT, LookupTextResolutionDecision.ENUMERATE_COMPLETE_SOURCE}:
                     if (
                         type_matches[resource_type]
                         is not ResourceTypeMatch.POSSIBLE_DENOTED_KIND
@@ -129,7 +129,7 @@ def _compatible_route(
     identifier_kind: IdentifierKind,
     operand: str | tuple[str, ...],
 ) -> CompatibleIdentityRoute:
-    surface = resolver_option_surface_from_catalog(request.resolver_catalog, option)
+    surface = resolver_option_surface_from_catalog(request.resolver_catalog, option, read_access=request.read_access)
     parameter_refs = tuple(resolution.lookup_request_params)
     if len(parameter_refs) != len(set(parameter_refs)):
         raise ValueError("semantic grounding repeats a request parameter")
@@ -140,7 +140,11 @@ def _compatible_route(
         for parameter in surface.request_parameters
         if requires_caller_supplied_input(parameter)
     } - set(parameter_refs)
-    if missing_required:
+    enumeration = resolution.decision == LookupTextResolutionDecision.ENUMERATE_COMPLETE_SOURCE.value
+    if enumeration:
+        if parameter_refs or not request.read_access.can_enumerate(surface.source):
+            raise ValueError('resolver source cannot be completely enumerated')
+    elif missing_required:
         raise ValueError("semantic grounding omits a required request parameter")
     field_paths = tuple(resolution.returned_identity_verification_fields)
     if len(field_paths) != len(set(field_paths)):
@@ -169,6 +173,7 @@ def _compatible_route(
         identifier_kind=identifier_kind,
         lookup_request_param_refs=parameter_refs,
         returned_identity_verification_field_paths=field_paths,
+        resolution_method=LookupTextResolutionDecision(resolution.decision),
     )
 
 

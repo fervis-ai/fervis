@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fervis.lookup.answer_program.values import FactValue, LiteralType
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 
@@ -24,6 +25,7 @@ from fervis.lookup.read_eligibility import (
     SemanticReadEligibilityResult,
 )
 from fervis.types.enums import StrEnum
+from fervis.lookup.source_reads.access_model import ReadAccessCatalog
 
 
 class SourceChoiceSurfaceKind(StrEnum):
@@ -49,6 +51,7 @@ class SourceChoiceValue:
         if self.declared_type is not RowSourceValueType.BOOLEAN:
             return None
         from fervis.lookup.plan_execution.declared_values import parse_declared_value
+
         value = parse_declared_value(self.value, "boolean")
         assert isinstance(value, bool)
         return value
@@ -109,11 +112,19 @@ class AvailableSourceCatalog:
     contract_snapshot: SourceContractSnapshot
     sources: tuple[RowSource, ...]
     relation_evidence: tuple[SourceRelationEvidence, ...]
+    read_access: ReadAccessCatalog = ReadAccessCatalog()
+
+    @property
+    def execution_sources(self) -> tuple[RowSource, ...]:
+        return tuple({**{source.id:source for source in self.read_access.sources}, **{source.id:source for source in self.sources}}.values())
 
     @property
     def field_bindings(self) -> tuple[SourceFieldBinding, ...]:
-        return tuple(SourceFieldBinding(source.id, field)
-                     for source in self.sources for field in source.fields)
+        return tuple(
+            SourceFieldBinding(source.id, field)
+            for source in self.sources
+            for field in source.fields
+        )
 
     def field_binding(self, ref: str) -> SourceFieldBinding:
         for binding in self.field_bindings:
@@ -122,7 +133,7 @@ class AvailableSourceCatalog:
         raise ValueError("field binding references an unknown source field")
 
     def source(self, source_ref: str) -> RowSource:
-        for source in self.sources:
+        for source in self.execution_sources:
             if source.id == source_ref:
                 return source
         raise KeyError(source_ref)
@@ -157,6 +168,7 @@ class AvailableSourceCatalog:
                 source for source in self.sources if source.id in source_refs
             ),
             relation_evidence=relations,
+            read_access=self.read_access,
         )
 
     @property
@@ -186,11 +198,21 @@ class AvailableSourceCatalog:
         raise KeyError(surface_ref)
 
     def choice_surface_at(
-        self, source_ref: str, target_ref: str, kind: SourceChoiceSurfaceKind,
+        self,
+        source_ref: str,
+        target_ref: str,
+        kind: SourceChoiceSurfaceKind,
     ) -> SourceChoiceSurface | None:
-        return next((surface for surface in self.choice_surfaces
-                     if surface.source_ref == source_ref
-                     and surface.target_ref == target_ref and surface.kind is kind), None)
+        return next(
+            (
+                surface
+                for surface in self.choice_surfaces
+                if surface.source_ref == source_ref
+                and surface.target_ref == target_ref
+                and surface.kind is kind
+            ),
+            None,
+        )
 
     def choice_value(self, value_ref: str) -> SourceChoiceValue:
         for value in self.choice_values:
@@ -273,6 +295,7 @@ def build_available_source_catalog(
     *,
     read_eligibility: SemanticReadEligibilityResult,
     snapshot_namespace: str = "test",
+    read_access: ReadAccessCatalog = ReadAccessCatalog(),
 ) -> AvailableSourceCatalog:
     retained_by_assessment = tuple(
         (assessment, source_refs)
@@ -281,9 +304,7 @@ def build_available_source_catalog(
         for source_refs in (
             _retained_row_source_refs(
                 assessment.source_refs,
-                retained_field_refs=frozenset(
-                    assessment.relevant_field_refs
-                ),
+                retained_field_refs=frozenset(assessment.relevant_field_refs),
                 row_sources=row_sources,
             ),
         )
@@ -304,6 +325,9 @@ def build_available_source_catalog(
         "sources": [asdict(source) for source in sources],
         "relation_evidence": [asdict(item) for item in relations],
     }
+    if read_access.dependencies:
+        snapshot_payload['read_access']=[{'source_ref':item.source_ref,'parent_source_ref':item.parent_source_ref,
+                                         'arguments':[asdict(arg) for arg in item.arguments]} for item in read_access.dependencies]
     snapshot_content = canonical_runtime_json(snapshot_payload)
     return AvailableSourceCatalog(
         contract_snapshot=SourceContractSnapshot.from_content(
@@ -312,6 +336,7 @@ def build_available_source_catalog(
         ),
         sources=sources,
         relation_evidence=relations,
+        read_access=read_access,
     )
 
 
@@ -341,7 +366,9 @@ def _retained_row_source_refs(
             for source in containing
             if _row_path_depth(source) == shallowest_depth
         )
-    return tuple(source.id for source in sources if source.id in selected) or source_refs
+    return (
+        tuple(source.id for source in sources if source.id in selected) or source_refs
+    )
 
 
 def _row_path_depth(source: RowSource) -> int:
@@ -356,3 +383,28 @@ __all__ = [
     "SourceRelationEvidence",
     "build_available_source_catalog",
 ]
+
+
+def source_choice_literal(choice, *, snapshot_ref: str) -> FactValue:
+    return source_value_literal(
+        value_ref=choice.value_ref, value=choice.value, declared_type=choice.declared_type,
+        label=choice.label, source_ref=choice.source_ref,
+        proof_refs=(snapshot_ref, choice.source_ref, choice.surface_ref, choice.value_ref),
+    )
+
+
+def source_value_literal(*, value_ref, value, declared_type, label, source_ref, proof_refs) -> FactValue:
+    """One typed scalar representation for source choices and read controls."""
+    from fervis.lookup.plan_execution.declared_values import parse_declared_value
+    if declared_type is RowSourceValueType.BOOLEAN:
+        literal_type = LiteralType.BOOLEAN
+        value = "true" if parse_declared_value(value, "boolean") else "false"
+    elif declared_type in {RowSourceValueType.INTEGER, RowSourceValueType.DECIMAL,
+                           RowSourceValueType.NUMBER, RowSourceValueType.FLOAT, RowSourceValueType.DOUBLE}:
+        literal_type, value = LiteralType.NUMBER, str(value)
+    else:
+        literal_type, value = LiteralType.STRING, str(value)
+    return FactValue.literal(
+        id=value_ref, literal_type=literal_type, value=value, label=label,
+        proof_refs=proof_refs, source_refs=(source_ref,),
+    )

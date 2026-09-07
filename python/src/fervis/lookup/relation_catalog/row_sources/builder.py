@@ -188,6 +188,8 @@ def _api_row_sources(
     *,
     catalog: RelationCatalog,
 ) -> tuple[RowSource, ...]:
+    if (read.source_metadata or {}).get("representation_status") == "read_failed":
+        return ()
     row_paths = read.row_paths or ()
     if not row_paths:
         if not read.fields:
@@ -522,6 +524,9 @@ def _api_fields(
                 _field_row_path(field, row_paths=row_paths),
             ),
             description=_field_description(field),
+            nullable=field.nullable,
+            declared_value_domain=(field.metadata or {}).get("representation_authority")
+            != "observed_response",
         )
         for field in selected
         if not row_path or field.path != row_path
@@ -619,7 +624,9 @@ def _api_params(
             choice_labels=param.choice_labels,
             description=param.description,
             default=defaults.get(param.ref, param.default),
+            default_is_known=param.ref in defaults or param.default_is_known,
             default_source="source_variant" if param.ref in defaults else "",
+            population=param.population,
             entity_target=param.entity_target,
             semantics=_param_semantics(
                 param,

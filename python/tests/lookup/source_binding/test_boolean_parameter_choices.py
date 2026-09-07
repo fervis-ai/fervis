@@ -1,7 +1,7 @@
 """Boolean request controls have a finite domain even without ChoiceField metadata."""
 from dataclasses import replace
 from fervis.lookup.relation_catalog.row_sources import RowSourceParam, RowSourceValueType
-from fervis.lookup.source_binding.model import source_required_inputs_are_satisfiable, source_binding_clarification
+from fervis.lookup.source_binding.model import source_inputs_allow_candidate_discovery, source_binding_clarification
 from tests.lookup.source_binding._candidate_fixture import daily_observation_request
 
 
@@ -25,7 +25,7 @@ def test_boolean_parameter_exposes_true_and_false_choices():
 
 def test_required_boolean_control_can_be_selected_without_inventing_user_input():
     request = request_with_boolean_control()
-    assert source_required_inputs_are_satisfiable(request.source_catalog.sources[0],values=())
+    assert source_inputs_allow_candidate_discovery(request.source_catalog.sources[0],values=())
     assert source_binding_clarification(request) is None
 
 

@@ -159,3 +159,27 @@ def test_universal_frame_requires_universal_qualification(form, accepted):
     else:
         with pytest.raises(ValueError, match="universal qualification"):
             parse(request)
+
+
+def test_identity_usage_cannot_retype_an_already_returned_property():
+    import json
+    request = json.loads((Path(__file__).parent / 'fixtures/identity_and_property_share_meaning.json').read_text())
+    with pytest.raises(ValueError, match="distinct_by must equal the complete output tuple"):
+        parse(request)
+
+
+def test_identity_and_property_with_equal_origins_remain_separate_terms():
+    import json
+    from fervis.lookup.semantic_types import IdentifierType
+    request = json.loads((Path(__file__).parent / 'fixtures/identity_and_property_share_meaning.json').read_text())
+    payload = request['payload']['outcome']['answer_requests'][0]
+    payload['distinct_by'] = []
+    payload['qualification']['fact']['origin']['meaning'] = 'precision'
+    fact = parse(request).contract.requested_facts[0]
+    output_ref = fact.outputs[0].expression_ref
+    terms = {term.id: term for term in fact.facts}
+    assert not isinstance(terms[output_ref].value_type, IdentifierType)
+    identity_terms = [term for term in fact.facts if isinstance(term.value_type, IdentifierType)]
+    assert len(identity_terms) == 1
+    assert identity_terms[0].origin == terms[output_ref].origin
+    assert identity_terms[0].id != output_ref

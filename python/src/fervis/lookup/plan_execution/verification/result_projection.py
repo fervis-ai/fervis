@@ -176,7 +176,7 @@ def _verify_result_output_targets(
     } | operation_outputs
     terminal_outputs = available_relations - set(
         _operation_input_refs_for_all(answer.operations)
-    )
+    ) - {relation.source.argument_relation_id for relation in answer.relations}
     result_outputs = tuple(answer.result_projection.relation_outputs)
     scalar_outputs = answer.result_projection.scalar_outputs
     _verify_unique_result_output_ids(result_outputs, scalar_outputs)

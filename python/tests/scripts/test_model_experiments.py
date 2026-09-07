@@ -145,3 +145,18 @@ def test_source_binding_assertion_checks_declared_binding_outcomes():
     }
 
     assert validate_source_binding(arguments, context) == []
+
+
+def test_population_assertion_checks_polarity_and_unknown_rows():
+    from scripts.experiments.source_realization.population_assertion import validate
+    context = {"sets": {"set": {"kind": "restricted_population", "truth_cases": [
+        {"fields": {"flag": True}, "expected": False},
+        {"fields": {"flag": False}, "expected": True},
+        {"fields": {"flag": None}, "expected": False},
+    ]}}}
+    def output(condition):
+        return {"populations": {"set": [{"population": {"kind": "restricted_population", "condition": condition}}]}}
+    assert validate(output({"kind": "boolean_field", "field_ref": "flag", "expected_value": False}), context) == []
+    assert validate(output({"kind": "boolean_field", "field_ref": "flag", "expected_value": True}), context)
+    assert validate(output({"kind": "unary", "operator": "not", "operand": {"kind": "field", "field_ref": "flag"}}), context) == []
+    assert validate({"populations": {"set": [{"population": {"kind": "exact_population"}}]}}, context)

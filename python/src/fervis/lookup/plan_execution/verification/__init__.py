@@ -7,8 +7,8 @@ from ._shared import (
     RelationCatalog,
     RelationRows,
 )
+from .relation_program import PreparedRelationProgram
 from .answer_program import (
-    PreparedAnswerProgram,
     prepare_answer_program,
     verify_prepared_answer_program,
 )
@@ -46,7 +46,7 @@ def _execution_catalog(
 
 
 __all__ = [
-    "PreparedAnswerProgram",
+    "PreparedRelationProgram",
     "prepare_answer_program",
     "verify_answer_program_structure",
     "verify_prepared_answer_program",

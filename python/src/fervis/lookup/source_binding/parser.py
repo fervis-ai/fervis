@@ -6,20 +6,10 @@ from collections.abc import Iterable, Mapping
 
 from fervis.lookup.available_sources import SourceChoiceSurfaceKind
 from fervis.lookup.provider_contract import ProviderObject
-from fervis.lookup.source_binding.occurrences import OccurrenceScope, occurrence_scope
+from fervis.lookup.source_binding.occurrences import occurrence_scope
 from fervis.lookup.answer_program.values import ValueProjectionKind
-from fervis.lookup.source_binding.param_binding_sets import (
-    finite_choice_parameter_is_omittable,
-)
-from fervis.lookup.source_binding.subject_obligations import (
-    explicit_override_from_application_owners,
-)
 from fervis.lookup.source_binding import provider_contract as output
-from fervis.lookup.source_binding.membership import (
-    SourceMembership,
-    membership_scopes,
-    requirement_choice_surfaces,
-)
+from fervis.lookup.source_binding.choice_requirements import requirement_choice_surfaces
 from fervis.lookup.source_binding.model import (
     AssociationRealization,
     AssociationRealizationKind,
@@ -59,15 +49,25 @@ def compile_source_realization(
 ) -> SourceRealization | SourceRealizationUnavailable:
     if payload.get("kind") == "unavailable_source_realization":
         unavailable = output.SourceRealizationUnavailableOutput.parse(payload)
-        allowed_requirements = {ref.token for ref in request.index.source_requirement_refs}
+        allowed_requirements = {
+            ref.token for ref in request.index.source_requirement_refs
+        }
         if not set(unavailable.unmet_requirement_refs) <= allowed_requirements:
-            raise ValueError("unavailable realization references an undeclared requirement")
-        return SourceRealizationUnavailable(request.index.requested_fact_id,
-                                           unavailable.unmet_requirement_refs, unavailable.explanation)
+            raise ValueError(
+                "unavailable realization references an undeclared requirement"
+            )
+        return SourceRealizationUnavailable(
+            request.index.requested_fact_id,
+            unavailable.unmet_requirement_refs,
+            unavailable.explanation,
+        )
     parsed = output.SourceRealizationOutput.parse(payload)
     from fervis.lookup.source_binding.association_choices import (
-        AssociationChoice, association_choices, association_endpoints,
+        AssociationChoice,
+        association_choices,
+        association_endpoints,
     )
+
     _exact_keys(
         parsed.association_bindings,
         expected=tuple(
@@ -75,38 +75,41 @@ def compile_source_realization(
         ),
         label="association binding",
     )
-    connected_sets = {
-        endpoint
-        for ref in request.index.association_requirement_refs
-        for endpoint in association_endpoints(request, ref.token)
-    }
     _exact_keys(
         parsed.set_bindings,
-        expected=tuple(ref for ref in _required_term_refs(request, kind="set") if ref not in connected_sets),
-        label="isolated set binding",
-    )
-    authored_sets = {ref: list(values) for ref, values in parsed.set_bindings.items()}
-    for ref, association_values in parsed.association_bindings.items():
-        allowed_associations = frozenset(association_choices(request, ref))
-        endpoints = association_endpoints(request, ref)
-        for item in association_values:
-            if AssociationChoice(item.from_rows_ref, item.to_rows_ref,
-                                 item.realization_ref, item.reference_from_set_ref) not in allowed_associations:
-                raise ValueError("association realization has incompatible endpoint rows")
-            for endpoint, rows_ref in zip(endpoints, (item.from_rows_ref, item.to_rows_ref)):
-                candidates = authored_sets.setdefault(endpoint, [])
-                existing = next((candidate for candidate in candidates if candidate.branch_id == item.branch_id), None)
-                if existing is not None:
-                    if existing.rows_ref != rows_ref:
-                        raise ValueError("connected associations disagree on their shared set rows")
-                else:
-                    candidates.append(output.SetRealizationOutput(item.branch_id, item.mapping_basis, rows_ref))
-    branch_ids = tuple(item.branch_id for item in request.strategy.branches)
-    _exact_keys(
-        authored_sets,
         expected=_required_term_refs(request, kind="set"),
         label="set binding",
     )
+    branch_ids = tuple(item.branch_id for item in request.strategy.branches)
+    authored_sets = {
+        ref: _exact_branch_realizations(
+            values, branch_ids=branch_ids, label="set realization"
+        )
+        for ref, values in parsed.set_bindings.items()
+    }
+    for ref, association_values in parsed.association_bindings.items():
+        allowed_associations = frozenset(association_choices(request, ref))
+        endpoints = association_endpoints(request, ref)
+        for item in _exact_branch_realizations(
+            association_values, branch_ids=branch_ids, label="association realization"
+        ):
+            rows = tuple(
+                next(
+                    value.rows_ref
+                    for value in authored_sets[endpoint]
+                    if value.branch_id == item.branch_id
+                )
+                for endpoint in endpoints
+            )
+            if (
+                AssociationChoice(
+                    rows[0], rows[1], item.realization_ref, item.reference_from_set_ref
+                )
+                not in allowed_associations
+            ):
+                raise ValueError(
+                    "association realization has incompatible assigned endpoint rows"
+                )
     _exact_keys(
         parsed.fact_bindings,
         expected=request.model_authored_fact_refs,
@@ -195,9 +198,8 @@ def compile_source_realization(
 def compile_source_binding_plan(
     payload: dict[str, object],
     *,
-    membership: SourceMembership,
+    realization: SourceRealization,
 ) -> SourceBindingPlan:
-    realization = membership.realization
     parsed = output.SemanticSourceBindingOutput.parse(payload)
     request = realization.request
     set_bindings = realization.set_bindings
@@ -210,7 +212,9 @@ def compile_source_binding_plan(
         expected=branch_ids,
         label="resolved input application branch",
     )
-    ordinary_applications = _resolved_input_applications(parsed.resolved_input_applications, request=request)
+    ordinary_applications = _resolved_input_applications(
+        parsed.resolved_input_applications, request=request
+    )
     finite_choice_applications = _finite_choice_applications(
         parsed.finite_choice_applications,
         request=request,
@@ -219,15 +223,11 @@ def compile_source_binding_plan(
         *ordinary_applications,
         *finite_choice_applications,
     )
-    subject_binding, subject_applications = _subject_binding(
+    subject_binding = _subject_binding(
         parsed.choice_requirement_applications,
-        membership=membership,
+        realization=realization,
         requirement_applications=finite_choice_applications,
         request=request,
-    )
-    invocation_applications = (
-        *invocation_applications,
-        *subject_applications,
     )
     _applications_by_ref(invocation_applications)
     _validate_required_invocation_targets(
@@ -248,9 +248,9 @@ def compile_source_binding_plan(
         **model_authored_fact_bindings,
         **identifier_fact_bindings,
     }
-    required_facts = request.required_fact_branches(
-        invocation_applications, subject_binding
-    )
+    # Request predicates may optimize retrieval; they do not erase selected
+    # returned facts or their deterministic evaluation.
+    required_facts = request.required_fact_branches((), subject_binding)
     fact_bindings = {
         ref: tuple(
             value for value in values if value.branch_id in required_facts.get(ref, ())
@@ -265,7 +265,7 @@ def compile_source_binding_plan(
         subject_binding=subject_binding,
         request=request,
     )
-    return SourceBindingPlan(
+    plan = SourceBindingPlan(
         strategy=request.strategy,
         set_bindings=set_bindings,
         fact_bindings=fact_bindings,
@@ -275,22 +275,34 @@ def compile_source_binding_plan(
         subject_binding=subject_binding,
     )
 
+    from dataclasses import replace
+    from fervis.lookup.source_binding.population_values import (
+        complete_population_applications,
+    )
+
+    return replace(
+        plan,
+        invocation_applications=(
+            *plan.invocation_applications,
+            *complete_population_applications(plan, request=request),
+        ),
+    )
+
 
 def _subject_binding(
     returned_applications,
     *,
-    membership: SourceMembership,
+    realization: SourceRealization,
     requirement_applications: tuple[InvocationValueApplication, ...],
     request: SemanticSourceBindingRequest,
-) -> tuple[SubjectObligationBinding, tuple[InvocationValueApplication, ...]]:
-    branch_ids = tuple(branch.branch_id for branch in request.strategy.branches)
+) -> SubjectObligationBinding:
+    """Bind exact predicates; the source population itself acquires no filter."""
     _exact_keys(
         returned_applications,
-        expected=branch_ids,
+        expected=tuple(b.branch_id for b in request.strategy.branches),
         label="returned choice application branch",
     )
     branches = []
-    applications: list[InvocationValueApplication] = []
     for branch in request.strategy.branches:
         returned = returned_applications[branch.branch_id]
         surfaces = requirement_choice_surfaces(request, branch.branch_id)
@@ -300,270 +312,70 @@ def _subject_binding(
             label="returned choice application surface",
         )
         reviews = []
-        scopes = membership_scopes(membership.realization)[branch.branch_id]
-        occurrences = occurrence_scope(request, membership.realization, branch.branch_id)
-        for surface_ref in _branch_subject_surfaces(branch.branch_id, request=request):
-            surface = request.source_catalog.choice_surface(surface_ref)
-            baselines = tuple((scope.owner_set_ref, membership.reviews[branch.branch_id][scope.owner_set_ref][surface_ref])
-                              for scope in scopes if surface in scope.surfaces)
-            if not baselines:
-                if surface_ref not in returned:
-                    continue
-                baselines = ((None, {
-                    "surface_mapping_basis": "Explicit predicate over declared source values.",
-                    "choice_reviews": {
-                        choice.value: {
-                            "choice_domain_meaning": choice.label,
-                            "decision_basis": "No ordinary-state restriction is applied to this source value.",
-                            "baseline_decision": "INCLUDE",
-                        } for choice in surface.values
-                    },
-                }),)
-            for owner_set_ref, baseline in baselines:
-                review, extra = _subject_surface_review(
-                    returned.get(surface_ref, {}), surface_ref, branch.branch_id,
-                    owner_set_ref=owner_set_ref, baseline=baseline, occurrences=occurrences,
-                    requirement_applications=requirement_applications, request=request,
-                )
-                reviews.append(review)
-                applications.extend(extra)
-        branches.append(SubjectObligationRealization(branch.branch_id, tuple(reviews)))
-    return (
-        SubjectObligationBinding(
-            request.index.subject_obligation.subject_set_ref.token, tuple(branches)
-        ),
-        tuple(applications),
-    )
-
-
-def _subject_surface_review(
-    choice_applications: Mapping[str, output.ChoiceRequirementApplicationOutput],
-    surface_ref: str,
-    branch_id: str,
-    *,
-    baseline,
-    owner_set_ref: str | None,
-    occurrences: OccurrenceScope,
-    requirement_applications: tuple[InvocationValueApplication, ...],
-    request: SemanticSourceBindingRequest,
-) -> tuple[SubjectSurfaceReview, tuple[InvocationValueApplication, ...]]:
-    surface = _subject_surface(surface_ref, branch_id, request=request)
-
-    def applies(owner_ref):
-        return owner_set_ref is None or occurrences.owner_applies(
-            request, owner_ref, source_ref=surface.source_ref,
-            occurrence_ref=occurrences.for_set(owner_set_ref).id,
-        )
-
-    choice_refs_by_value = {value.value: value.value_ref for value in surface.values}
-    expected_choices = tuple(choice_refs_by_value)
-    _exact_keys(
-        choice_applications,
-        expected=expected_choices
-        if surface in requirement_choice_surfaces(request, branch_id)
-        else (),
-        label="subject choice review",
-    )
-    surface_applications = tuple(
-        application
-        for application in requirement_applications
-        if application.branch_id == branch_id
-        and application.source_ref == surface.source_ref
-        and application.target_applications[0].target_ref == surface.target_ref
-        and applies(application.owner_ref)
-    )
-    boolean_requirement_refs = frozenset(
-        requirement.requirement_ref
-        for requirement in request.index.boolean_requirements
-    )
-    explicit_requirement_applications = tuple(
-        application
-        for application in surface_applications
-        if application.owner_ref in boolean_requirement_refs
-    )
-    explicitly_selected_choice_refs = {
-        application.value_ref for application in explicit_requirement_applications
-    }
-
-    for choice_value, review in choice_applications.items():
-        choice = request.source_catalog.choice_value(choice_refs_by_value[choice_value])
-        allowed = request.explicit_subject_requirement_refs(choice, branch_id=branch_id)
-        if len(set(review.selected_by_requirements)) != len(
-            review.selected_by_requirements
-        ) or not set(review.selected_by_requirements) <= set(allowed):
-            raise ValueError(
-                "returned choice selects an incompatible explicit requirement"
+        for surface in surfaces:
+            choices = returned[surface.surface_ref]
+            _exact_keys(
+                choices,
+                expected=tuple(c.value for c in surface.values),
+                label="returned choice application value",
             )
-        if any(applies(owner) for owner in review.selected_by_requirements):
-            explicitly_selected_choice_refs.add(choice.value_ref)
-
-    def _review(choice_value, review) -> SubjectChoiceReview:
-        choice_ref = choice_refs_by_value[choice_value]
-        declared = baseline["choice_reviews"][choice_value]
-        decision = declared["baseline_decision"]
-        if decision not in {"INCLUDE", "EXCLUDE"}:
-            raise ValueError("subject choice review requires one membership decision")
-        baseline_included = decision == "INCLUDE"
-        selection_refs = tuple(
-            dict.fromkeys(
-                (
-                    *(owner for owner in (review.selected_by_requirements if review is not None else ()) if applies(owner)),
-                    *(
-                        application.owner_ref
-                        for application in explicit_requirement_applications
-                        if application.value_ref == choice_ref
-                        and application.owner_ref is not None
-                    ),
+            choice_reviews = []
+            for choice in surface.values:
+                application = choices[choice.value]
+                selected = application.selected_by_requirements
+                allowed = request.explicit_subject_requirement_refs(
+                    choice, branch_id=branch.branch_id
                 )
-            )
-        )
-        explicit_override_applies = explicit_override_from_application_owners(
-            application_owner_refs=selection_refs,
-            boolean_requirement_refs=boolean_requirement_refs,
-            baseline_included=baseline_included,
-        )
-        return SubjectChoiceReview(
-            choice_ref=choice_ref,
-            choice_domain_meaning=_text(declared["choice_domain_meaning"]),
-            decision_basis=_text(declared["decision_basis"]),
-            baseline_included=baseline_included,
-            explicit_user_override_applies=explicit_override_applies,
-            selection_requirement_refs=selection_refs,
-        )
-
-    choice_reviews = tuple(
-        _review(choice_value, choice_applications.get(choice_value))
-        for choice_value in expected_choices
-    )
-    expected_choice_refs = tuple(choice_refs_by_value.values())
-    retained_reviews = (
-        tuple(
-            review
-            for review in choice_reviews
-            if review.choice_ref in explicitly_selected_choice_refs
-        )
-        if explicit_requirement_applications
-        and surface.kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER
-        else tuple(review for review in choice_reviews if review.included)
-    )
-    retained_values = tuple(review.choice_ref for review in retained_reviews)
-    excluded_choices = tuple(
-        review.choice_ref for review in choice_reviews if not review.included
-    )
-    applications: tuple[InvocationValueApplication, ...]
-    mechanics: tuple[SourceMechanic, ...]
-    if (
-        excluded_choices
-        and not retained_values
-        and surface.kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER
-    ):
-        raise ValueError("subject parameter has no admitted retrieval choice")
-    source_required_choice_refs = {
-        application.value_ref
-        for application in surface_applications
-        if application.owner_ref is not None
-        and application.owner_ref.startswith("source_required:")
-    }
-    if not source_required_choice_refs <= set(retained_values):
-        raise ValueError("source-required choice selects an excluded subject state")
-    if surface.kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER:
-        selected_values = tuple(
-            request.source_catalog.choice_value(review.choice_ref).value
-            for review in retained_reviews
-        )
-        source = request.source_catalog.source(surface.source_ref)
-        param = next(
-            item for item in source.params if item.param_ref == surface.target_ref
-        )
-        omittable = finite_choice_parameter_is_omittable(
-            required=param.required,
-            default=param.default,
-            choices=param.choices,
-            included_values=selected_values,
-        )
-        if surface_applications:
-            applications = ()
-        elif omittable:
-            applications = ()
-        else:
-            applications = tuple(
-                _subject_choice_application(
-                    branch_id=branch_id,
-                    source_ref=surface.source_ref,
-                    target_ref=surface.target_ref,
-                    value_ref=review.choice_ref,
-                    owner_ref=None,
-                    membership_owner_ref=owner_set_ref,
-                    ordinal=ordinal,
-                    mapping_basis=(
-                        "The reviewed finite-choice parameter retains this "
-                        "ordinary subject choice."
-                    ),
-                    request=request,
+                if len(set(selected)) != len(selected) or not set(selected) <= set(
+                    allowed
+                ):
+                    raise ValueError(
+                        "returned choice selects an incompatible explicit requirement"
+                    )
+                choice_reviews.append(
+                    SubjectChoiceReview(
+                        choice_ref=choice.value_ref,
+                        choice_domain_meaning=choice.label,
+                        decision_basis=_text(application.mapping_basis),
+                        selection_requirement_refs=tuple(selected),
+                    )
                 )
-                for ordinal, review in enumerate(
-                    retained_reviews,
-                    start=1,
-                )
-            )
-        if excluded_choices or explicit_requirement_applications or applications:
-            mechanics = (
-                SourceMechanic(
-                    mapping_basis=(
-                        "The reviewed finite-choice parameter retains exactly the "
-                        "choices inside the requested subject population."
-                    ),
-                    source_ref=surface.source_ref,
-                    application_refs=tuple(
-                        application.application_ref
-                        for application in (surface_applications or applications)
-                    ),
-                    contract_evidence_refs=(
-                        request.source_catalog.contract_snapshot.ref,
-                        surface.surface_ref,
-                        *expected_choice_refs,
-                    ),
-                    kind=SourceMechanicKind.INVOCATION_PREDICATE,
-                ),
-            )
-        else:
-            mechanics = ()
-    else:
-        applications = ()
-        if excluded_choices or explicitly_selected_choice_refs:
-            mechanics = (
-                SourceMechanic(
-                    mapping_basis=(
-                        "The reviewed returned field retains exactly the choices "
-                        "inside the requested subject population."
-                    ),
-                    source_ref=surface.source_ref,
-                    application_refs=(),
-                    contract_evidence_refs=(
-                        request.source_catalog.contract_snapshot.ref,
-                        surface.surface_ref,
-                        *expected_choice_refs,
-                        *(
-                            ref
-                            for review in choice_reviews
-                            for ref in review.selection_requirement_refs
+            mechanics: tuple[SourceMechanic, ...] = ()
+            if surface.kind is SourceChoiceSurfaceKind.RETURNED_FIELD:
+                mechanics = (
+                    SourceMechanic(
+                        mapping_basis="Declared returned choices realize explicit question predicates.",
+                        source_ref=surface.source_ref,
+                        application_refs=(),
+                        contract_evidence_refs=(
+                            request.source_catalog.contract_snapshot.ref,
+                            surface.surface_ref,
+                            *(c.value_ref for c in surface.values),
+                            *(
+                                owner
+                                for c in choice_reviews
+                                for owner in c.selection_requirement_refs
+                            ),
                         ),
+                        kind=SourceMechanicKind.RETURNED_CHOICE_PREDICATE,
                     ),
-                    kind=SourceMechanicKind.RETURNED_CHOICE_PREDICATE,
-                ),
+                )
+            selected_refs = tuple(
+                c.choice_ref for c in choice_reviews if c.selection_requirement_refs
             )
-        else:
-            mechanics = ()
-    return (
-        SubjectSurfaceReview(
-            owner_set_ref=owner_set_ref,
-            surface_ref=surface_ref,
-            surface_mapping_basis=_text(baseline["surface_mapping_basis"]),
-            choice_reviews=choice_reviews,
-            included_choice_refs=retained_values,
-            mechanics=mechanics,
-        ),
-        applications,
+            reviews.append(
+                SubjectSurfaceReview(
+                    owner_set_ref=None,
+                    surface_ref=surface.surface_ref,
+                    surface_mapping_basis="Explicit question requirement correspondence.",
+                    choice_reviews=tuple(choice_reviews),
+                    included_choice_refs=selected_refs,
+                    mechanics=mechanics,
+                )
+            )
+        branches.append(SubjectObligationRealization(branch.branch_id, tuple(reviews)))
+    return SubjectObligationBinding(
+        request.index.subject_obligation.subject_set_ref.token, tuple(branches)
     )
 
 
@@ -652,7 +464,6 @@ def _subject_choice_application(
     ordinal: int,
     mapping_basis: str,
     request: SemanticSourceBindingRequest,
-    membership_owner_ref: str | None = None,
 ) -> InvocationValueApplication:
     matches = tuple(
         option
@@ -668,8 +479,6 @@ def _subject_choice_application(
     [option] = matches
     if owner_ref is not None:
         _validate_application_owner(owner_ref, option=option, request=request)
-    if membership_owner_ref is not None:
-        owner_ref = f"membership:{membership_owner_ref}"
     application_owner = owner_ref or "subject_obligation"
     application_ref = (
         f"choice_application:{branch_id}:{target_ref}:{application_owner}:{ordinal}"
@@ -889,7 +698,8 @@ def _association_realization(
 
 def _resolved_input_applications(
     values: dict[str, tuple[ProviderObject, ...]],
-    *, request: SemanticSourceBindingRequest,
+    *,
+    request: SemanticSourceBindingRequest,
 ) -> tuple[InvocationValueApplication, ...]:
     applications: list[InvocationValueApplication] = []
     applied = set()
@@ -901,8 +711,15 @@ def _resolved_input_applications(
             if kind == "no_request_application":
                 decision = value.parse_as(output.UnappliedInputOutput)
                 key = (branch_id, decision.owner_ref, decision.value_ref)
-                if decision.value_ref not in request.unapplied_input_value_refs_for_owner(decision.owner_ref, branch_id=branch_id):
-                    raise ValueError("unapplied input references an unavailable owner or value")
+                if (
+                    decision.value_ref
+                    not in request.unapplied_input_value_refs_for_owner(
+                        decision.owner_ref, branch_id=branch_id
+                    )
+                ):
+                    raise ValueError(
+                        "unapplied input references an unavailable owner or value"
+                    )
                 _text(decision.mapping_basis)
                 if key in unapplied:
                     raise ValueError("input repeats its non-application decision")
@@ -910,9 +727,14 @@ def _resolved_input_applications(
             elif kind == "request_application":
                 item = value.parse_as(output.ResolvedInputApplicationOutput)
                 applied.add((branch_id, item.owner_ref, item.value_ref))
-                applications.append(_resolved_input_application(
-                    item, branch_id=branch_id, application_ref=f"application_{len(applications) + 1}", request=request,
-                ))
+                applications.append(
+                    _resolved_input_application(
+                        item,
+                        branch_id=branch_id,
+                        application_ref=f"application_{len(applications) + 1}",
+                        request=request,
+                    )
+                )
             else:
                 raise ValueError("unknown input application decision")
     if applied.intersection(unapplied):
@@ -986,7 +808,7 @@ def _validate_required_invocation_targets(
 
 
 def _validate_application_owner(owner_ref: str, *, option, request) -> None:
-    scope_surface = request.raw_subject_scope_surfaces.get(owner_ref)
+    scope_surface = request.population_scope_surfaces.get(owner_ref)
     if scope_surface is not None:
         if (
             option.source_ref != scope_surface.source_ref
@@ -1051,22 +873,14 @@ def _derive_boolean_bindings(
             choice_mechanics = subject_binding.choice_mechanics(
                 branch.branch_id, requirement.requirement_ref
             )
-            mechanics = (
-                (
-                    *_invocation_mechanics(
-                        owned, requirement_ref=requirement.requirement_ref
-                    ),
-                    *choice_mechanics,
-                )
-                if owned
-                else choice_mechanics
-                or _returned_mechanics(
-                    branch.branch_id,
-                    fact_refs=fact_refs,
-                    fact_bindings=fact_bindings,
-                    requirement_ref=requirement.requirement_ref,
-                )
+            row_mechanics = choice_mechanics or _returned_mechanics(
+                branch.branch_id, fact_refs=fact_refs, fact_bindings=fact_bindings,
+                requirement_ref=requirement.requirement_ref,
             )
+            mechanics = (
+                *_invocation_mechanics(owned, requirement_ref=requirement.requirement_ref),
+                *row_mechanics,
+            ) if owned else row_mechanics
             if not mechanics:
                 mechanics = _relational_boolean_mechanics(
                     request=request,

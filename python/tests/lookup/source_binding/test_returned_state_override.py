@@ -116,7 +116,7 @@ def test_explicit_cancellation_survives_returned_boolean_state_filter(
     selected = next(
         choice
         for choice in field_review.choice_reviews
-        if choice.explicit_user_override_applies
+        if choice.selection_requirement_refs
     )
     assert selected.selection_requirement_refs == (requirement,)
     # Ordinary coverage admits the explicit exception; the Boolean predicate
@@ -410,9 +410,4 @@ def test_positive_logical_property_can_map_to_false_on_an_inverse_boolean_parame
         ).value
         == "false"
     )
-    assert (
-        plan.subject_binding.branch_realizations[0]
-        .surface_reviews[0]
-        .choice_reviews[0]
-        .explicit_user_override_applies
-    )
+    assert plan.subject_binding.branch_realizations[0].surface_reviews == ()

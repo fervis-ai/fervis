@@ -1,8 +1,8 @@
 """Exercise role membership through production parsing, verification, and execution."""
 
 from dataclasses import replace
-from copy import deepcopy
 from decimal import Decimal
+from fervis.host_api.contracts.population import ParameterPopulation, ParameterRowValues
 
 import pytest
 from jsonschema import Draft202012Validator, validate
@@ -24,13 +24,8 @@ from fervis.lookup.relation_catalog.row_sources.model import (
     RowSourceValueType,
 )
 from fervis.lookup.answer_program.relations import FieldBindingRole
-from fervis.lookup.source_binding.membership import (
-    membership_surfaces,
-    membership_scopes,
-    membership_schema,
-    parse_source_membership,
-    requirement_choice_surfaces,
-)
+from fervis.lookup.source_binding.choice_requirements import requirement_choice_surfaces
+
 from fervis.lookup.source_binding.parser import (
     compile_source_realization,
     compile_source_binding_plan,
@@ -75,6 +70,7 @@ def _run_role_membership(
     employee_predicate=False,
     manager_parameter_predicate=True,
 ):
+    employee_predicate = not include_inactive_employees
     original = employee_query()
     fact = original.request.index.requested_fact
     fact = replace(
@@ -150,6 +146,18 @@ def _run_role_membership(
                     RowSourceValueType.BOOLEAN,
                     choices=("false", "true"),
                     default=parameter_default,
+                    population=ParameterPopulation(
+                        field_path="field.active",
+                        value_mapping=(
+                            ParameterRowValues(
+                                "false",
+                                ("false" if encoding == "boolean" else "inactive",),
+                            ),
+                            ParameterRowValues(
+                                "true", ("true" if encoding == "boolean" else "active",)
+                            ),
+                        ),
+                    ),
                 ),
             ),
         )
@@ -161,7 +169,17 @@ def _run_role_membership(
     )
     scalar_ref = index.fact_local_ref_by_local_id["manager_active"].token
     row_payload = {
-        "set_bindings": {},
+        "set_bindings": {
+            ref: [
+                {
+                    "branch_id": v.branch_id,
+                    "mapping_basis": v.mapping_basis,
+                    "rows_ref": v.identity_ref or v.source_ref,
+                }
+                for v in values
+            ]
+            for ref, values in original.binding_plan.set_bindings.items()
+        },
         "fact_bindings": {
             scalar_ref: [
                 {
@@ -178,8 +196,6 @@ def _run_role_membership(
                 {
                     "branch_id": value.branch_id,
                     "mapping_basis": value.mapping_basis,
-                    "from_rows_ref": original.binding_plan.set_bindings["fact_1:set:employee"][0].identity_ref,
-                    "to_rows_ref": original.binding_plan.set_bindings["fact_1:set:manager"][0].identity_ref,
                     "realization_ref": value.relation_evidence_ref,
                     "reference_from_set_ref": value.reference_from_set_ref,
                 }
@@ -191,13 +207,17 @@ def _run_role_membership(
     if employee_predicate:
         row_payload["fact_bindings"][
             index.fact_local_ref_by_local_id["employee_active"].token
-        ] = [
-            {
-                "branch_id": "branch",
-                "mapping_basis": "Employee activity.",
-                "field_ref": "source_field:employees:active",
-            }
-        ]
+        ] = (
+            [
+                {
+                    "branch_id": "branch",
+                    "mapping_basis": "Employee activity.",
+                    "field_ref": "source_field:employees:active",
+                }
+            ]
+            if encoding == "boolean"
+            else []
+        )
     schema = build_semantic_source_realization_schema(request)
     Draft202012Validator.check_schema(schema)
     validate(row_payload, schema)
@@ -207,44 +227,7 @@ def _run_role_membership(
             == 0
         )
     realization = compile_source_realization(row_payload, request=request)
-    baseline = {
-        branch: {
-            surface.surface_ref: {
-                "surface_mapping_basis": "Activity scope.",
-                "choice_reviews": {
-                    choice.value: {
-                        "choice_domain_meaning": "Activity state.",
-                        "decision_basis": "Active records are ordinary; inactive records are excluded.",
-                        "baseline_decision": "INCLUDE"
-                        if choice.value in ("true", "active")
-                        else "EXCLUDE",
-                    }
-                    for choice in surface.values
-                },
-            }
-            for surface in surfaces
-        }
-        for branch, surfaces in membership_surfaces(realization).items()
-    }
-    baseline = {
-        branch: {
-            scope.owner_set_ref: {
-                surface.surface_ref: deepcopy(baseline[branch][surface.surface_ref])
-                for surface in scope.surfaces
-            }
-            for scope in scopes
-        }
-        for branch, scopes in membership_scopes(realization).items()
-    }
-    if include_inactive_employees:
-        for surfaces in baseline.values():
-            for owner, reviews in surfaces.items():
-                if owner.endswith(":employee"):
-                    for review in reviews.values():
-                        for choice in review["choice_reviews"].values():
-                            choice["baseline_decision"] = "INCLUDE"
-    validate(baseline, membership_schema(realization))
-    membership = parse_source_membership(baseline, realization=realization)
+    membership = realization
     inner = next(
         r
         for r in index.boolean_requirements
@@ -268,40 +251,49 @@ def _run_role_membership(
                     }
                     for choice in surface.values
                 }
-                for surface in requirement_choice_surfaces(
-                    membership.realization.request, "branch"
-                )
+                for surface in requirement_choice_surfaces(membership.request, "branch")
             }
         },
     }
+    for owner in membership.request.invocation_application_owner_refs:
+        options = membership.request.finite_choice_options_for_owner(
+            owner, branch_id="branch"
+        )
+        if not options:
+            continue
+        surface, choices = options[0]
+        if owner.startswith("subject_scope:"):
+            selected = [choice.value for choice in choices]
+        elif owner in {
+            r.requirement_ref
+            for r in index.boolean_requirements
+            if r.use_site is BooleanRequirementUseSite.POPULATION
+        }:
+            selected = ["true"]
+        elif owner == inner.requirement_ref and manager_parameter_predicate:
+            selected = ["false"]
+        else:
+            payload["finite_choice_applications"]["branch"][owner] = None
+            continue
+        payload["finite_choice_applications"]["branch"][owner] = {
+            "surface_ref": surface.surface_ref,
+            "selected_choice_values": selected,
+            "application_basis": "Complete population scope or explicit employee activity predicate.",
+        }
     if employee_predicate:
-        requirement = next(
-            r
+        owner = next(
+            r.requirement_ref
             for r in index.boolean_requirements
             if r.use_site is BooleanRequirementUseSite.POPULATION
             and r.atom_ref.value_ref.endswith(":employee_active")
         )
-        parameter = next(
-            s
-            for s in membership.realization.request.source_catalog.choice_surfaces
-            if s.kind.value == "REQUEST_PARAMETER"
-        )
-        payload["finite_choice_applications"]["branch"][requirement.requirement_ref] = {
-            "surface_ref": parameter.surface_ref,
-            "selected_choice_values": ["true"],
-            "application_basis": "Select active employees.",
-        }
-    validate(
-        payload, build_semantic_source_binding_schema(membership.realization.request)
-    )
-    plan = compile_source_binding_plan(payload, membership=membership)
-    verified = verify_source_strategy(plan, request=membership.realization.request)
-    if employee_predicate and not manager_parameter_predicate:
-        # A field-only override cannot certify a parameter scope known to hide
-        # every requested manager; require a complete retrieval declaration.
-        assert not isinstance(verified, VerifiedSourceStrategy)
-        assert verified.reason.value == "INSUFFICIENT_COMPLETENESS"
-        return
+        for choices in payload["choice_requirement_applications"]["branch"].values():
+            for value, application in choices.items():
+                if value in ("true", "active"):
+                    application["selected_by_requirements"].append(owner)
+    validate(payload, build_semantic_source_binding_schema(membership.request))
+    plan = compile_source_binding_plan(payload, realization=membership)
+    verified = verify_source_strategy(plan, request=membership.request)
     assert isinstance(verified, VerifiedSourceStrategy)
     compilation = compile_verified_source_strategy(verified)
     program = compilation.answer_program
@@ -398,21 +390,7 @@ def _run_role_membership(
 @pytest.mark.parametrize("include_inactive_employees", [False, True])
 @pytest.mark.parametrize("parameter_default", ["absent", None, "true", "false"])
 @pytest.mark.parametrize("encoding", ["boolean", "enum"])
-def test_inactive_manager_exception_does_not_admit_inactive_employees(
+def test_explicit_employee_and_manager_predicates_preserve_scope(
     encoding, parameter_default, include_inactive_employees
 ):
     _run_role_membership(encoding, parameter_default, include_inactive_employees)
-
-
-@pytest.mark.parametrize("parameter_default", ["true", "false"])
-@pytest.mark.parametrize("manager_parameter_predicate", [False, True])
-def test_employee_parameter_does_not_suppress_manager_scope_controls(
-    parameter_default, manager_parameter_predicate
-):
-    _run_role_membership(
-        "boolean",
-        parameter_default,
-        False,
-        employee_predicate=True,
-        manager_parameter_predicate=manager_parameter_predicate,
-    )

@@ -10,6 +10,7 @@ from pathlib import Path
 import time
 import uuid
 
+from fervis.model_io.structured_output.errors import is_retryable_provider_error
 from fervis.interfaces.common.admission import ConfiguredModelPolicy
 from fervis.questions import (
     AskRequest,
@@ -35,13 +36,7 @@ class GoldsetPreflightError(ValueError):
     pass
 
 
-_RETRYABLE_PROVIDER_ERRORS = {
-    "provider_runtime_failed",
-    "provider_connection_failed",
-    "provider_timeout",
-    "provider_rate_limited",
-    "provider_internal_error",
-}
+
 
 
 @dataclass(frozen=True)
@@ -540,7 +535,7 @@ def _positive_int(value: int, *, field_name: str) -> int:
 
 
 def _is_retryable_provider_failure(result: AskResult) -> bool:
-    return result.status == "FAILED" and result.error in _RETRYABLE_PROVIDER_ERRORS
+    return result.status == "FAILED" and is_retryable_provider_error(result.error)
 
 
 def _with_duration_assertion(

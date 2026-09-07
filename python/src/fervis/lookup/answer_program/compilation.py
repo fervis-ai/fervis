@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import TypeVar
 
 from fervis.lookup.contract_codec import canonicalize_answer_program
 from fervis.lookup.answer_program.compatibility import (
     build_program_compatibility,
 )
-from fervis.lookup.answer_program.inputs import compile_answer_program_inputs
-from fervis.lookup.answer_program.model import AnswerProgram
+from fervis.lookup.answer_program.inputs import compile_relation_program_inputs
+from fervis.lookup.answer_program.model import AnswerProgram, RelationProgram
 from fervis.lookup.answer_program.relations import (
     EndpointParamBinding,
     SourceKind,
@@ -40,8 +41,9 @@ def compile_answer_program(
         catalog,
         memory_relations=memory_relations,
     )
-    closed_sources = _close_catalog_defaults(program, row_sources=row_sources)
-    compiled_inputs = compile_answer_program_inputs(
+    from fervis.lookup.answer_program.request_projection import project_request_arguments
+    closed_sources = close_catalog_defaults(project_request_arguments(program), row_sources=row_sources)
+    compiled_inputs = compile_relation_program_inputs(
         closed_sources,
         bindings=bindings,
     )
@@ -70,11 +72,13 @@ def compile_answer_program(
     return canonical, compiled_inputs.bindings
 
 
-def _close_catalog_defaults(
-    program: AnswerProgram,
+_Program = TypeVar("_Program", bound=RelationProgram)
+
+def close_catalog_defaults(
+    program: _Program,
     *,
     row_sources: RowSourceCatalog,
-) -> AnswerProgram:
+) -> _Program:
     """Make every selected source default an explicit environment expression."""
 
     relations = []

@@ -9,13 +9,14 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from types import GenericAlias, UnionType
-from typing import Protocol, TypeAlias, Union, get_args, get_origin
+from typing import Any, Protocol, TypeAlias, Union, get_args, get_origin
 from uuid import UUID
 
 from fastapi._compat import ModelField
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticUndefined
 from sqlalchemy import Column, ForeignKeyConstraint, Index, Table, UniqueConstraint
 
 from fervis.host_api.contracts import (
@@ -28,6 +29,8 @@ from fervis.host_api.contracts import (
     ParameterContract,
     ResponseFieldContract,
 )
+
+from fervis.host_api.contracts.values import ContractValue, serialize_parameter_default
 
 ResponseAnnotation: TypeAlias = type | GenericAlias | UnionType
 
@@ -163,8 +166,18 @@ def _parameter(field: ModelField, *, source: str) -> ParameterContract:
         required=_field_is_required(field),
         description=str(field.field_info.description or ""),
         choices=_enum_choices(annotation),
+        default=_parameter_default(field.field_info),
+        default_is_known=field.field_info.default_factory is None,
         source=source,
     )
+
+
+def _parameter_default(info: FieldInfo) -> ContractValue:
+    # Read the declaration directly: ModelField.default can execute factories.
+    value = info.default
+    if value is PydanticUndefined:
+        return None
+    return serialize_parameter_default(value)
 
 
 def _collect_response_model(
@@ -195,6 +208,11 @@ def _collect_response_model(
                 type=_annotation_type(field_annotation),
                 description=field.description,
                 choices=_enum_choices(field_annotation),
+                nullable=(
+                    field_annotation is None
+                    or field_annotation is Any
+                    or type(None) in get_args(field_annotation)
+                ),
             )
         )
         if nested_model is not None:

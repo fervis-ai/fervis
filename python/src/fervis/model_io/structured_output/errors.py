@@ -27,6 +27,16 @@ class ModelIoErrorCode(StrEnum):
     PROVIDER_CONFIGURATION_FAILED = "provider_configuration_failed"
 
 
+def is_retryable_provider_error(code: str | None) -> bool:
+    return code in {
+        ModelIoErrorCode.PROVIDER_RUNTIME_FAILED,
+        ModelIoErrorCode.PROVIDER_CONNECTION_FAILED,
+        ModelIoErrorCode.PROVIDER_TIMEOUT,
+        ModelIoErrorCode.PROVIDER_RATE_LIMITED,
+        ModelIoErrorCode.PROVIDER_INTERNAL_ERROR,
+    }
+
+
 class RequiredToolOutputError(ValueError):
     def __init__(
         self,

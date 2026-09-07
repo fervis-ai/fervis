@@ -348,6 +348,8 @@ def _proof_json(
                     for arg in proof.endpoint_args
                 ),
                 "computation_summaries": proof.computation_summaries,
+                "required_source_read_ids": proof.required_source_read_ids,
+                "execute_step_id": proof.execute_step_id,
                 "source_read_ids": tuple(
                     source_read.source_read_id for source_read in proof.source_reads
                 ),

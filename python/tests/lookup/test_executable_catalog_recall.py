@@ -12,9 +12,10 @@ from fervis.lookup.relation_catalog.row_sources.model import (
 from fervis.lookup.answer_program.values import FactValue, LiteralType
 
 
+@pytest.mark.parametrize("opaque_control", [False, True])
 @pytest.mark.parametrize("supplied", [False, True])
 def test_required_inputs_are_checked_before_spending_on_read_eligibility(
-    monkeypatch, supplied
+    monkeypatch, supplied, opaque_control
 ):
     catalog = RelationCatalog(
         reads=(EndpointRead("open", "open"), EndpointRead("detail", "detail"))
@@ -32,7 +33,7 @@ def test_required_inputs_are_checked_before_spending_on_read_eligibility(
                     "detail.number",
                     "number",
                     RowSourceValueType.INTEGER,
-                    "query",
+                    "query" if opaque_control else "path",
                     required=True,
                 ),
             ),
@@ -50,7 +51,7 @@ def test_required_inputs_are_checked_before_spending_on_read_eligibility(
     )
     selected = module._executable_relation_catalog(catalog, values=values)
     assert [read.id for read in selected.reads] == (
-        ["open", "detail"] if supplied else ["open"]
+        ["open", "detail"] if supplied or opaque_control else ["open"]
     )
 
 

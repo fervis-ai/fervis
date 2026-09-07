@@ -14,40 +14,9 @@ from fervis.lookup.answer_program.contracts import (
     ProgramInputs,
     parameter_value_type,
 )
-from fervis.lookup.answer_program.values import FactValue, LiteralType
+from fervis.lookup.available_sources import source_choice_literal
 from fervis.lookup.source_binding import VerifiedSourceStrategy
 from fervis.lookup.contract_codec import canonical_contract_fingerprint
-
-
-def source_choice_literal(choice, *, snapshot_ref: str) -> FactValue:
-    """Preserve the declared primitive type of a catalog choice token."""
-    from fervis.lookup.relation_catalog.row_sources import RowSourceValueType
-
-    if choice.declared_type is RowSourceValueType.BOOLEAN:
-        literal_type, value = (
-            LiteralType.BOOLEAN,
-            "true" if choice.boolean_value else "false",
-        )
-    elif choice.declared_type in {
-        RowSourceValueType.INTEGER,
-        RowSourceValueType.DECIMAL,
-    }:
-        literal_type, value = LiteralType.NUMBER, str(choice.value)
-    else:
-        literal_type, value = LiteralType.STRING, str(choice.value)
-    return FactValue.literal(
-        id=choice.value_ref,
-        literal_type=literal_type,
-        value=value,
-        label=choice.label,
-        proof_refs=(
-            snapshot_ref,
-            choice.source_ref,
-            choice.surface_ref,
-            choice.value_ref,
-        ),
-        source_refs=(choice.source_ref,),
-    )
 
 
 def semantic_compiler_inputs(
@@ -99,6 +68,11 @@ def semantic_compiler_inputs(
         for application in verified.binding_plan.invocation_applications
         for target in application.target_applications
     }
+    from fervis.lookup.answer_program.expressions import expression_references
+    selected_choice_refs.update(ref.parameter_id
+        for realizations in verified.binding_plan.set_bindings.values()
+        for realization in realizations if realization.membership is not None
+        for ref in expression_references(realization.membership).parameters)
     source_choice_values = tuple(
         (
             value.value_ref,
@@ -114,6 +88,12 @@ def semantic_compiler_inputs(
         for value in request.source_catalog.choice_values
         if value.value_ref in selected_choice_refs
     )
+    from fervis.lookup.source_binding.population_values import population_control_values
+    population_values = tuple(
+        (ref, value, value.proof_refs)
+        for ref, value in population_control_values(request).items()
+        if ref in selected_choice_refs
+    )
     plan_values = (
         tuple(
             (
@@ -124,6 +104,7 @@ def semantic_compiler_inputs(
             for value in request.catalog_values
         )
         + source_choice_values
+        + population_values
     )
     for value_id, typed_value, provenance_refs in plan_values:
         parameter_id = _parameter_id(value_id)

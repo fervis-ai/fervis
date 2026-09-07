@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
-from decimal import Decimal
-from enum import Enum
 from typing import Any
-from uuid import UUID
 
 from fervis.lookup.answer_program.values import (
     FactValue,
@@ -19,6 +15,7 @@ from fervis.lookup.answer_program.values import (
 from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.relation_catalog.parameter_values import (
     parse_catalog_parameter_value,
+    catalog_parameter_wire_value,
 )
 from fervis.lookup.relation_catalog.model import EntityKeyComponentTarget
 
@@ -106,14 +103,14 @@ def fact_value_parameter_projection(
     if isinstance(projected, tuple) and type_name not in {"array", "list"}:
         return tuple(
             parse_catalog_parameter_value(
-                _parameter_wire_value(item, type_name=type_name),
+                catalog_parameter_wire_value(item, type_name=type_name),
                 type_name=type_name,
                 choices=choices,
             )
             for item in projected
         )
     return parse_catalog_parameter_value(
-        _parameter_wire_value(projected, type_name=type_name),
+        catalog_parameter_wire_value(projected, type_name=type_name),
         type_name=type_name,
         choices=choices,
     )
@@ -186,18 +183,6 @@ def compatible_identity_parameter_component_ids(
     return tuple(accepted)
 
 
-def _parameter_wire_value(value: RuntimeValue, *, type_name: str = "") -> object:
-    if isinstance(value, Decimal) and type_name == "integer":
-        if not value.is_finite() or value != value.to_integral_value():
-            raise ValueError("integer parameter requires an exact integral value")
-        return int(value)
-    if isinstance(value, Decimal | UUID):
-        return str(value)
-    if isinstance(value, datetime | date | time):
-        return value.isoformat()
-    if isinstance(value, Enum):
-        return value.value
-    return value
 
 
 __all__ = [

@@ -24,7 +24,7 @@ from fervis.lookup.answer_program.model import (
     AnswerProgram,
     ProgramCompatibility,
 )
-from fervis.lookup.answer_program.errors import AnswerProgramContractError
+from fervis.lookup.answer_program.errors import AnswerProgramContractError, UnsupportedAnswerProgramSchema
 from fervis.lookup.answer_program.values import BindingPatch, BindingSet
 from fervis.lookup.question_contract import model as question_contract_model
 from fervis.lookup import semantic_types
@@ -200,7 +200,7 @@ def decode_answer_program(payload: dict[str, Any] | str) -> AnswerProgram:
         if not isinstance(raw, dict) or set(raw) != {"schema_revision", "program"}:
             raise ValueError("answer-program payload fields do not match schema")
         if raw.get("schema_revision") != ANSWER_PROGRAM_SCHEMA_REVISION:
-            raise ValueError("unsupported answer-program schema revision")
+            raise UnsupportedAnswerProgramSchema()
         decoded = _decode_as(raw.get("program"), AnswerProgram)
         return canonicalize_answer_program(decoded)
     except AnswerProgramContractError:

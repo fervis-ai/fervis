@@ -147,7 +147,7 @@ def employee_query(
             ),
         ),
         expressions,
-        Subject("employee", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        Subject("employee", InstanceInterpretation.RESOURCE_POPULATION),
         None if return_truth else qualification,
         (),
         (RequestedOutput("employee", "employee_id", origin),)
@@ -202,6 +202,7 @@ def employee_query(
     )
     if manager_minimum:
         from fervis.lookup.relation_catalog.row_sources.model import RowSourceParam
+        from fervis.host_api.contracts.population import ParameterPopulation
 
         source = replace(
             source,
@@ -211,6 +212,7 @@ def employee_query(
                     "employees.min_salary",
                     "Minimum salary",
                     RowSourceValueType.DECIMAL,
+                    population=ParameterPopulation(field_path="field.salary", comparison_operator="gt"),
                 ),
             ),
         )

@@ -50,7 +50,7 @@ def _turn_summary(*, purpose: str, source: dict[str, Any]) -> dict[str, object]:
         return _read_eligibility_step_summary(source)
     if purpose == ModelTurnPurpose.PLAN_SELECTION:
         return _plan_selection_step_summary(source)
-    if purpose in {ModelTurnPurpose.SOURCE_REALIZATION, ModelTurnPurpose.SOURCE_BINDING}:
+    if purpose in {ModelTurnPurpose.SOURCE_ACCESS, ModelTurnPurpose.SOURCE_POPULATION, ModelTurnPurpose.SOURCE_REALIZATION, ModelTurnPurpose.SOURCE_BINDING}:
         return _source_binding_step_summary(source)
     return {}
 

@@ -1,5 +1,6 @@
 """Operation reference checks for answer-program verification."""
 
+from fervis.lookup.answer_program.model import RelationProgram
 from ._shared import (
     AggregateSpec,
     AggregationFunction,
@@ -52,7 +53,9 @@ def _compute_uses_direct_value(operation: Operation) -> bool:
     return bool(references.parameters or references.constants)
 
 
-def _verify_operation_references(answer: AnswerProgram) -> None:
+def _verify_operation_references(answer: RelationProgram) -> None:
+    from fervis.lookup.answer_program.dependencies import execution_schedule
+    execution_schedule(answer)
     available = {item.id for item in answer.relations}
     operation_ids: set[str] = set()
     scalar_outputs: set[str] = _operation_field_outputs(answer.operations)
@@ -101,7 +104,7 @@ def _operation_field_outputs(operations: tuple[Operation, ...]) -> set[str]:
     return outputs
 
 
-def _verify_compute_scalar_availability(answer: AnswerProgram) -> None:
+def _verify_compute_scalar_availability(answer: RelationProgram) -> None:
     available_outputs = {
         f"parameter:{parameter.id}": {parameter.id} for parameter in answer.parameters
     }
@@ -152,7 +155,7 @@ def _operation_input_refs(operation: Operation) -> tuple[str, ...]:
 
 
 def _verify_coverage_operation_relation_contracts(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     relation_contracts: dict[str, RelationContract],
 ) -> None:
@@ -274,7 +277,7 @@ def _verify_coverage_operation_relation_contracts(
 
 
 def _verify_operation_field_references(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     relation_contracts: dict[str, RelationContract],
 ) -> None:

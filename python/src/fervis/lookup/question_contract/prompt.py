@@ -99,8 +99,9 @@ The fixed candidate set is the set whose instances are tested by qualification
 and then grouped or aggregated. A requested group label is separate from it
 when qualifying instances are aggregated by that label.
 
-NORMAL_BUSINESS_INSTANCE means the candidate instances as business users
-normally understand them. RAW_DATA_RECORD means persisted records, rows, logs,
+RESOURCE_POPULATION means instances of the requested API resource. Do not
+add implicit lifecycle, activity, cancellation, deletion, or test-data restrictions.
+Any restriction must be explicitly represented by the question requirements. RAW_DATA_RECORD means persisted records, rows, logs,
 audit entries, raw data, database entries, or another explicitly requested data
 artifact. Use RAW_DATA_RECORD only when the question explicitly requests that
 data artifact.
@@ -141,10 +142,15 @@ An aggregate's filter applies only to
 that aggregate. A Boolean output contains the requested Boolean expression.
 value_comparison compares two observed or computed values.
 
-A quantifier traverses declared associations from the current row to the
-related row. Use forall for every related row. Use coverage when every
-candidate must have an observation for every member of a separate
-required-dimension set.
+A quantifier with association_refs traverses those associations from the
+current row to related rows. With association_refs=[], it quantifies over the
+whole over_set_ref and returns one population-level Boolean. Use exists or
+not_exists to test whether any rows satisfy condition, and forall to test
+whether every row satisfies it. Put the tested row condition inside that
+quantifier; it may itself quantify related rows. A presence or absence result
+uses this Boolean operation directly, without a count comparison or an
+invented constant fact. Use coverage when every candidate must have an
+observation for every member of a separate required-dimension set.
 
 related_row means that one row from set_ref is connected to the current row
 through every association declared on that set's graph node. condition is
@@ -304,9 +310,13 @@ restrict those rows are supplied values.
 
 result_grain_basis states what one result row represents after qualification
 and grouping. Then result selects one closed grain branch. Use
-one_value_for_population for one value over all qualifying rows,
-one_result_per_qualifying_row for one result per qualifying row, and
-one_result_per_group with grouping_meanings for one result per grouping tuple.
+one_value_for_population for an aggregate or Boolean proposition over the
+qualifying population, one_result_per_qualifying_row for properties or related
+values of each qualifying row, and one_result_per_group with grouping_meanings
+for one result per grouping tuple. Grain describes the computation, not the
+number of values expected today. A property of one identified instance still
+uses one_result_per_qualifying_row: the identity restricts the candidate rows,
+and projection omits candidate_identity unless the answer must state it.
 
 A request for the first, last, or top N qualifying occurrences uses
 one_result_per_qualifying_row. When entities are ranked by an aggregate over
@@ -328,7 +338,10 @@ B?” returns the identity and B, then orders by B's value_ref.
 For result kind one_value_for_population, returned_meanings contains exactly
 the one unknown value requested by the question and ordering is
 no_ordering_requested.
-Relationships used to qualify rows retain one_result_per_qualifying_row.
+Relationships used for qualification do not determine result grain. Preserve
+whether the requested answer is one scalar, individual rows, or grouped rows.
+A question asking whether something exists or is true requests one Boolean
+value for the population. Return member identities only when requested.
 
 For result_rows kind one_result_per_group, each grouping_meaning names one
 value that varies across result rows and defines one grouping dimension. It
@@ -448,27 +461,42 @@ class SemanticQuestionFrameTurnPrompt(TurnPromptBase):
                     "Return exactly one provider-native tool call.",
                 ),
             ),
-            builder.instruction_block('Grouping ownership', (
-                'A restriction shared by all groups remains a qualification unless the question also explicitly requests it as a grouping dimension.',
-                'Comparison operators and arithmetic operations are structural relations, not supplied text operands. Copy their operand values only; a word is an operand when the question uses it as data.',
-            )),
-            builder.instruction_block('Temporal operands', (
-                'A temporal_scope operand is one complete interval expression, including both boundaries when supplied. Copy the whole interval as one operand; its endpoints are not alternative values. Separate temporal scopes have separate supplied-value items.',
-            )),
-            builder.instruction_block('Quantified relationship', (
-                'every_required_member_has_observation requires two different related row sets: every member of an independently required set must have at least one matching row from the observation set.',
-                'An absence condition asks whether matching observations do not exist. It uses ordinary relational shape even when the search domain includes all stores or locations.',
-                'every_related_row tests a property directly on each existing related row. An amount or another field on that row is not a separate observation set. Determine the logical requirement rather than treating a broad search domain as positive coverage.',
-            )),
-            builder.instruction_block('Ordinal selection', (
-                'Use position_with_ties when the question requests one explicit ordered position, such as second, third, or position five. It retains only rows tied at that one-based position, excluding rows before that boundary.',
-                'Declare that positive integer position once in supplied_values.selection_limits, with the answer_request_number it belongs to. The selection kind distinguishes an ordinal position from a requested number of results.',
-                'Use take_with_boundary_ties for the first specified number of ordered rows, and first_rank_with_ties for a highest or lowest result without another explicit position.',
-            )),
-            builder.instruction_block('Group result grain', (
-                'A grouped result returns its grouping keys and aggregate values. An individual related entity is a grouping key or a row-level result, not an aggregate value.',
-                'When a question lists individual entities with their related entities or attributes, retain one result per qualifying row. Organizing a list by a related entity does not require aggregating away the listed entities.',
-            )),
+            builder.instruction_block(
+                "Grouping ownership",
+                (
+                    "A restriction shared by all groups remains a qualification unless the question also explicitly requests it as a grouping dimension.",
+                    "Comparison operators and arithmetic operations are structural relations, not supplied text operands. Copy their operand values only; a word is an operand when the question uses it as data.",
+                ),
+            ),
+            builder.instruction_block(
+                "Temporal operands",
+                (
+                    "A temporal_scope operand is one complete interval expression, including both boundaries when supplied. Copy the whole interval as one operand; its endpoints are not alternative values. Separate temporal scopes have separate supplied-value items.",
+                ),
+            ),
+            builder.instruction_block(
+                "Quantified relationship",
+                (
+                    "every_required_member_has_observation requires two different related row sets: every member of an independently required set must have at least one matching row from the observation set.",
+                    "An absence condition asks whether matching observations do not exist. It uses ordinary relational shape even when the search domain includes all stores or locations.",
+                    "every_related_row tests a property directly on each existing related row. An amount or another field on that row is not a separate observation set. Determine the logical requirement rather than treating a broad search domain as positive coverage.",
+                ),
+            ),
+            builder.instruction_block(
+                "Ordinal selection",
+                (
+                    "Use position_with_ties when the question requests one explicit ordered position, such as second, third, or position five. It retains only rows tied at that one-based position, excluding rows before that boundary.",
+                    "Declare that positive integer position once in supplied_values.selection_limits, with the answer_request_number it belongs to. The selection kind distinguishes an ordinal position from a requested number of results.",
+                    "Use take_with_boundary_ties for the first specified number of ordered rows, and first_rank_with_ties for a highest or lowest result without another explicit position.",
+                ),
+            ),
+            builder.instruction_block(
+                "Group result grain",
+                (
+                    "A grouped result returns its grouping keys and aggregate values. An individual related entity is a grouping key or a row-level result, not an aggregate value.",
+                    "When a question lists individual entities with their related entities or attributes, retain one result per qualifying row. Organizing a list by a related entity does not require aggregating away the listed entities.",
+                ),
+            ),
         )
 
     def response_contract(self) -> ProviderResponseContract:
@@ -559,14 +587,20 @@ class SemanticQuestionContractTurnPrompt(TurnPromptBase):
                     "Return exactly one provider-native tool call.",
                 ),
             ),
-            builder.instruction_block('Operand ownership', (
-                'An input_comparison is fact OPERATOR input, in that order. The operator states how the observed fact compares with the supplied input.',
-                'Write the requested arithmetic directly. Do not add neutral, cancelling, or repeated operations. A constant uses a supplied input_ref; it is never an observed fact.',
-            )),
-            builder.instruction_block('Input references', (
-                'Every supplied input must be referenced by an input_ref in the executable semantic structure. Repeating its meaning in instance_kind or origin text does not use that input.',
-                'When a supplied value identifies a class, category, or state of the candidate population, express that restriction as a qualification using the supplied input_ref. Retain it even when the population description already mentions the same class.',
-            )),
+            builder.instruction_block(
+                "Operand ownership",
+                (
+                    "An input_comparison is fact OPERATOR input, in that order. The operator states how the observed fact compares with the supplied input.",
+                    "Write the requested arithmetic directly. Do not add neutral, cancelling, or repeated operations. A constant uses a supplied input_ref; it is never an observed fact.",
+                ),
+            ),
+            builder.instruction_block(
+                "Input references",
+                (
+                    "Every supplied input must be referenced by an input_ref in the executable semantic structure. Repeating its meaning in instance_kind or origin text does not use that input.",
+                    "When a supplied value identifies a class, category, or state of the candidate population, express that restriction as a qualification using the supplied input_ref. Retain it even when the population description already mentions the same class.",
+                ),
+            ),
         )
 
     def response_contract(self) -> ProviderResponseContract:
@@ -646,11 +680,7 @@ def _question_meaning_payload(
                 "ordering_meanings": [
                     {
                         **_origin_payload(origin),
-                        **(
-                            {"group_ref": group_ref}
-                            if group_ref is not None
-                            else {}
-                        ),
+                        **({"group_ref": group_ref} if group_ref is not None else {}),
                         **({"value_ref": value_ref} if value_ref is not None else {}),
                     }
                     for origin, group_ref, value_ref in zip(

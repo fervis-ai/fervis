@@ -611,7 +611,6 @@ def test_saved_count_executes_when_paginated_data_becomes_empty():
         compile_source_realization,
         compile_source_binding_plan,
     )
-    from fervis.lookup.source_binding.membership import parse_source_membership
     from fervis.lookup.source_binding.verification import (
         verify_source_strategy,
         VerifiedSourceStrategy,
@@ -691,16 +690,15 @@ def test_saved_count_executes_when_paginated_data_becomes_empty():
         },
         request=request,
     )
-    membership = parse_source_membership({"branch": {}}, realization=realization)
     plan = compile_source_binding_plan(
         {
             "resolved_input_applications": {"branch": []},
             "finite_choice_applications": {"branch": {}},
             "choice_requirement_applications": {"branch": {}},
         },
-        membership=membership,
+        realization=realization,
     )
-    verified = verify_source_strategy(plan, request=membership.realization.request)
+    verified = verify_source_strategy(plan, request=realization.request)
     assert isinstance(verified, VerifiedSourceStrategy)
     compiled = compile_verified_source_strategy(verified)
 
@@ -846,3 +844,25 @@ def test_continuation_inspection_failure_retains_terminal_usage_and_lineage(
     assert len(recorder.reads) == 1
     assert len(recorder.errors) == 1
     assert recorder.errors[0].result.run_id == "continuation_failure"
+
+
+def test_discovery_defers_failed_candidates_without_hiding_working_routes():
+    from fervis.lookup.relation_catalog import EndpointRead
+    from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
+    from fervis.lookup.source_reads.representation import inspect_selected_representations, can_inspect_representation
+    catalog = RelationCatalog(reads=(EndpointRead('bad', 'bad', resource_names=('bad',)), EndpointRead('good', 'good', resource_names=('good',))))
+
+    class Port:
+        def read(self, *, endpoint_name, args):
+            return {'responseStatus': 400, 'responseBody': {}} if endpoint_name == 'bad' else {
+                'responseStatus': 200, 'responseFormat': 'json', 'responseBody': [{'name': 'A'}],
+            }
+
+    failures, observations = [], []
+    inspected = inspect_selected_representations(catalog, read_ids=('bad', 'good'), data_access_port=Port(),
+        on_failure=failures.append, on_response=lambda read, result: observations.append(read.id))
+    assert observations == ['bad', 'good']
+    assert len(failures) == 1 and 'HTTP 400' in str(failures[0])
+    assert inspected.read('bad').source_metadata['representation_status'] == 'read_failed'
+    assert not can_inspect_representation(inspected.read('bad'))
+    assert [source.read_id for source in build_api_row_source_catalog(inspected).sources] == ['good']

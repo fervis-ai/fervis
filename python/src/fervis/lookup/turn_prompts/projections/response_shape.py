@@ -439,6 +439,7 @@ def semantic_grounding_tasks_xml(payload: dict[str, Any]) -> str:
             api_read = option.get("api_read")
             if isinstance(api_read, Mapping):
                 lines.extend(_resolver_api_read_xml_lines(api_read, indent="      "))
+            lines.extend(_complete_source_access_xml_lines(option, indent="      "))
             canonical_result = option.get("canonical_result")
             if isinstance(canonical_result, Mapping):
                 lines.extend(
@@ -593,13 +594,28 @@ def semantic_canonical_identity_uses_xml(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _complete_source_access_xml_lines(
+    resolver: Mapping[str, object], *, indent: str,
+) -> list[str]:
+    if not resolver.get("complete_source_access"):
+        return []
+    return [
+        f'{indent}<complete_source_access available="true">'
+        'The complete source rows can be retrieved without caller-supplied '
+        'request inputs. Any required path arguments are supplied by the '
+        'established traversal. Match the lookup text against the returned '
+        'verification fields.</complete_source_access>'
+    ]
+
+
 def _resolver_xml_lines(resolver: Mapping[str, object], *, indent: str) -> list[str]:
     lines = [
-        f"{indent}<resolver{_xml_attrs({'option_id': resolver.get('binding_option_id'), 'purpose': resolver.get('purpose')})}>"
+        f"{indent}<resolver{_xml_attrs({'option_id': resolver.get('binding_option_id'), 'purpose': resolver.get('purpose'), 'resolution_method': resolver.get('resolution_method')})}>"
     ]
     api_read = resolver.get("api_read")
     if isinstance(api_read, Mapping):
         lines.extend(_resolver_api_read_xml_lines(api_read, indent=indent + "  "))
+    lines.extend(_complete_source_access_xml_lines(resolver, indent=indent + "  "))
     lookup_parameters = tuple(
         item
         for item in _array(resolver.get("lookup_request_parameters"))

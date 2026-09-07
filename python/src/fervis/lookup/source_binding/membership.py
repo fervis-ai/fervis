@@ -1,303 +1,385 @@
-"""Ordinary source membership, authored without question qualifications."""
+"""Executable logical-set membership over a covering source population.
 
-from __future__ import annotations
+The expression algebra is shared with AnswerProgram. This boundary supplies
+only source-owned fields and current-run values, never invented literals.
+"""
 
-from dataclasses import dataclass, replace
-from typing import Any
+from dataclasses import dataclass
 
-from fervis.lookup.question_contract import RawDataRecord
-from fervis.host_api.contracts import ParameterSemantics
-from fervis.lookup.available_sources import SourceChoiceSurfaceKind
-from fervis.lookup.source_binding.model import SourceRealization
-from fervis.lookup.source_binding.subject_obligations import (
-    NORMAL_INSTANCE_EXCLUDED_STATE_ROLES,
+from fervis.lookup.answer_program.expressions import (
+    BinaryExpression,
+    Expression,
+    FieldRef,
+    UnaryExpression,
+    expression_references,
+    fold_expression,
 )
-from fervis.lookup.turn_prompts import (
-    ProviderResponseContract,
-    ProviderToolContract,
-    TurnPromptBase,
+from fervis.lookup.answer_program.values import (
+    ParameterRef,
+    project_fact_value,
+    ValueProjectionKind,
+    TimeValuePayload,
 )
-from fervis.model_io.structured_output.specs import required_tool_spec
-
-TOOL_NAME = "submit_source_membership"
+from fervis.lookup.available_sources import SourceFieldBinding, SourceChoiceSurfaceKind
+from fervis.lookup.expression_operators import (
+    ExpressionBinaryOperator,
+    ExpressionUnaryOperator,
+    infer_operator_result,
+    operator_signature,
+    OperatorKind,
+)
+from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
+from fervis.lookup.relation_catalog.row_sources import (
+    semantic_type_for_row_source_type,
+    RowSourceValueType,
+)
+from fervis.lookup.semantic_types import BooleanType, TemporalScopeType
 
 
 @dataclass(frozen=True)
-class MembershipScope:
-    owner_set_ref: str
-    source_ref: str
-    subject_kind: str
-    surfaces: tuple[Any, ...]
+class ExactPopulationOutput(ProviderOutput):
+    kind: str
 
 
-def membership_scopes(realization: SourceRealization):
-    from fervis.lookup.question_contract import FactLocalRef
-    from fervis.lookup.relation_catalog.row_sources.model import RowSourceIdentityKind
-    from fervis.lookup.source_binding.occurrences import occurrence_scope
+@dataclass(frozen=True)
+class RestrictedPopulationOutput(ProviderOutput):
+    kind: str
+    condition: ProviderObject
 
-    request = realization.request
-    result = {}
-    for branch in request.strategy.branches:
-        scopes = []
-        for occurrence in occurrence_scope(
-            request, realization, branch.branch_id
-        ).occurrences:
-            source_ref = occurrence.source_ref
-            bindings = tuple(
-                (ref, value)
-                for ref, values in realization.set_bindings.items()
-                for value in values
-                if ref in occurrence.set_refs and value.branch_id == branch.branch_id
+
+@dataclass(frozen=True)
+class MembershipFieldOutput(ProviderOutput):
+    kind: str
+    field_ref: str
+
+
+@dataclass(frozen=True)
+class MembershipBooleanOutput(ProviderOutput):
+    kind: str
+    field_ref: str
+    expected_value: bool
+
+
+@dataclass(frozen=True)
+class MembershipValueOutput(ProviderOutput):
+    kind: str
+    value_ref: str
+
+
+@dataclass(frozen=True)
+class MembershipUnaryOutput(ProviderOutput):
+    kind: str
+    operator: str
+    operand: ProviderObject
+
+
+@dataclass(frozen=True)
+class MembershipBinaryOutput(ProviderOutput):
+    kind: str
+    operator: str
+    left: ProviderObject
+    right: ProviderObject
+
+
+def _has_whole_projection(value):
+    try:
+        project_fact_value(value, projection=ValueProjectionKind.WHOLE_VALUE)
+    except ValueError:
+        return False
+    return True
+
+
+def membership_choice_values(request):
+    return tuple(
+        item
+        for item in request.source_catalog.choice_values
+        if request.source_catalog.choice_surface(item.surface_ref).kind
+        is SourceChoiceSurfaceKind.RETURNED_FIELD
+    )
+
+
+def membership_schema(request):
+    exact = ExactPopulationOutput.schema({"kind": {"enum": ["exact_population"]}})
+    if not any(source.fields for source in request.source_catalog.sources):
+        return exact
+    return {
+        "anyOf": [
+            exact,
+            RestrictedPopulationOutput.schema(
+                {
+                    "kind": {"enum": ["restricted_population"]},
+                    "condition": {"$ref": "#/$defs/membership_condition_3"},
+                }
+            ),
+        ]
+    }
+
+
+def membership_definitions(request):
+    fields = [
+        SourceFieldBinding(source.id, field).ref
+        for source in request.source_catalog.sources
+        for field in source.fields
+    ]
+    values = [
+        item.canonical_value_id
+        for item in request.canonical_values
+        if _has_whole_projection(item.typed_value)
+        or isinstance(item.typed_value.payload, TimeValuePayload)
+    ]
+    values.extend(item.value_ref for item in membership_choice_values(request))
+    if not fields:
+        return {}
+    definitions = {
+        "membership_field": MembershipFieldOutput.schema(
+            {"kind": {"enum": ["field"]}, "field_ref": {"enum": fields}}
+        )
+    }
+    if values:
+        definitions["membership_value"] = MembershipValueOutput.schema(
+            {"kind": {"enum": ["value"]}, "value_ref": {"enum": values}}
+        )
+
+    def unary(operand, operators):
+        return MembershipUnaryOutput.schema(
+            {
+                "kind": {"enum": ["unary"]},
+                "operator": {"enum": operators},
+                "operand": operand,
+            }
+        )
+
+    def binary(left, right, operators):
+        return MembershipBinaryOutput.schema(
+            {
+                "kind": {"enum": ["binary"]},
+                "operator": {"enum": operators},
+                "left": left,
+                "right": right,
+            }
+        )
+
+    arithmetic = [
+        item.value
+        for item in ExpressionBinaryOperator
+        if operator_signature(item).kind is OperatorKind.ARITHMETIC
+    ]
+    comparisons = [
+        item.value
+        for item in ExpressionBinaryOperator
+        if operator_signature(item).kind
+        in {OperatorKind.COMPARISON, OperatorKind.MEMBERSHIP}
+    ]
+    boolean_fields = [
+        SourceFieldBinding(source.id, field).ref
+        for source in request.source_catalog.sources
+        for field in source.fields
+        if field.type is RowSourceValueType.BOOLEAN
+    ]
+    for depth in range(4):
+        variants = [{"$ref": "#/$defs/membership_field"}]
+        row_variants = list(variants)
+        if values:
+            variants.append({"$ref": "#/$defs/membership_value"})
+        if depth:
+            child = {"$ref": f"#/$defs/membership_expression_{depth - 1}"}
+            row_child = {"$ref": f"#/$defs/membership_row_expression_{depth - 1}"}
+            variants.extend(
+                (unary(child, ["negate"]), binary(child, child, arithmetic))
             )
-            row_owners = tuple(
-                (ref, value)
-                for ref, value in bindings
-                if value.identity_ref is None
-                or request.source_catalog.identity(value.identity_ref).kind
-                is RowSourceIdentityKind.ENTITY_ROW
+            row_variants.extend(
+                (
+                    unary(row_child, ["negate"]),
+                    binary(row_child, child, arithmetic),
+                    binary(child, row_child, arithmetic),
+                )
             )
-            # Co-resident references do not own the carrier's row-state fields.
-            owners = row_owners or bindings[:1]
-            surfaces = tuple(
-                surface
-                for surface in request.source_catalog.choice_surfaces
-                if surface.source_ref == source_ref and not surface.declared_entity_kind
-                and not (surface.kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER
-                         and any(param.param_ref == surface.target_ref and param.semantics is ParameterSemantics.RESPONSE_SHAPE
-                                 for param in request.source_catalog.source(source_ref).params))
+        definitions[f"membership_expression_{depth}"] = {"anyOf": variants}
+        definitions[f"membership_row_expression_{depth}"] = {"anyOf": row_variants}
+        row = {"$ref": "#/$defs/membership_row_expression_2"}
+        value = {"$ref": "#/$defs/membership_expression_2"}
+        conditions = [
+            unary(row, ["is_null", "not_null"]),
+            binary(row, value, comparisons),
+            binary(value, row, comparisons),
+        ]
+        if boolean_fields:
+            conditions.append(
+                MembershipBooleanOutput.schema(
+                    {
+                        "kind": {"enum": ["boolean_field"]},
+                        "field_ref": {"enum": boolean_fields},
+                        "expected_value": {"type": "boolean"},
+                    }
+                )
             )
-            for ref, value in owners:
-                if not surfaces or (
-                    isinstance(request.index.subject_obligation, RawDataRecord)
-                    and ref == request.index.subject_obligation.subject_set_ref.token
-                ):
-                    continue
-                kind = request.index.term_by_ref[
-                    FactLocalRef.from_token(ref)
-                ].origin.meaning
-                if not row_owners:
-                    source = request.source_catalog.source(source_ref)
-                    kinds = tuple(
-                        dict.fromkeys(
-                            key.entity_kind
-                            for key in source.candidate_keys
-                            if key.primary
-                        )
-                    )
-                    kind = ", ".join(kinds) or source.label
-                scopes.append(MembershipScope(ref, source_ref, kind, surfaces))
-        result[branch.branch_id] = tuple(scopes)
+        if depth:
+            child_condition = {"$ref": f"#/$defs/membership_condition_{depth - 1}"}
+            conditions.extend(
+                (
+                    unary(child_condition, ["not"]),
+                    binary(child_condition, child_condition, ["and", "or"]),
+                )
+            )
+        definitions[f"membership_condition_{depth}"] = {"anyOf": conditions}
+    return definitions
+
+
+def parse_membership(payload, *, source, request):
+    if payload.discriminator("kind") == "exact_population":
+        payload.parse_as(ExactPopulationOutput)
+        return None
+    if payload.discriminator("kind") != "restricted_population":
+        raise ValueError("unknown set population realization")
+    parsed = payload.parse_as(RestrictedPopulationOutput)
+
+    def expression(value):
+        kind = value.discriminator("kind")
+        if kind == "boolean_field":
+            boolean = value.parse_as(MembershipBooleanOutput)
+            field = next(
+                (
+                    item
+                    for item in source.fields
+                    if SourceFieldBinding(source.id, item).ref == boolean.field_ref
+                ),
+                None,
+            )
+            if field is None or field.type is not RowSourceValueType.BOOLEAN:
+                raise ValueError(
+                    "membership Boolean predicate requires a declared Boolean field"
+                )
+            operand = FieldRef(field.id)
+            return (
+                operand
+                if boolean.expected_value
+                else UnaryExpression(ExpressionUnaryOperator.NOT, operand)
+            )
+        if kind == "field":
+            field = value.parse_as(MembershipFieldOutput)
+            match = next(
+                (
+                    item
+                    for item in source.fields
+                    if SourceFieldBinding(source.id, item).ref == field.field_ref
+                ),
+                None,
+            )
+            if match is None:
+                raise ValueError("membership field belongs to another source")
+            return FieldRef(match.id)
+        if kind == "value":
+            return ParameterRef(value.parse_as(MembershipValueOutput).value_ref)
+        if kind == "unary":
+            unary = value.parse_as(MembershipUnaryOutput)
+            return UnaryExpression(
+                ExpressionUnaryOperator(unary.operator), expression(unary.operand)
+            )
+        if kind == "binary":
+            binary = value.parse_as(MembershipBinaryOutput)
+            return BinaryExpression(
+                ExpressionBinaryOperator(binary.operator),
+                expression(binary.left),
+                expression(binary.right),
+            )
+        raise ValueError("unknown membership expression")
+
+    result = expression(parsed.condition)
+    validate_membership(result, source=source, request=request)
     return result
 
 
-def membership_surfaces(realization: SourceRealization):
-    return {
-        branch: tuple(
-            {
-                surface.surface_ref: surface
-                for scope in scopes
-                for surface in scope.surfaces
-            }.values()
-        )
-        for branch, scopes in membership_scopes(realization).items()
-    }
+def map_membership(expression: Expression, *, field, value, binary=None):
+    def unsupported(_):
+        raise ValueError("membership requires source fields and authorized values")
 
-
-def requirement_choice_surfaces(request, branch_id):
-    branch = next(b for b in request.strategy.branches if b.branch_id == branch_id)
-    return tuple(
-        surface
-        for surface in request.source_catalog.choice_surfaces
-        if surface.source_ref in branch.source_refs
-        and (branch_id, surface.surface_ref)
-        not in request.unrestricted_parameter_surfaces
-        and any(
-            request.explicit_subject_requirement_refs(choice, branch_id=branch_id)
-            for choice in surface.values
-        )
+    return fold_expression(
+        expression,
+        field=field,
+        parameter=value,
+        output=unsupported,
+        constant=unsupported,
+        environment=unsupported,
+        unary=lambda node, operand: UnaryExpression(node.operator, operand),
+        binary=binary
+        or (lambda node, left, right: BinaryExpression(node.operator, left, right)),
+        function=lambda node, arguments: unsupported(node),
     )
 
 
-def _object(properties):
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": list(properties),
-        "additionalProperties": False,
+def validate_membership(expression, *, source, request):
+    refs = expression_references(expression)
+    if not refs.fields:
+        raise ValueError("restricted population requires a source-row predicate")
+    fields = {item.id: item for item in source.fields}
+    canonical_values = {
+        item.canonical_value_id: item for item in request.canonical_values
+    }
+    choices = {
+        item.value_ref: item
+        for item in membership_choice_values(request)
+        if item.source_ref == source.id
     }
 
+    def field_type(ref):
+        if ref.field_id not in fields:
+            raise ValueError("membership field belongs to another source")
+        return semantic_type_for_row_source_type(fields[ref.field_id].type), False
 
-def membership_schema(realization: SourceRealization):
-    text = {"type": "string", "minLength": 1}
-    return _object(
-        {
-            branch: _object(
-                {
-                    scope.owner_set_ref: _object(
-                        {
-                            surface.surface_ref: _object(
-                                {
-                                    "surface_mapping_basis": text,
-                                    "choice_reviews": _object(
-                                        {
-                                            choice.value: _object(
-                                                {
-                                                    "choice_domain_meaning": text,
-                                                    "decision_basis": text,
-                                                    "baseline_decision": {
-                                                        "enum": ["INCLUDE", "EXCLUDE"]
-                                                    },
-                                                }
-                                            )
-                                            for choice in surface.values
-                                        }
-                                    ),
-                                }
-                            )
-                            for surface in scope.surfaces
-                        }
-                    )
-                    for scope in scopes
-                }
-            )
-            for branch, scopes in membership_scopes(realization).items()
-        }
-    )
+    def value_type(ref):
+        if (
+            ref.component != "value"
+            or ref.item_index is not None
+            or ref.parameter_id not in canonical_values
+            and ref.parameter_id not in choices
+        ):
+            raise ValueError("membership value lacks current-run authority")
+        if ref.parameter_id in canonical_values:
+            if isinstance(
+                canonical_values[ref.parameter_id].typed_value.payload, TimeValuePayload
+            ):
+                return TemporalScopeType(), True
+            if not _has_whole_projection(
+                canonical_values[ref.parameter_id].typed_value
+            ):
+                raise ValueError(
+                    "membership operand lacks an executable whole-value projection"
+                )
+            return request.index.value_type(
+                canonical_values[ref.parameter_id].input_ref
+            ), False
+        return semantic_type_for_row_source_type(
+            choices[ref.parameter_id].declared_type
+        ), False
 
+    def unsupported(_):
+        raise ValueError("unsupported membership expression leaf")
 
-@dataclass(frozen=True)
-class SourceMembership:
-    realization: SourceRealization
-    reviews: dict[str, Any]
+    def unary_type(node, operand):
+        if operand[1]:
+            raise ValueError("temporal scope requires within")
+        return infer_operator_result(node.operator, (operand[0],)), False
 
-
-def parse_source_membership(
-    payload: dict[str, Any], *, realization: SourceRealization
-) -> SourceMembership:
-    from jsonschema import Draft7Validator
-
-    errors = tuple(Draft7Validator(membership_schema(realization)).iter_errors(payload))
-    if errors:
-        raise ValueError(
-            "source membership violates its declared schema: " + errors[0].message
-        )
-    from fervis.lookup.available_sources import SourceChoiceSurfaceKind
-
-    unrestricted = []
-    scopes_by_branch = membership_scopes(realization)
-    for branch in realization.request.strategy.branches:
-        for surface in realization.request.source_catalog.choice_surfaces:
+    def binary_type(node, left, right):
+        if left[1] or right[1]:
             if (
-                surface.source_ref not in branch.source_refs
-                or surface.kind is not SourceChoiceSurfaceKind.REQUEST_PARAMETER
+                left[1]
+                or node.operator is not ExpressionBinaryOperator.WITHIN
+                or not isinstance(node.right, ParameterRef)
             ):
-                continue
-            owners = tuple(
-                scope
-                for scope in scopes_by_branch[branch.branch_id]
-                if surface in scope.surfaces
-            )
-            if all(
-                choice["baseline_decision"] == "INCLUDE"
-                for scope in owners
-                for choice in payload[branch.branch_id][scope.owner_set_ref][
-                    surface.surface_ref
-                ]["choice_reviews"].values()
-            ):
-                unrestricted.append((branch.branch_id, surface.surface_ref))
-    realization = replace(
-        realization,
-        request=replace(
-            realization.request, unrestricted_parameter_surfaces=tuple(unrestricted)
-        ),
+                raise ValueError("temporal scope requires within")
+        return infer_operator_result(node.operator, (left[0], right[0])), False
+
+    result = fold_expression(
+        expression,
+        field=field_type,
+        parameter=value_type,
+        output=unsupported,
+        constant=unsupported,
+        environment=unsupported,
+        unary=unary_type,
+        binary=binary_type,
+        function=lambda node, arguments: unsupported(node),
     )
-    return SourceMembership(realization, payload)
-
-
-class SourceMembershipTurnPrompt(TurnPromptBase):
-    turn_name = "source membership"
-    turn_task = "classify ordinary instances in each logical row scope"
-    include_current_question = False
-
-    def __init__(self, realization: SourceRealization):
-        self.realization = realization
-
-    def system_prompt(self, context):
-        return "Classify source-contract choices using only each scope's declared subject kind, source descriptions, and ordinary-instance definitions. Do not invent business rules."
-
-    def data_sections(self, builder):
-        request = self.realization.request
-        return (
-            builder.json_section(
-                "Ordinary membership authority:",
-                {
-                    "excluded_states": [
-                        {"role": role.role.value, "definition": role.definition}
-                        for role in NORMAL_INSTANCE_EXCLUDED_STATE_ROLES
-                    ],
-                    "branches": {
-                        branch: [
-                            {
-                                "owner_set_ref": scope.owner_set_ref,
-                                "subject_kind": scope.subject_kind,
-                                "surfaces": [
-                                    {
-                                        "surface_ref": surface.surface_ref,
-                                        "source_description": request.source_catalog.source(
-                                            surface.source_ref
-                                        ).description,
-                                        "surface_description": surface.description,
-                                        "surface_label": surface.label,
-                                        "choices": [
-                                            {
-                                                "value": choice.value,
-                                                "label": choice.label,
-                                            }
-                                            for choice in surface.values
-                                        ],
-                                    }
-                                    for surface in scope.surfaces
-                                ],
-                            }
-                            for scope in scopes
-                        ]
-                        for branch, scopes in membership_scopes(
-                            self.realization
-                        ).items()
-                    },
-                },
-                indent=2,
-            ),
-        )
-
-    def instruction_sections(self, builder):
-        return (
-            builder.instruction_block(
-                "Membership decisions",
-                (
-                    "Review every shown choice against its own scope’s subject kind and the excluded-state definitions. A related row is not excluded merely because its kind differs from the main answer subject. Decisions in one scope do not restrict another scope.",
-                    "Write what the choice means, explain membership, then select INCLUDE or EXCLUDE.",
-                    "Classify the rows admitted by the choice, not the option itself. A retrieval scope admitting deleted, superseded, or other excluded artifacts is EXCLUDE even when it also admits ordinary rows.",
-                    "INCLUDE admits ordinary instances of this subject. EXCLUDE admits excluded states or artifacts, a mixed scope containing excluded artifacts, or a different subject kind.",
-                    "Source descriptions determine whether a state is an effective subject instance. A persisted record does not establish realization when the source explicitly says it is not realized. Do not exclude an ordinary instance merely for lacking optional validation or presentation properties.",
-                    "Request parameters and returned fields expressing the same population property have the same membership decisions.",
-                    "Return exactly one submit_source_membership tool call.",
-                ),
-            ),
-        )
-
-    def response_contract(self):
-        return ProviderResponseContract(
-            provider_schema={TOOL_NAME: membership_schema(self.realization)}
-        )
-
-    def tool_contract(self):
-        return ProviderToolContract(
-            tool_specs=(
-                required_tool_spec(
-                    tool_name=TOOL_NAME,
-                    tool_description="Submit ordinary source membership.",
-                    input_schema=membership_schema(self.realization),
-                ),
-            )
-        )
+    if not isinstance(result[0], BooleanType) or result[1]:
+        raise ValueError("set membership must be Boolean")

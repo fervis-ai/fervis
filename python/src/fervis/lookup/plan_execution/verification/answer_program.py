@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol
 
 from ._shared import (
@@ -11,20 +10,13 @@ from ._shared import (
     CatalogSelectionResult,
     RelationCatalog,
     RelationRows,
-    RowSourceCatalog,
     VerificationError,
-    build_row_source_catalog,
-    verify_operation,
 )
+from .relation_program import PreparedRelationProgram, prepare_relation_program, verify_prepared_relation_program
 from .contract_types import RelationContract
-from .contracts import _relation_contracts
-from .execution_proof import ExecutionProofContext, ExecutionProofSource
+from .execution_proof import ExecutionProofSource
 from .operations import (
     _verify_answer_uses_evidence_input,
-    _verify_compute_scalar_availability,
-    _verify_coverage_operation_relation_contracts,
-    _verify_operation_field_references,
-    _verify_operation_references,
 )
 from .result_projection import (
     _result_output_fact_refs,
@@ -34,19 +26,10 @@ from .result_projection import (
 )
 from fervis.lookup.question_contract import analyze_requested_fact
 from fervis.lookup.qualification import qualification_entails
-from .sources import (
-    _allowed_read_ids,
-    _verify_api_relation_catalog_refs,
-    _verify_relations,
-    _verify_required_source_params,
-    _verify_sources,
-    _verify_program_expression_targets,
-)
 from fervis.lookup.answer_program.inputs import CompiledProgramInputs
 from fervis.lookup.answer_program.expression_instantiation import (
     InstantiatedProgramInputs,
 )
-from fervis.lookup.answer_program.values import BindingSet
 from fervis.lookup.answer_program.contracts import AnswerProgramContractError
 from fervis.lookup.answer_program.revisions import verify_capability_declarations
 from fervis.lookup.plan_execution.operation_runtime import ResolvedOperationInput
@@ -60,12 +43,6 @@ class MaterializedAnswerProgram(ExecutionProofSource, Protocol):
     def operation_inputs(self) -> tuple[ResolvedOperationInput, ...]: ...
 
 
-@dataclass(frozen=True)
-class PreparedAnswerProgram:
-    program: AnswerProgram
-    bindings: BindingSet
-    row_sources: RowSourceCatalog
-
 
 def prepare_answer_program(
     answer: AnswerProgram,
@@ -75,8 +52,7 @@ def prepare_answer_program(
     memory_relations: tuple[RelationRows, ...],
     catalog_selection: CatalogSelectionResult | None,
     authorized_sources: AuthorizedExecutionSources | None,
-) -> PreparedAnswerProgram:
-    bindings = compiled_inputs.bindings
+) -> PreparedRelationProgram[AnswerProgram]:
     _verify_semantic_templates(answer)
     if not answer.operations and not (
         answer.result_projection.relation_outputs
@@ -87,74 +63,23 @@ def prepare_answer_program(
         verify_capability_declarations(answer)
     except AnswerProgramContractError as exc:
         raise VerificationError(f"{exc.code}: {exc}") from exc
-    row_sources = (
-        build_row_source_catalog(catalog, memory_relations=memory_relations)
-        if catalog is not None
-        else RowSourceCatalog()
-    )
-    _verify_sources(
-        answer,
-        row_sources=row_sources,
-        allowed_read_ids=_allowed_read_ids(
-            catalog_selection=catalog_selection,
-            authorized_sources=authorized_sources,
-        ),
-    )
-    _verify_relations(answer.relations)
-    for operation in answer.operations:
-        verify_operation(operation)
-    _verify_operation_references(answer)
-    _verify_program_expression_targets(
-        answer,
-        bindings=bindings,
-        catalog=catalog,
-        row_sources=row_sources,
-    )
-    if catalog is not None:
-        _verify_required_source_params(
-            answer,
-            row_sources=row_sources,
-        )
-    _verify_compute_scalar_availability(answer)
+    prepared = prepare_relation_program(answer,compiled_inputs=compiled_inputs,catalog=catalog,
+        memory_relations=memory_relations,catalog_selection=catalog_selection,authorized_sources=authorized_sources)
     _verify_answer_uses_evidence_input(answer)
     _verify_result_output_targets(answer, require_output=False)
-    return PreparedAnswerProgram(
-        program=answer,
-        bindings=bindings,
-        row_sources=row_sources,
-    )
+    return prepared
 
 
 def verify_prepared_answer_program(
-    structured: PreparedAnswerProgram,
+    structured: PreparedRelationProgram[AnswerProgram],
     *,
     materialized: MaterializedAnswerProgram,
     catalog: RelationCatalog | None,
     catalog_selection: CatalogSelectionResult | None,
 ) -> None:
     answer = structured.program
-    row_sources = structured.row_sources
-    if catalog is not None:
-        _verify_api_relation_catalog_refs(
-            answer.relations,
-            catalog,
-            row_sources=row_sources,
-            instantiated_inputs=materialized.instantiated_inputs,
-        )
-    proof_context = ExecutionProofContext.from_materialized_execution(
-        materialized,
-    )
-    relation_contracts = _relation_contracts(
-        answer,
-        catalog=catalog,
-        row_sources=row_sources,
-        proof_context=proof_context,
-    )
-    _verify_operation_field_references(answer, relation_contracts=relation_contracts)
-    _verify_coverage_operation_relation_contracts(
-        answer,
-        relation_contracts=relation_contracts,
-    )
+    relation_contracts = verify_prepared_relation_program(structured,materialized=materialized,catalog=catalog,
+        guarantee_declarations=answer.relation_guarantees)
     _verify_result_references(answer, relation_contracts=relation_contracts)
     _verify_fact_fulfillment(
         answer,

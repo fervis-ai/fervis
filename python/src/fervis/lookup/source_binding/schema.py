@@ -10,23 +10,33 @@ from fervis.lookup.question_contract import (
     SetTerm,
 )
 from fervis.lookup.source_binding import provider_contract as output
-from fervis.lookup.source_binding.association_choices import association_choices, association_endpoints
+from fervis.lookup.source_binding.association_choices import association_choices
 from fervis.lookup.source_binding.model import (
     InvocationProjectionOption,
     SemanticSourceBindingRequest,
 )
 
 
-def build_unavailable_source_realization_schema(requirement_refs: tuple[str, ...]) -> dict[str, object]:
+def build_unavailable_source_realization_schema(
+    requirement_refs: tuple[str, ...],
+) -> dict[str, object]:
     refs = tuple(dict.fromkeys(requirement_refs))
     if not refs:
-        raise ValueError("unavailable realization requires a declared requirement scope")
-    return output.SourceRealizationUnavailableOutput.schema({
-        "kind": {"enum": ["unavailable_source_realization"]},
-        "unmet_requirement_refs": {"type": "array", "minItems": 1, "maxItems": len(refs),
-                                  "items": {"enum": list(refs)}},
-        "explanation": {"type": "string", "minLength": 1},
-    })
+        raise ValueError(
+            "unavailable realization requires a declared requirement scope"
+        )
+    return output.SourceRealizationUnavailableOutput.schema(
+        {
+            "kind": {"enum": ["unavailable_source_realization"]},
+            "unmet_requirement_refs": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": len(refs),
+                "items": {"enum": list(refs)},
+            },
+            "explanation": {"type": "string", "minLength": 1},
+        }
+    )
 
 
 def build_semantic_source_realization_schema(
@@ -61,7 +71,6 @@ def build_semantic_source_realization_schema(
                         ),
                     )
                     for ref in set_refs
-                    if ref not in {endpoint for edge in association_refs for endpoint in association_endpoints(request, edge)}
                 }
             ),
             "fact_bindings": _closed_object(
@@ -92,6 +101,7 @@ def build_semantic_source_realization_schema(
     )
 
 
+
 def build_semantic_source_binding_schema(
     request: SemanticSourceBindingRequest,
 ) -> dict[str, object]:
@@ -114,22 +124,29 @@ def _association_realization_schema(
     association_ref: str,
     branch_ids: tuple[str, ...],
 ) -> dict[str, object]:
-    groups: dict[tuple[str, str, str | None], list[str]] = {}
-    for choice in association_choices(request, association_ref):
-        groups.setdefault((choice.from_rows_ref, choice.realization_ref,
-                           choice.reference_from_set_ref), []).append(choice.to_rows_ref)
+    choices = tuple(
+        dict.fromkeys(
+            (choice.realization_ref, choice.reference_from_set_ref)
+            for choice in association_choices(request, association_ref)
+        )
+    )
     variants = []
-    for (left, evidence, orientation), rights in groups.items():
-        variant = output.AssociationRealizationOutput.schema({
-            "branch_id": {"enum": list(branch_ids)},
-            "mapping_basis": _text(),
-            "from_rows_ref": {"enum": [left]},
-            "to_rows_ref": {"enum": list(dict.fromkeys(rights))},
-            "realization_ref": {"enum": [evidence]},
-            "reference_from_set_ref": {"enum": [orientation]},
-        })
+    for evidence, orientation in choices:
+        variant = output.AssociationRealizationOutput.schema(
+            {
+                "branch_id": {"enum": list(branch_ids)},
+                "mapping_basis": _text(),
+                "realization_ref": {"enum": [evidence]},
+                "reference_from_set_ref": {"enum": [orientation]},
+            }
+        )
         if orientation is not None:
-            variant["required"] = ["branch_id", "mapping_basis", "from_rows_ref", "to_rows_ref", "realization_ref", "reference_from_set_ref"]
+            variant["required"] = [
+                "branch_id",
+                "mapping_basis",
+                "realization_ref",
+                "reference_from_set_ref",
+            ]
         variants.append(variant)
     if not variants:
         raise ValueError("association has no structurally compatible row realization")
@@ -195,12 +212,17 @@ def _resolved_input_applications_schema(
     )
 
 
-def unapplied_input_application_schema(owner_ref: str, value_ref: str) -> dict[str, object]:
-    return output.UnappliedInputOutput.schema({
-        "kind": {"enum": ["no_request_application"]},
-        "mapping_basis": _text(), "owner_ref": {"enum": [owner_ref]},
-        "value_ref": {"enum": [value_ref]},
-    })
+def unapplied_input_application_schema(
+    owner_ref: str, value_ref: str
+) -> dict[str, object]:
+    return output.UnappliedInputOutput.schema(
+        {
+            "kind": {"enum": ["no_request_application"]},
+            "mapping_basis": _text(),
+            "owner_ref": {"enum": [owner_ref]},
+            "value_ref": {"enum": [value_ref]},
+        }
+    )
 
 
 def _branch_resolved_input_applications_schema(
@@ -228,7 +250,9 @@ def _branch_resolved_input_applications_schema(
     variants.extend(
         unapplied_input_application_schema(owner_ref, value_ref)
         for owner_ref in request.invocation_application_owner_refs
-        for value_ref in request.unapplied_input_value_refs_for_owner(owner_ref, branch_id=branch_id)
+        for value_ref in request.unapplied_input_value_refs_for_owner(
+            owner_ref, branch_id=branch_id
+        )
     )
     # Multiple response row paths can expose the same endpoint parameter.
     # The authored value/target projection is still one legal choice.
@@ -314,7 +338,9 @@ def _finite_choice_owner_application_schema(options) -> dict[str, object]:
 
 
 def _choice_requirement_applications_schema(request: SemanticSourceBindingRequest):
-    from fervis.lookup.source_binding.membership import requirement_choice_surfaces
+    from fervis.lookup.source_binding.choice_requirements import (
+        requirement_choice_surfaces,
+    )
 
     return _closed_object(
         {

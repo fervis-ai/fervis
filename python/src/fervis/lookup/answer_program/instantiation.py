@@ -23,7 +23,7 @@ from fervis.lookup.answer_program.expression_instantiation import (
     instantiate_program_expressions,
 )
 from fervis.lookup.answer_program.operations import operation_node_output_refs
-from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
+from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment, RelationProgram
 from fervis.lookup.relation_catalog.row_sources.model import RowSourceCatalog
 from fervis.lookup.answer_program.values import (
     ConstantRef,
@@ -42,7 +42,7 @@ from fervis.lookup.answer_program.operations import (
     UniversalConditionSpec,
 )
 from fervis.lookup.answer_program.inputs import (
-    compile_answer_program_inputs,
+    compile_relation_program_inputs,
     program_value_expressions,
     resolve_value_expression,
     resolved_value_expression_type,
@@ -159,20 +159,33 @@ class ExecutionProofGraph:
         )
 
 
+@dataclass(frozen=True, kw_only=True)
+class MaterializedRelationInputs:
+    instantiated_inputs: InstantiatedProgramInputs
+    operations: tuple[ExecutableOperation, ...]
+    operation_inputs: tuple[ResolvedOperationInput, ...] = ()
+    expression_values: Mapping[str, RuntimeValue] | None = None
+    expression_types: Mapping[str, str] | None = None
+
+    @property
+    def endpoint_arg_scope_refs(self) -> dict[str, frozenset[str]]:
+        return {key:frozenset(refs) for key,refs in self.instantiated_inputs.proofs_by_relation.items()}
+
+    @property
+    def operation_proof_refs(self) -> dict[str, tuple[str, ...]]:
+        from fervis.lookup.plan_execution.operation_runtime import operation_input_proofs
+        return operation_input_proofs(self.operation_inputs)
+
+
 @dataclass(frozen=True)
-class _MaterializedExecution:
+class _MaterializedExecution(MaterializedRelationInputs):
     answer: AnswerProgram
     bindings: BindingSet
     catalog: RelationCatalog
     row_sources: RowSourceCatalog
-    instantiated_inputs: InstantiatedProgramInputs
-    operations: tuple[ExecutableOperation, ...]
     authority_ref: str
     proof_graph: ExecutionProofGraph
     effective_requested_facts: tuple[RequestedFact, ...]
-    operation_inputs: tuple[ResolvedOperationInput, ...] = ()
-    expression_values: Mapping[str, RuntimeValue] | None = None
-    expression_types: Mapping[str, str] | None = None
 
     @property
     def proof_node_refs_by_result_output_id(self) -> dict[str, tuple[str, ...]]:
@@ -180,34 +193,6 @@ class _MaterializedExecution:
             fulfillment.result_output_id: (_answer_output_node_id(fulfillment),)
             for fulfillment in self.answer.fulfillment
         }
-
-    @property
-    def endpoint_arg_scope_refs(self) -> dict[str, frozenset[str]]:
-        refs_by_relation: dict[str, set[str]] = {}
-        for endpoint_arg in self.instantiated_inputs.endpoint_args:
-            refs_by_relation.setdefault(endpoint_arg.relation_id, set()).update(
-                _dedupe_refs(tuple(endpoint_arg.proof_refs))
-            )
-        return {
-            relation_id: frozenset(refs)
-            for relation_id, refs in refs_by_relation.items()
-        }
-
-    @property
-    def operation_proof_refs(self) -> dict[str, tuple[str, ...]]:
-        grouped: dict[str, list[str]] = {}
-        for node in self.proof_graph.nodes:
-            if node.kind is not ProofNodeKind.OPERATION_INPUT:
-                continue
-            operation_id = _operation_id_from_node(node.id)
-            if not operation_id:
-                continue
-            grouped.setdefault(operation_id, []).extend(node.proof_refs)
-        return {
-            operation_id: _dedupe_refs(tuple(refs))
-            for operation_id, refs in grouped.items()
-        }
-
 
 @dataclass(frozen=True)
 class VerifiedExecution(_MaterializedExecution):
@@ -236,7 +221,7 @@ def instantiate_answer_program(
 
     structured = prepare_answer_program(
         program,
-        compiled_inputs=compile_answer_program_inputs(
+        compiled_inputs=compile_relation_program_inputs(
             program,
             bindings=bindings,
         ),
@@ -283,17 +268,9 @@ def _materialize_execution(
     row_sources: RowSourceCatalog,
     authority_ref: str = "",
 ) -> _MaterializedExecution:
-    instantiated_inputs = instantiate_program_expressions(
-        bindings=bindings,
-        catalog=catalog or RelationCatalog(),
-        relations=answer.relations,
-        parameters=answer.parameters,
-        row_sources=row_sources,
-    )
-    operations, operation_inputs = _instantiate_operations(
-        answer,
-        bindings=bindings,
-    )
+    materialized = materialize_relation_inputs(answer,bindings=bindings,catalog=catalog or RelationCatalog(),row_sources=row_sources)
+    instantiated_inputs = materialized.instantiated_inputs
+    operations, operation_inputs = materialized.operations, materialized.operation_inputs
     proof_graph = _execution_proof_graph(
         answer,
         instantiated_inputs=instantiated_inputs,
@@ -337,8 +314,8 @@ def _operation_input_refs(
     return {operation_id: frozenset(items) for operation_id, items in refs.items()}
 
 
-def _instantiate_operations(
-    answer: AnswerProgram,
+def instantiate_relation_operations(
+    answer: RelationProgram,
     *,
     bindings: BindingSet,
 ) -> tuple[tuple[ExecutableOperation, ...], tuple[ResolvedOperationInput, ...]]:
@@ -536,6 +513,11 @@ def _execution_proof_graph(
     contributions: list[ExecutionProofContribution] = []
     explicit_labels_by_ref = _explicit_labels_by_proof_ref(answer.inputs)
     relations = answer.relations
+    for relation in relations:
+        if relation.source.argument_relation_id:
+            edges.append(ExecutionProofEdge(
+                source=f"relation:{relation.source.argument_relation_id}",
+                target=f"relation:{relation.id}", role=ProofEdgeRole.SCOPES))
     for arg in instantiated_inputs.endpoint_args:
         node_id = f"endpoint_arg:{arg.relation_id}:{arg.param_ref}"
         nodes.append(
@@ -871,3 +853,11 @@ def _node_with_proof_refs(
 
 def _dedupe_refs(refs: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(ref for ref in refs if ref))
+
+
+def materialize_relation_inputs(program: RelationProgram, *, bindings: BindingSet,
+                                catalog: RelationCatalog, row_sources: RowSourceCatalog) -> MaterializedRelationInputs:
+    instantiated_inputs=instantiate_program_expressions(bindings=bindings,catalog=catalog,
+        relations=program.relations,parameters=program.parameters,row_sources=row_sources)
+    operations,operation_inputs=instantiate_relation_operations(program,bindings=bindings)
+    return MaterializedRelationInputs(instantiated_inputs=instantiated_inputs,operations=operations,operation_inputs=operation_inputs)

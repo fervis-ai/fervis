@@ -132,7 +132,7 @@ class OutputRequirement:
 
 
 @dataclass(frozen=True)
-class NormalBusinessInstance:
+class ResourcePopulation:
     subject_set_ref: FactLocalRef
 
 
@@ -141,7 +141,7 @@ class RawDataRecord:
     subject_set_ref: FactLocalRef
 
 
-SubjectObligation: TypeAlias = NormalBusinessInstance | RawDataRecord
+SubjectObligation: TypeAlias = ResourcePopulation | RawDataRecord
 
 
 @dataclass(frozen=True)
@@ -171,14 +171,38 @@ class RequestedFactSemanticIndex:
 
     def output_qualification(self, output_id: str) -> QualificationDNF:
         """Require subject filtering only for outputs evaluated over that subject."""
-        from fervis.lookup.question_contract.domains import value_population_dependencies
+        from fervis.lookup.question_contract.domains import (
+            value_population_dependencies,
+        )
 
-        output = next(item for item in self.requested_fact.outputs if item.id == output_id)
-        ref = self.fact_local_ref_by_local_id.get(output.expression_ref, output.expression_ref)
-        if (isinstance(self.result_grain, Singleton)
-                and self.subject_obligation.subject_set_ref.token not in value_population_dependencies(self, ref)):
+        output = next(
+            item for item in self.requested_fact.outputs if item.id == output_id
+        )
+        ref = self.fact_local_ref_by_local_id.get(
+            output.expression_ref, output.expression_ref
+        )
+        if (
+            isinstance(self.result_grain, Singleton)
+            and self.subject_obligation.subject_set_ref.token
+            not in value_population_dependencies(self, ref)
+        ):
             return QualificationDNF.true(self.requested_fact_id)
         return self.qualification
+
+    def condition_qualification(self, expression_ref: str) -> QualificationDNF:
+        """Normalize a scoped condition with the same algebra as qualification."""
+        return normalize_qualification(
+            requested_fact_id=self.requested_fact_id,
+            root_ref=self.fact_local_ref_by_local_id[expression_ref].token,
+            formulas={
+                ref.token: _qualification_node(
+                    node,
+                    local_refs=self.fact_local_ref_by_local_id,
+                    inputs=self.input_by_ref,
+                )
+                for ref, node in self.expression_by_ref.items()
+            },
+        )
 
     @property
     def observed_fact_refs(self) -> frozenset[FactLocalRef]:
@@ -363,8 +387,10 @@ def analyze_requested_fact(
         raise ValueError("qualification is not evaluated for the subject")
     if grouping_refs:
         _validate_grouping_domains(
-            tuple(domains[item] for item in grouping_refs), subject_ref=subject_ref,
-            terms=terms, local_refs=local_refs,
+            tuple(domains[item] for item in grouping_refs),
+            subject_ref=subject_ref,
+            terms=terms,
+            local_refs=local_refs,
         )
     result_grain = _result_grain(
         requested_fact,
@@ -436,7 +462,7 @@ def analyze_requested_fact(
     if requested_fact.subject.instance_interpretation.value == "raw_data_record":
         obligation = RawDataRecord(subject_ref)
     else:
-        obligation = NormalBusinessInstance(subject_ref)
+        obligation = ResourcePopulation(subject_ref)
     return RequestedFactSemanticIndex(
         requested_fact=requested_fact,
         input_by_ref=MappingProxyType(dict(inputs)),
@@ -877,7 +903,9 @@ def _validate_grouping_domains(
 ) -> None:
     """A grouping tuple combines connected row keys, not scalar operands."""
     varying = tuple(item for item in domains if not isinstance(item, ConstantDomain))
-    if not varying or any(not isinstance(item, (RowDomain, AssociationExpandedDomain)) for item in varying):
+    if not varying or any(
+        not isinstance(item, (RowDomain, AssociationExpandedDomain)) for item in varying
+    ):
         raise ValueError("grouping requires row-level values")
     for domain in varying:
         if isinstance(domain, RowDomain):
@@ -888,7 +916,10 @@ def _validate_grouping_domains(
             assert isinstance(association, AssociationTerm)
             owner = local_refs[association.from_set_ref]
         if owner != subject_ref and not _unique_association_path_refs(
-            subject_ref, destination=owner, terms=terms, local_refs=local_refs,
+            subject_ref,
+            destination=owner,
+            terms=terms,
+            local_refs=local_refs,
         ):
             raise ValueError("grouping has an unrelated row domain")
 
@@ -1022,7 +1053,10 @@ def _validate_result_surfaces(
             ref, result_grain=result_grain, grouping_refs=grouping_refs, domains=domains
         )
     if (
-        isinstance(requested_fact.selection, (FirstRankWithTies, TakeWithBoundaryTies, PositionWithTies))
+        isinstance(
+            requested_fact.selection,
+            (FirstRankWithTies, TakeWithBoundaryTies, PositionWithTies),
+        )
         and not requested_fact.ordering
     ):
         raise ValueError("bounded selection requires ordering")

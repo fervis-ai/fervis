@@ -1,6 +1,7 @@
 """Read retention and identity decisions owned by Read Eligibility."""
 
 from __future__ import annotations
+from fervis.lookup.source_reads.access_model import ReadAccessCatalog
 
 from dataclasses import dataclass
 from typing import TypeAlias
@@ -136,6 +137,7 @@ class SemanticReadEligibilityRequest:
     answer_catalog: RelationCatalog
     identity_tasks: tuple[IdentityResolutionTask, ...]
     resolver_catalog: RelationCatalog
+    read_access: ReadAccessCatalog = ReadAccessCatalog()
 
     def input_term(self, input_ref: str) -> InputTerm:
         terms = {

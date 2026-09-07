@@ -1,7 +1,6 @@
 """Relation contracts for answer-program verification."""
 
 from ._shared import (
-    AnswerProgram,
     Relation,
     RelationCatalog,
     RowSourceCatalog,
@@ -11,6 +10,7 @@ from ._shared import (
     row_source_evidence_ref,
     row_source_field_evidence_ref,
 )
+from fervis.lookup.answer_program.model import RelationProgram, RelationGuaranteeDeclaration
 from .contract_types import (
     ProofLineage,
     RelationContract,
@@ -36,43 +36,50 @@ from .sources import _row_source_for_relation, _source_mechanic_proof_refs
 
 
 def _relation_contracts(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     catalog: RelationCatalog | None,
     row_sources: RowSourceCatalog,
     proof_context: ExecutionProofContext,
+    guarantee_declarations: tuple[RelationGuaranteeDeclaration,...] = (),
 ) -> dict[str, RelationContract]:
-    declarations = {item.relation_id: item for item in answer.relation_guarantees}
-    if len(declarations) != len(answer.relation_guarantees):
+    declarations = {item.relation_id: item for item in guarantee_declarations}
+    if len(declarations) != len(guarantee_declarations):
         raise ValueError("answer program repeats a relation guarantee")
-    contracts = {}
-    for relation in answer.relations:
-        contract = _base_relation_contract(
-            relation,
-            catalog=catalog,
-            row_sources=row_sources,
-            proof_context=proof_context,
-        )
-        contracts[relation.id] = _with_declared_semantic_guarantee(
-            contract,
-            declarations.pop(relation.id, None),
-        )
+    from dataclasses import replace
+    from fervis.lookup.answer_program.dependencies import execution_schedule
+    from fervis.lookup.answer_program.expressions import expression_references
+    from fervis.lookup.plan_execution.errors import VerificationError
+    contracts: dict[str, RelationContract] = {}
     scalar_types = {f"parameter:{p.id}":parameter_runtime_type(p.value_type) for p in answer.parameters}
     node_output_types: dict[str, dict[str, str]] = {}
-    for operation in answer.operations:
+    for item in execution_schedule(answer):
+        if isinstance(item, Relation):
+            contract = _base_relation_contract(item, catalog=catalog, row_sources=row_sources, proof_context=proof_context)
+            if item.source.argument_relation_id:
+                parent = contracts[item.source.argument_relation_id]
+                field_ids = tuple(ref.field_id for binding in item.source.param_bindings
+                                  for ref in expression_references(binding.value_expr).fields)
+                if any(field_id not in parent.fields for field_id in field_ids):
+                    raise VerificationError('dependent argument references an unavailable parent field')
+                argument_proof = parent.row_proof.merge(*(parent.field_proofs[field_id] for field_id in field_ids))
+                contract = replace(contract,
+                    row_proof=contract.row_proof.merge(argument_proof),
+                    field_proofs={key:proof.merge(argument_proof) for key,proof in contract.field_proofs.items()})
+            contracts[item.id] = _with_declared_semantic_guarantee(contract, declarations.pop(item.id, None))
+            continue
+        operation = item
         if isinstance(operation.spec, ComputeSpec):
             node_output_types[operation.id] = {operation.spec.output_scalar:expression_value_type(operation.spec.expression, scalar_types=scalar_types, node_output_types=node_output_types)}
         if not operation.output_relation:
             continue
         contract = _operation_relation_contract(
-            operation,
-            contracts,
-            proof_context=proof_context, scalar_types=scalar_types, node_output_types=node_output_types,
+            operation, contracts, proof_context=proof_context,
+            scalar_types=scalar_types, node_output_types=node_output_types,
         )
         node_output_types[operation.id] = {key:contract.field_types.get(key, "") for key in operation_scalar_output_ids(operation.spec)}
         contracts[operation.output_relation] = _with_declared_semantic_guarantee(
-            contract,
-            declarations.pop(operation.output_relation, None),
+            contract, declarations.pop(operation.output_relation, None),
         )
     if declarations:
         raise ValueError("relation guarantee references an unknown relation")
@@ -110,7 +117,7 @@ def _with_declared_semantic_guarantee(contract, declaration):
 
 
 def _scalar_contracts(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     relation_contracts: dict[str, RelationContract],
     operation_inputs: tuple[ResolvedOperationInput, ...],
@@ -347,6 +354,11 @@ def _binding_proof(
         row_source = _row_source_for_relation(relation, row_sources=row_sources)
         row_source_field = row_source.field(field_id)
     except KeyError:
+        return ProofLineage.value(frozenset(refs))
+    if row_source_field.request_parameter_ref:
+        from fervis.lookup.relation_catalog.row_sources import row_source_param_evidence_ref
+        param = next(param for param in row_source.params if param.param_ref == row_source_field.request_parameter_ref)
+        refs.add(row_source_param_evidence_ref(row_source_id=row_source.id,param_id=param.id))
         return ProofLineage.value(frozenset(refs))
     refs.add(
         read_field_evidence_ref(

@@ -9,7 +9,10 @@ from typing import TypeVar
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 from fervis.lookup.answer_program.graph import prune_unused_program_nodes
 from .occurrences import RelationalValue
-from fervis.lookup.question_contract.domains import value_set_dependencies, relational_free_sets
+from fervis.lookup.question_contract.domains import (
+    value_set_dependencies,
+    relational_free_sets,
+)
 from fervis.lookup.source_binding.occurrences import OccurrenceScope, occurrence_scope
 from fervis.lookup.question_contract.analysis import (
     RowDomain,
@@ -75,7 +78,6 @@ from fervis.lookup.answer_program.values import (
     LiteralType,
     ParameterRef,
     NodeOutputRef,
-    ValueProjectionKind,
     BindingSet,
 )
 from fervis.lookup.expression_operators import (
@@ -122,28 +124,17 @@ from fervis.lookup.question_contract import (
     TemporalBucket,
 )
 from fervis.lookup.semantic_types import IdentifierType
-from fervis.lookup.source_binding.param_binding_sets import (
-    ParamBindingSetAlternatives,
-    RelationInputOrigin,
-    alternate_param_binding_sets,
-    combine_param_binding_sets,
-    equivalent_param_binding_sets,
-    intersect_param_binding_sets,
-    merge_equivalent_param_binding_sets,
-    parameter_binding_sets,
-)
-from fervis.lookup.source_binding.param_values import fact_value_parameter_projection
 from fervis.lookup.source_binding import (
     FactRealization,
     SetRealization,
     SourceBindingPlan,
     SourceMechanicKind,
     SubjectSurfaceReview,
-    SubjectChoiceReview,
     VerifiedSourceStrategy,
 )
 
-from .inputs import semantic_compiler_inputs, source_choice_literal
+from .inputs import semantic_compiler_inputs
+from fervis.lookup.available_sources import source_choice_literal
 from .model import FactCompilationResult
 
 
@@ -172,7 +163,9 @@ class _ProgramBuilder:
     attached_values: dict[tuple[str, str], str] = field(default_factory=dict)
     qualified_branches: dict[str, str] = field(default_factory=dict)
     normalized_relations: dict[str, str] = field(default_factory=dict)
-    global_relational_values: dict[FactLocalRef, RelationalValue] = field(default_factory=dict)
+    global_relational_values: dict[FactLocalRef, RelationalValue] = field(
+        default_factory=dict
+    )
 
 
 def compile_verified_source_strategy(
@@ -196,7 +189,9 @@ def compile_verified_source_strategy(
         {},
     )
     builder.occurrence_scopes = {
-        branch.branch_id: occurrence_scope(verified.request, verified.binding_plan, branch.branch_id)
+        branch.branch_id: occurrence_scope(
+            verified.request, verified.binding_plan, branch.branch_id
+        )
         for branch in verified.request.strategy.branches
     }
     _compile_requested_fact(builder)
@@ -217,11 +212,13 @@ def compile_verified_source_strategy(
         ),
     )
     program = prune_unused_program_nodes(program)
+    from fervis.lookup.source_reads.access_compilation import expand_read_access
+    program = expand_read_access(program,verified.request.source_catalog.read_access)
     program = replace(
         program,
         compatibility=build_program_compatibility(
             program,
-            row_sources=RowSourceCatalog(verified.request.source_catalog.sources),
+            row_sources=RowSourceCatalog(verified.request.source_catalog.execution_sources),
         ),
     )
     return FactCompilationResult(
@@ -277,7 +274,7 @@ def compile_verified_source_strategies(
             tuple(
                 source
                 for verified in verified_strategies
-                for source in verified.request.source_catalog.sources
+                for source in verified.request.source_catalog.execution_sources
             ),
             key=lambda item: item.id,
             label="row source",
@@ -375,7 +372,8 @@ def _needs_qualified_row_union(index: RequestedFactSemanticIndex) -> bool:
     # Global quantifiers consume each qualifying branch through idempotent
     # Boolean folds. They do not require a row-identity union first.
     return not isinstance(index.result_grain, Singleton) or any(
-        isinstance(node, Aggregate) and not isinstance(index.evaluation_domain_by_ref[ref], RowDomain)
+        isinstance(node, Aggregate)
+        and not isinstance(index.evaluation_domain_by_ref[ref], RowDomain)
         for ref, node in index.expression_by_ref.items()
     )
 
@@ -510,7 +508,9 @@ def _compile_branch(
         )
     )
     builder.qualified_branches[branch_id] = current
-    if len(builder.verified.request.strategy.branches) > 1 and _needs_qualified_row_union(index):
+    if len(
+        builder.verified.request.strategy.branches
+    ) > 1 and _needs_qualified_row_union(index):
         current = _normalize_branch_fields(
             builder, branch_id=branch_id, input_relation=current
         )
@@ -780,13 +780,39 @@ def _compile_source_relation(
         for key in builder.grain_by_relation[current]
     ) or (row_key,)
     current = scoped_relation
-    return _compile_returned_subject_filters(
-        builder,
-        branch_id=branch_id,
-        source_ref=source_ref,
-        input_relation=current,
-        occurrence_ref=occurrence_ref,
-    )
+    from fervis.lookup.source_binding.membership import map_membership
+    occurrence = next(item for item in builder.occurrence_scopes[branch_id].occurrences if item.id == occurrence_ref)
+    for set_ref in occurrence.set_refs:
+        realization = next(item for item in plan.set_bindings[set_ref] if item.branch_id == branch_id)
+        if realization.membership is None:
+            continue
+        if len(occurrence.set_refs) != 1:
+            raise ValueError("restricted set membership requires an independent occurrence")
+        def membership_binary(node, left, right):
+            if node.operator is not ExpressionBinaryOperator.WITHIN:
+                return BinaryExpression(node.operator, left, right)
+            from fervis.lookup.answer_program.values import ParameterRef
+            if not isinstance(node.right, ParameterRef):
+                raise ValueError("within requires a certified temporal value")
+            scope_value = next(item.typed_value.payload for item in builder.verified.request.canonical_values
+                               if item.canonical_value_id == node.right.parameter_id)
+            if not isinstance(scope_value, TimeValuePayload):
+                raise ValueError("within requires a certified temporal scope")
+            return _compile_temporal_scope(point=left, temporal_value=scope_value,
+                lower_bound=builder.inputs.expression_for_value(node.right.parameter_id, component="start"),
+                upper_bound=builder.inputs.expression_for_value(node.right.parameter_id, component="end"),
+                constant_id=f"membership_day.{set_ref}.{node.right.parameter_id}")
+        condition = map_membership(realization.membership,
+            binary=membership_binary,
+            field=lambda ref: FieldRef(_execution_field_id(builder, source_ref, ref.field_id, occurrence_ref=occurrence_ref)),
+            value=lambda ref: builder.inputs.expression_for_value(ref.parameter_id))
+        output = f"{scoped_relation}.members"
+        builder.operations.append(Operation(id=f"{output}.filter", output_relation=output,
+            spec=FilterSpec(current, condition, proof_refs=realization.contract_evidence_refs)))
+        builder.fields_by_relation[output] = builder.fields_by_relation[current]
+        builder.grain_by_relation[output] = builder.grain_by_relation[current]
+        current = output
+    return current
 
 
 def _source_join_mode(
@@ -971,77 +997,6 @@ def _union_relations(
     return output_relation
 
 
-def _compile_returned_subject_filters(
-    builder: _ProgramBuilder,
-    *,
-    branch_id: str,
-    source_ref: str,
-    input_relation: str,
-    occurrence_ref: str,
-) -> str:
-    reviews = tuple(
-        review
-        for realization in builder.verified.binding_plan.subject_binding.branch_realizations
-        if realization.branch_id == branch_id
-        for review in realization.surface_reviews
-        for surface in (
-            builder.verified.request.source_catalog.choice_surface(review.surface_ref),
-        )
-        if surface.source_ref == source_ref
-        and (review.owner_set_ref is None or builder.occurrence_scopes[branch_id].for_set(review.owner_set_ref).id == occurrence_ref)
-        and surface.kind is SourceChoiceSurfaceKind.RETURNED_FIELD
-        and review.mechanics
-    )
-    if not reviews:
-        return input_relation
-    conditions = tuple(
-        _returned_choice_condition(
-            builder,
-            review=replace(
-                review,
-                included_choice_refs=tuple(
-                    choice.choice_ref
-                    for choice in review.choice_reviews
-                    if _choice_included_for_occurrence(
-                        builder,
-                        choice,
-                        source_ref=source_ref,
-                        branch_id=branch_id,
-                        occurrence_ref=occurrence_ref,
-                    )
-                ),
-            ),
-            occurrence_ref=occurrence_ref,
-        )
-        for review in reviews
-    )
-    condition = _combine_boolean_expressions(
-        conditions,
-        operator=ExpressionBinaryOperator.AND,
-    )
-    from fervis.lookup.answer_program.operations import FilterSpec
-
-    output_relation = f"{input_relation}.subject"
-    builder.operations.append(
-        Operation(
-            id=f"{output_relation}.filter",
-            spec=FilterSpec(
-                input_relation=input_relation,
-                condition=condition,
-                proof_refs=builder.verified.evidence_refs,
-            ),
-            output_relation=output_relation,
-        )
-    )
-    builder.fields_by_relation[output_relation] = builder.fields_by_relation[
-        input_relation
-    ]
-    builder.grain_by_relation[output_relation] = builder.grain_by_relation[
-        input_relation
-    ]
-    return output_relation
-
-
 def _returned_choice_condition(
     builder: _ProgramBuilder,
     *,
@@ -1082,8 +1037,13 @@ def _returned_choice_condition(
     )
     if not comparisons:
         constant_id = f"membership.empty:{review.surface_ref}"
-        return ConstantRef(constant_id, builder.verified.request.source_catalog.contract_snapshot.ref,
-            FactValue.literal(id=constant_id, literal_type=LiteralType.BOOLEAN, value="false"))
+        return ConstantRef(
+            constant_id,
+            builder.verified.request.source_catalog.contract_snapshot.ref,
+            FactValue.literal(
+                id=constant_id, literal_type=LiteralType.BOOLEAN, value="false"
+            ),
+        )
     return _combine_boolean_expressions(
         comparisons,
         operator=ExpressionBinaryOperator.OR,
@@ -1113,8 +1073,14 @@ def _relation_fields(
     source = builder.verified.request.source_catalog.source(source_ref)
     roles: dict[str, set[FieldBindingRole]] = {
         field_ref: {FieldBindingRole.IDENTITY}
-        for field_ref in _source_grain_field_refs(source)
+        for field_ref in source.stable_grain_field_refs
     }
+    for param in source.params:
+        population = builder.verified.request.parameter_population(source_ref, param.param_ref)
+        if population is not None and population.field_path:
+            for field in source.fields:
+                if population.field_path in (field.path, field.response_path, field.field_ref):
+                    roles.setdefault(field.field_ref, set()).add(FieldBindingRole.PREDICATE)
     for set_realizations in plan.set_bindings.values():
         for set_realization in set_realizations:
             if (
@@ -1153,6 +1119,12 @@ def _relation_fields(
                 roles.setdefault(source.field(field_id).field_ref, set()).add(
                     FieldBindingRole.PREDICATE
                 )
+    from fervis.lookup.answer_program.expressions import expression_references
+    for set_members in plan.set_bindings.values():
+        for membership_realization in set_members:
+            if membership_realization.branch_id == branch_id and membership_realization.source_ref == source_ref and membership_realization.membership is not None:
+                for ref in expression_references(membership_realization.membership).fields:
+                    roles.setdefault(source.field(ref.field_id).field_ref, set()).add(FieldBindingRole.PREDICATE)
     for subject_realization in plan.subject_binding.branch_realizations:
         if subject_realization.branch_id != branch_id:
             continue
@@ -1179,20 +1151,8 @@ def _relation_fields(
     )
 
 
-def _source_grain_field_refs(source: RowSource) -> tuple[str, ...]:
-    stable_keys = tuple(key for key in source.candidate_keys if key.stable)
-    key = next((key for key in stable_keys if key.primary), None)
-    if key is None and stable_keys:
-        key = stable_keys[0]
-    if key is None:
-        return ()
-    return tuple(
-        source.field(component.field_id).field_ref for component in key.components
-    )
-
-
 def _source_grain_field_ids(source: RowSource) -> tuple[str, ...]:
-    grain_refs = set(_source_grain_field_refs(source))
+    grain_refs = set(source.stable_grain_field_refs)
     return tuple(field.id for field in source.fields if field.field_ref in grain_refs)
 
 
@@ -1213,132 +1173,25 @@ def _owner_applies_to_occurrence(
     occurrence_ref: str,
 ) -> bool:
     return builder.occurrence_scopes[branch_id].owner_applies(
-        builder.verified.request, owner_ref, source_ref=source_ref, occurrence_ref=occurrence_ref,
+        builder.verified.request,
+        owner_ref,
+        source_ref=source_ref,
+        occurrence_ref=occurrence_ref,
     )
 
 
-def _choice_included_for_occurrence(
-    builder: _ProgramBuilder,
-    choice: SubjectChoiceReview,
-    *,
-    source_ref: str,
-    branch_id: str,
-    occurrence_ref: str,
-) -> bool:
-    return builder.occurrence_scopes[branch_id].choice_included(
-        builder.verified.request, choice, source_ref=source_ref, occurrence_ref=occurrence_ref,
-    )
+def _source_parameter_binding_sets(builder, *, branch_id, source_ref, occurrence_ref):
+    from fervis.lookup.source_binding.invocation_bindings import invocation_binding_sets
 
-
-def _source_parameter_binding_sets(
-    builder: _ProgramBuilder,
-    *,
-    branch_id: str,
-    source_ref: str,
-    occurrence_ref: str,
-) -> ParamBindingSetAlternatives:
-    source = builder.verified.request.source_catalog.source(source_ref)
-    groups_by_target: dict[str, list[tuple[str, ParamBindingSetAlternatives]]] = {}
     scope = builder.occurrence_scopes[branch_id]
     occurrence = next(item for item in scope.occurrences if item.id == occurrence_ref)
-    for application in scope.applications_for(
-        builder.verified.request, builder.verified.binding_plan,
-        branch_id=branch_id, occurrence=occurrence,
-    ):
-        for target in application.target_applications:
-            param = next(
-                item for item in source.params if item.param_ref == target.target_ref
-            )
-            value = _bound_fact_value(builder, target.value_ref)
-            projected = fact_value_parameter_projection(
-                value,
-                projection=target.projection,
-                component_id=target.component_ref,
-                type_name=param.type.value,
-                choices=tuple(str(item) for item in param.choices),
-            )
-            groups_by_target.setdefault(target.target_ref, []).append(
-                (
-                    application.application_ref,
-                    parameter_binding_sets(
-                        param_id=param.id,
-                        value=projected,
-                        parameter_type=param.type.value,
-                        origin_kind=(
-                            RelationInputOrigin.QUESTION_INPUT
-                            if any(
-                                item.canonical_value_id == target.value_ref
-                                for item in builder.verified.request.canonical_values
-                            )
-                            else RelationInputOrigin.PLAN_CONTROL
-                        ),
-                        value_id=target.value_ref,
-                        value_component=_projection_component(target),
-                        proof_refs=(application.application_ref, target.target_ref),
-                    ),
-                )
-            )
-    independent_groups: list[ParamBindingSetAlternatives] = []
-    mechanics = _source_mechanics(
-        builder,
+    return invocation_binding_sets(
+        request=builder.verified.request,
+        plan=builder.verified.binding_plan,
+        scope=scope,
+        occurrence=occurrence,
         branch_id=branch_id,
-        source_ref=source_ref,
     )
-    for target_ref, entries in groups_by_target.items():
-        distinct_entries: list[tuple[set[str], ParamBindingSetAlternatives]] = []
-        for application_ref, group in entries:
-            matching_index = next(
-                (
-                    index
-                    for index, item in enumerate(distinct_entries)
-                    if equivalent_param_binding_sets(item[1], group)
-                ),
-                None,
-            )
-            if matching_index is None:
-                distinct_entries.append(({application_ref}, group))
-                continue
-            application_refs_for_group, existing_group = distinct_entries[
-                matching_index
-            ]
-            application_refs_for_group.add(application_ref)
-            distinct_entries[matching_index] = (
-                application_refs_for_group,
-                merge_equivalent_param_binding_sets(existing_group, group),
-            )
-        owned_application_refs: set[str] = set()
-        constraints: list[ParamBindingSetAlternatives] = []
-        for mechanic in mechanics:
-            owned = tuple(
-                group
-                for application_refs, group in distinct_entries
-                if application_refs & set(mechanic.application_refs)
-            )
-            if not owned:
-                continue
-            owned_application_refs.update(mechanic.application_refs)
-            constraints.append(alternate_param_binding_sets(owned))
-        constraints.extend(
-            group
-            for application_refs, group in distinct_entries
-            if not application_refs & owned_application_refs
-        )
-        intersection = intersect_param_binding_sets(constraints)
-        if not intersection:
-            raise ValueError(f"invocation constraints conflict on target {target_ref}")
-        independent_groups.append(intersection)
-    return combine_param_binding_sets(independent_groups)
-
-
-def _bound_fact_value(builder: _ProgramBuilder, value_ref: str) -> FactValue:
-    matches = tuple(
-        binding.value
-        for binding in builder.inputs.program_inputs.bindings.bindings
-        if binding.value.id == value_ref
-    )
-    if len(matches) != 1:
-        raise ValueError(f"invocation value {value_ref} lacks one typed binding")
-    return matches[0]
 
 
 def _source_mechanic_proof_refs(
@@ -1403,20 +1256,6 @@ def _source_mechanics(
         for mechanic in review.mechanics
         if mechanic.source_ref == source_ref
     )
-
-
-def _projection_component(target) -> str:
-    if target.projection is ValueProjectionKind.WHOLE_VALUE:
-        return "value"
-    if target.projection is ValueProjectionKind.TEMPORAL_START:
-        return "start"
-    if target.projection is ValueProjectionKind.TEMPORAL_END:
-        return "end"
-    if target.projection is ValueProjectionKind.IDENTITY_COMPONENT:
-        if target.component_ref is None:
-            raise ValueError("identity application lacks a key component")
-        return f"key_component:{target.component_ref}"
-    raise TypeError("unsupported invocation value projection")
 
 
 def _returned_atom_refs(plan: SourceBindingPlan, *, branch_id: str) -> frozenset[str]:
@@ -1736,20 +1575,24 @@ def _filter_aggregate_input(
     return output
 
 
-def _declare_independent_population_guarantee(builder: _ProgramBuilder, relation_id: str) -> None:
+def _declare_independent_population_guarantee(
+    builder: _ProgramBuilder, relation_id: str
+) -> None:
     """Certify membership without claiming an unrelated subject's qualification."""
     if any(item.relation_id == relation_id for item in builder.relation_guarantees):
         return
     index = builder.verified.request.index
-    builder.relation_guarantees.append(RelationGuaranteeDeclaration(
-        relation_id=relation_id,
-        qualification=QualificationGuarantee(
-            requested_fact_id=index.requested_fact_id,
-            formula=qualification_dnf(index.requested_fact_id, (frozenset(),)),
-            atom_proofs=(),
-        ),
-        subject=builder.verified.subject_guarantee,
-    ))
+    builder.relation_guarantees.append(
+        RelationGuaranteeDeclaration(
+            relation_id=relation_id,
+            qualification=QualificationGuarantee(
+                requested_fact_id=index.requested_fact_id,
+                formula=qualification_dnf(index.requested_fact_id, (frozenset(),)),
+                atom_proofs=(),
+            ),
+            subject=builder.verified.subject_guarantee,
+        )
+    )
 
 
 def _aggregate_input_relation(
@@ -1764,7 +1607,9 @@ def _aggregate_input_relation(
         if aggregate.filter_ref is None
         else (_semantic_ref(index, aggregate.filter_ref),)
     )
-    sets = set().union(*(value_set_dependencies(builder.verified.request.index, ref) for ref in refs))
+    sets = set().union(
+        *(value_set_dependencies(builder.verified.request.index, ref) for ref in refs)
+    )
     fields = {item.field_id for item in builder.fields_by_relation[input_relation]}
     representative = _representative_branch(builder)
     required_keys = {
@@ -2224,7 +2069,6 @@ def _compile_node(
     )
 
 
-
 def _connected_occurrences(
     builder: _ProgramBuilder,
     branch_id: str,
@@ -2350,22 +2194,30 @@ def _attach_relational_values(
 
 
 def _quantifier_aggregation(node: Quantify | RelatedRow) -> AggregationFunction:
-    return (AggregationFunction.BOOL_ALL
-            if isinstance(node, Quantify) and node.quantifier is Quantifier.FORALL
-            else AggregationFunction.BOOL_ANY)
+    return (
+        AggregationFunction.BOOL_ALL
+        if isinstance(node, Quantify) and node.quantifier is Quantifier.FORALL
+        else AggregationFunction.BOOL_ANY
+    )
 
 
-def _lower_global_quantifier(builder: _ProgramBuilder, ref: FactLocalRef, node: Quantify) -> RelationalValue:
+def _lower_global_quantifier(
+    builder: _ProgramBuilder, ref: FactLocalRef, node: Quantify
+) -> RelationalValue:
     """Fold Boolean observations over all qualifying branches, including empty ones."""
     index = builder.verified.request.index
     base = f"{index.requested_fact_id}.{ref.local_id}.global"
     condition_field, presence_field = f"{base}.condition", f"{base}.present"
     over_ref = index.fact_local_ref_by_local_id[node.over_set_ref].token
-    associations = tuple(index.fact_local_ref_by_local_id[item].token for item in node.association_refs)
+    associations = tuple(
+        index.fact_local_ref_by_local_id[item].token for item in node.association_refs
+    )
     sets = {over_ref}
     for association in associations:
         sets.update(value_set_dependencies(index, FactLocalRef.from_token(association)))
-    condition_ref = None if node.condition_ref is None else _semantic_ref(index, node.condition_ref)
+    condition_ref = (
+        None if node.condition_ref is None else _semantic_ref(index, node.condition_ref)
+    )
     if condition_ref is not None:
         sets.update(value_set_dependencies(index, condition_ref))
     projections = []
@@ -2373,26 +2225,61 @@ def _lower_global_quantifier(builder: _ProgramBuilder, ref: FactLocalRef, node: 
         root = builder.qualified_branches[branch.branch_id]
         root_fields = {item.field_id for item in builder.fields_by_relation[root]}
         scope = builder.occurrence_scopes[branch.branch_id]
-        occurrences = _connected_occurrences(builder, branch.branch_id, sets, association_refs=associations or None)
-        initial = tuple(item.id for item in scope.occurrences if item.id in occurrences and all(
-            set(_set_scope_keys(builder, set_ref, branch.branch_id)) <= root_fields for set_ref in item.set_refs
-        ))
-        domain = _compile_relational_scope(builder, branch_id=branch.branch_id, occurrence_refs=occurrences,
-            association_refs=associations or None, label=f"{ref.local_id}.qualified_domain",
-            initial_relation=root if initial else None, initial_occurrences=initial)
-        presence = _combine_boolean_expressions(tuple(
-            UnaryExpression(ExpressionUnaryOperator.NOT_NULL, FieldRef(key))
-            for key in _set_scope_keys(builder, over_ref, branch.branch_id)
-        ), operator=ExpressionBinaryOperator.AND)
+        occurrences = _connected_occurrences(
+            builder, branch.branch_id, sets, association_refs=associations or None
+        )
+        initial = tuple(
+            item.id
+            for item in scope.occurrences
+            if item.id in occurrences
+            and all(
+                set(_set_scope_keys(builder, set_ref, branch.branch_id)) <= root_fields
+                for set_ref in item.set_refs
+            )
+        )
+        domain = _compile_relational_scope(
+            builder,
+            branch_id=branch.branch_id,
+            occurrence_refs=occurrences,
+            association_refs=associations or None,
+            label=f"{ref.local_id}.qualified_domain",
+            initial_relation=root if initial else None,
+            initial_occurrences=initial,
+        )
+        presence = _combine_boolean_expressions(
+            tuple(
+                UnaryExpression(ExpressionUnaryOperator.NOT_NULL, FieldRef(key))
+                for key in _set_scope_keys(builder, over_ref, branch.branch_id)
+            ),
+            operator=ExpressionBinaryOperator.AND,
+        )
         if condition_ref is None:
             condition = presence
         else:
-            domain = _attach_relational_values(builder, domain, condition_ref, branch_id=branch.branch_id)
-            condition = _compile_scoped_condition(builder, condition_ref, branch_id=branch.branch_id,
-                owner_expression_ref=ref.token, use_site=BooleanRequirementUseSite.QUANTIFIER_CONDITION)
+            domain = _attach_relational_values(
+                builder, domain, condition_ref, branch_id=branch.branch_id
+            )
+            condition = _compile_scoped_condition(
+                builder,
+                condition_ref,
+                branch_id=branch.branch_id,
+                owner_expression_ref=ref.token,
+                use_site=BooleanRequirementUseSite.QUANTIFIER_CONDITION,
+            )
         projected = f"{base}.{branch.branch_id}.observations"
-        builder.operations.append(Operation(id=f"{projected}.operation", output_relation=projected,
-            spec=ProjectSpec(domain, (NamedExpression(condition_field, condition), NamedExpression(presence_field, presence)))))
+        builder.operations.append(
+            Operation(
+                id=f"{projected}.operation",
+                output_relation=projected,
+                spec=ProjectSpec(
+                    domain,
+                    (
+                        NamedExpression(condition_field, condition),
+                        NamedExpression(presence_field, presence),
+                    ),
+                ),
+            )
+        )
         builder.fields_by_relation[projected] = (
             RelationField(condition_field, (FieldBindingRole.PREDICATE,)),
             RelationField(presence_field, (FieldBindingRole.PREDICATE,)),
@@ -2405,22 +2292,55 @@ def _lower_global_quantifier(builder: _ProgramBuilder, ref: FactLocalRef, node: 
     if len(projections) > 1:
         domain = f"{base}.observations"
         # ANY and ALL are idempotent: overlapping branches do not need row deduplication.
-        builder.operations.append(Operation(id=f"{domain}.operation", output_relation=domain,
-            spec=UnionSpec(tuple(projections), (condition_field, presence_field))))
+        builder.operations.append(
+            Operation(
+                id=f"{domain}.operation",
+                output_relation=domain,
+                spec=UnionSpec(tuple(projections), (condition_field, presence_field)),
+            )
+        )
         builder.fields_by_relation[domain] = builder.fields_by_relation[projections[0]]
         builder.grain_by_relation[domain] = ()
     quantified = f"{base}.quantified"
     result_field = f"{base}.truth"
     operation_id = f"{quantified}.operation"
     function = _quantifier_aggregation(node)
-    builder.operations.append(Operation(id=operation_id, output_relation=quantified,
-        spec=AggregateSpec(domain, (), (AggregationSpec(function, result_field, condition_field, filter=FieldRef(presence_field)),))))
-    builder.fields_by_relation[quantified] = (RelationField(result_field, (FieldBindingRole.OUTPUT,)),)
+    builder.operations.append(
+        Operation(
+            id=operation_id,
+            output_relation=quantified,
+            spec=AggregateSpec(
+                domain,
+                (),
+                (
+                    AggregationSpec(
+                        function,
+                        result_field,
+                        condition_field,
+                        filter=FieldRef(presence_field),
+                    ),
+                ),
+            ),
+        )
+    )
+    builder.fields_by_relation[quantified] = (
+        RelationField(result_field, (FieldBindingRole.OUTPUT,)),
+    )
     builder.grain_by_relation[quantified] = ()
     if node.quantifier is Quantifier.NOT_EXISTS:
         scalar = f"{base}.not_exists"
-        builder.operations.append(Operation(id=scalar, spec=ComputeSpec(
-            UnaryExpression(ExpressionUnaryOperator.NOT, NodeOutputRef(operation_id, result_field)), scalar)))
+        builder.operations.append(
+            Operation(
+                id=scalar,
+                spec=ComputeSpec(
+                    UnaryExpression(
+                        ExpressionUnaryOperator.NOT,
+                        NodeOutputRef(operation_id, result_field),
+                    ),
+                    scalar,
+                ),
+            )
+        )
         operation_id = result_field = scalar
     return RelationalValue(quantified, None, (), result_field, operation_id)
 
@@ -2430,11 +2350,16 @@ def _lower_relational_value(
 ) -> RelationalValue:
     index = builder.verified.request.index
     node = index.expression_by_ref[ref]
-    if (isinstance(node, Quantify)
-            and not relational_free_sets(index, node)
-            and len(builder.qualified_branches) == len(builder.verified.request.strategy.branches)):
+    if (
+        isinstance(node, Quantify)
+        and not relational_free_sets(index, node)
+        and len(builder.qualified_branches)
+        == len(builder.verified.request.strategy.branches)
+    ):
         if ref not in builder.global_relational_values:
-            builder.global_relational_values[ref] = _lower_global_quantifier(builder, ref, node)
+            builder.global_relational_values[ref] = _lower_global_quantifier(
+                builder, ref, node
+            )
         return builder.global_relational_values[ref]
     cached = builder.relational_values.get((branch_id, ref))
     if cached is not None:
@@ -2459,11 +2384,15 @@ def _lower_relational_value(
     )
     for association in associations:
         sets.update(
-            value_set_dependencies(builder.verified.request.index, FactLocalRef.from_token(association))
+            value_set_dependencies(
+                builder.verified.request.index, FactLocalRef.from_token(association)
+            )
         )
     if node.condition_ref is not None:
         sets.update(
-            value_set_dependencies(builder.verified.request.index, _semantic_ref(index, node.condition_ref))
+            value_set_dependencies(
+                builder.verified.request.index, _semantic_ref(index, node.condition_ref)
+            )
         )
     occurrence_refs = _connected_occurrences(
         builder, branch_id, sets, association_refs=associations or None
@@ -2615,7 +2544,9 @@ def _lower_correlated_aggregate(
     sets = {outer, *value_set_dependencies(builder.verified.request.index, argument)}
     if node.filter_ref is not None:
         sets.update(
-            value_set_dependencies(builder.verified.request.index, _semantic_ref(index, node.filter_ref))
+            value_set_dependencies(
+                builder.verified.request.index, _semantic_ref(index, node.filter_ref)
+            )
         )
     occurrences = _connected_occurrences(builder, branch_id, sets)
     first = builder.occurrence_scopes[branch_id].for_set(outer).id
@@ -2803,7 +2734,9 @@ def _lower_coverage_value(
     sets = {candidate_ref, required_ref, observation_ref}
     for association in associations:
         sets.update(
-            value_set_dependencies(builder.verified.request.index, FactLocalRef.from_token(association))
+            value_set_dependencies(
+                builder.verified.request.index, FactLocalRef.from_token(association)
+            )
         )
     occurrences = _connected_occurrences(
         builder, branch_id, sets, association_refs=associations
@@ -3041,35 +2974,21 @@ def _compile_comparison(
     )
     if not isinstance(temporal_value, TimeValuePayload):
         raise ValueError("within requires a certified temporal scope")
-    point = value(node.left_ref)
+    return _compile_temporal_scope(
+        point=value(node.left_ref), temporal_value=temporal_value,
+        lower_bound=builder.inputs.expression_for_question_input(node.right_ref, component="start"),
+        upper_bound=builder.inputs.expression_for_question_input(node.right_ref, component="end"),
+        constant_id=f"within_day.{node.id}",
+    )
+
+
+def _compile_temporal_scope(*, point, temporal_value, lower_bound, upper_bound, constant_id):
     if temporal_value.granularity != "hour":
-        point = _temporal_bucket_expression(
-            point,
-            grain="day",
-            constant_id=f"within_day.{node.id}",
-            timezone_ref=temporal_value.timezone_ref,
-        )
-    lower_bound = builder.inputs.expression_for_question_input(
-        node.right_ref,
-        component="start",
-    )
-    upper_bound = builder.inputs.expression_for_question_input(
-        node.right_ref,
-        component="end",
-    )
-    return BinaryExpression(
-        ExpressionBinaryOperator.AND,
-        BinaryExpression(
-            ExpressionBinaryOperator.GTE,
-            point,
-            lower_bound,
-        ),
-        BinaryExpression(
-            ExpressionBinaryOperator.LTE,
-            point,
-            upper_bound,
-        ),
-    )
+        point = _temporal_bucket_expression(point, grain="day", constant_id=constant_id,
+            timezone_ref=temporal_value.timezone_ref)
+    return BinaryExpression(ExpressionBinaryOperator.AND,
+        BinaryExpression(ExpressionBinaryOperator.GTE, point, lower_bound),
+        BinaryExpression(ExpressionBinaryOperator.LTE, point, upper_bound))
 
 
 def _occurrence_row_key(occurrence_ref: str) -> str:
@@ -3432,7 +3351,11 @@ def _selection(builder: _ProgramBuilder, selection):
         )
         if not isinstance(expression, ParameterRef):
             raise ValueError("selection limit requires a parameter")
-        return AtPosition(position=expression) if isinstance(selection, PositionWithTies) else Take(limit=expression)
+        return (
+            AtPosition(position=expression)
+            if isinstance(selection, PositionWithTies)
+            else Take(limit=expression)
+        )
     return KeepAll()
 
 

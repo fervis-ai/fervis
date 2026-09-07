@@ -188,7 +188,7 @@ def _resolver_mechanics_schema(
             },
         }
     )
-    if not allow_positive or not positive_allowed:
+    if not allow_positive:
         return negative
     positive = output.ResolverMechanicsOutput.schema(
         {
@@ -211,7 +211,17 @@ def _resolver_mechanics_schema(
             },
         }
     )
-    return {"oneOf": [negative, positive]}
+    variants=[negative]
+    if positive_allowed:
+        variants.append(positive)
+    if fields and surface.read_access.can_enumerate(surface.source):
+        variants.append(output.ResolverMechanicsOutput.schema({
+            "decision":{"enum":[LookupTextResolutionDecision.ENUMERATE_COMPLETE_SOURCE.value]},
+            "lookup_request_params":{"type":"array","items":{"type":"string"},"maxItems":0},
+            "returned_identity_verification_fields":{"type":"array","items":{"enum":[field.path for field in fields]},
+                                                      "minItems":1,"maxItems":len(fields),"uniqueItems":True},
+        }))
+    return {"oneOf":variants} if len(variants)>1 else negative
 
 
 def _resource_type_review_schema(
@@ -229,6 +239,7 @@ def _resource_type_review_schema(
                         resolver_option_surface_from_catalog(
                             request.resolver_catalog,
                             option,
+                            read_access=request.read_access,
                         ),
                         operands=operands,
                         allow_positive=allow_positive,

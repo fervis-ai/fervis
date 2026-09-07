@@ -30,6 +30,8 @@ _MODEL_TURN_STEP_KEYS = {
     ModelTurnPurpose.GROUNDING: RunStepKey.GROUNDING,
     ModelTurnPurpose.READ_ELIGIBILITY: RunStepKey.READ_ELIGIBILITY,
     ModelTurnPurpose.PLAN_SELECTION: RunStepKey.PLAN_SELECTION,
+    ModelTurnPurpose.SOURCE_ACCESS: RunStepKey.SOURCE_ACCESS,
+    ModelTurnPurpose.SOURCE_POPULATION: RunStepKey.SOURCE_POPULATION,
     ModelTurnPurpose.SOURCE_REALIZATION: RunStepKey.SOURCE_REALIZATION,
     ModelTurnPurpose.SOURCE_BINDING: RunStepKey.SOURCE_BINDING,
     ModelTurnPurpose.ANSWER_SYNTHESIS: RunStepKey.ANSWER_SYNTHESIS,
@@ -45,6 +47,8 @@ _DETERMINISTIC_STEP_SEQUENCE = {
 
 
 _INSPECTION_SEQUENCES = {
+    SourceInspectionPhase.CONTINUATION_IDENTITY: 8650,
+    SourceInspectionPhase.IDENTITY: 8750,
     SourceInspectionPhase.CONTINUATION: 8700,
     SourceInspectionPhase.SEMANTIC: 8800,
     SourceInspectionPhase.EXECUTION: 8850,

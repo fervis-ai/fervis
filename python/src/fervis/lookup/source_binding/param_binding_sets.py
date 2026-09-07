@@ -7,10 +7,6 @@ from dataclasses import dataclass, replace
 
 from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.answer_program.expressions import Expression
-from fervis.lookup.relation_catalog.parameter_values import (
-    CatalogParameterValue,
-    CatalogScalarParameterValue,
-)
 from fervis.types.enums import StrEnum
 
 
@@ -50,23 +46,6 @@ class ParameterBindingCandidate:
 
 ParamBindingSet = tuple[ParameterBindingCandidate, ...]
 ParamBindingSetAlternatives = tuple[ParamBindingSet, ...]
-
-
-def finite_choice_parameter_is_omittable(
-    *,
-    required: bool,
-    default: CatalogParameterValue,
-    choices: tuple[CatalogScalarParameterValue, ...],
-    included_values: tuple[CatalogScalarParameterValue, ...],
-) -> bool:
-    """Whether omission has exactly the selected finite-choice population."""
-
-    if required:
-        return False
-    if isinstance(default, (tuple, dict)):
-        raise ValueError("finite-choice parameter default must be scalar")
-    omission_values = (default,) if default is not None else choices
-    return set(included_values) == set(omission_values)
 
 
 def parameter_binding_sets(
@@ -261,7 +240,6 @@ __all__ = [
     "coalesce_equivalent_param_binding_sets",
     "combine_param_binding_sets",
     "equivalent_param_binding_sets",
-    "finite_choice_parameter_is_omittable",
     "intersect_param_binding_sets",
     "merge_equivalent_param_binding_sets",
     "parameter_binding_sets",

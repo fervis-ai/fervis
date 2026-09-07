@@ -1,6 +1,5 @@
 """Outcome contracts for the semantic downstream responsibility cut."""
 
-
 from jsonschema import ValidationError, validate
 import pytest
 
@@ -80,7 +79,9 @@ def test_read_eligibility_retains_evidence_without_authoring_realizations() -> N
     result = parse_semantic_read_eligibility(payload, request=request)
 
     assessment = next(
-        item for item in result.read_assessments if item.candidate_ref == candidate.candidate_ref
+        item
+        for item in result.read_assessments
+        if item.candidate_ref == candidate.candidate_ref
     )
     assert assessment.requested_fact_id == index.requested_fact_id
     assert assessment.relevant_field_refs == (field_ref,)
@@ -107,7 +108,7 @@ def test_downstream_requirements_project_a_direct_boolean_fact_predicate() -> No
                 origin,
             ),
         ),
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref="f1",
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "e1", origin),),
@@ -148,9 +149,7 @@ def test_downstream_requirements_project_a_direct_boolean_fact_predicate() -> No
 def test_downstream_requirement_preserves_comparison_operator_and_operands() -> None:
     [index] = _semantic_contract().semantic_indexes
 
-    [requirement] = semantic_requirements_prompt_payload(index)[
-        "boolean_requirements"
-    ]
+    [requirement] = semantic_requirements_prompt_payload(index)["boolean_requirements"]
 
     assert requirement["condition"] == {
         "operator": "equals",

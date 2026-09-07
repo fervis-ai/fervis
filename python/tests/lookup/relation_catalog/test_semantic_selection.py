@@ -46,7 +46,7 @@ def test_semantic_catalog_selection_uses_requirement_resource_matches() -> None:
                 origin=origin,
             ),
         ),
-        subject=Subject("event_set", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("event_set", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "event_count", origin),),
@@ -106,7 +106,7 @@ def test_semantic_catalog_selection_preserves_a_directly_callable_exact_read() -
                 origin=origin,
             ),
         ),
-        subject=Subject("event_set", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("event_set", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "event_count", origin),),
@@ -186,9 +186,7 @@ def test_semantic_catalog_selection_round_robins_requirements_not_resource_names
                 origin=origin,
             ),
         ),
-        subject=Subject(
-            "measurements", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE
-        ),
+        subject=Subject("measurements", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=("group_name",),
         outputs=(
@@ -270,7 +268,7 @@ def test_semantic_catalog_selection_requires_exact_requirement_coverage() -> Non
                 origin=origin,
             ),
         ),
-        subject=Subject("event_set", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("event_set", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "event_count", origin),),

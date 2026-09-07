@@ -25,8 +25,6 @@ class ReturnedFactRealizationOutput(ProviderOutput):
 class AssociationRealizationOutput(ProviderOutput):
     branch_id: str
     mapping_basis: str
-    from_rows_ref: str
-    to_rows_ref: str
     realization_ref: str
     reference_from_set_ref: str | None = None
 
@@ -86,7 +84,9 @@ class SemanticSourceBindingOutput(ProviderOutput):
         str,
         dict[str, FiniteChoiceApplicationOutput | None],
     ]
-    choice_requirement_applications: dict[str, dict[str, dict[str, ChoiceRequirementApplicationOutput]]]
+    choice_requirement_applications: dict[
+        str, dict[str, dict[str, ChoiceRequirementApplicationOutput]]
+    ]
 
 
 __all__ = tuple(name for name in globals() if not name.startswith("_"))

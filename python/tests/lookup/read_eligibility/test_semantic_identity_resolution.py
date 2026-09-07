@@ -267,3 +267,100 @@ class _FailingDataAccess:
     def read(self, *, endpoint_name, args):
         del endpoint_name, args
         raise RuntimeError("resolver unavailable")
+
+
+@pytest.mark.parametrize('names,expected_type',[(('Ada',),ResolvedIdentity),(('Ada','Ada'),IdentityExecutionClarification)])
+def test_complete_enumeration_resolves_names_without_a_search_parameter(names,expected_type):
+    from fervis.lookup.grounding.identity import LookupTextResolutionDecision
+    from fervis.lookup.grounding.surface import resolver_option_surface_from_catalog
+    from fervis.lookup.grounding.semantic_schema import _resolver_mechanics_schema
+    from jsonschema import validate
+    read=replace(_staff_read(),params=())
+    case=_identity_case('Ada',catalog=RelationCatalog(reads=(read,)))
+    route=case.task.resolver_routes[0]
+    route=replace(route,compatibility=replace(route.compatibility,lookup_request_param_refs=(),
+        resolution_method=LookupTextResolutionDecision.ENUMERATE_COMPLETE_SOURCE))
+    case.task=replace(case.task,resolver_routes=(route,))
+    surface=resolver_option_surface_from_catalog(case.catalog,route.option)
+    validate({'decision':'ENUMERATE_COMPLETE_SOURCE','lookup_request_params':[],
+              'returned_identity_verification_fields':['data.full_name']},_resolver_mechanics_schema(surface,operands=('Ada',)))
+    calls=[]
+    class Port:
+        def read(self,*,endpoint_name,args):
+            calls.append((endpoint_name,args))
+            return {'responseStatus':200,'responseBody':{'data':[{'staff_id':f'staff_{index}','full_name':name} for index,name in enumerate(names)]}}
+    result=case.execute(Port())
+    assert isinstance(result,expected_type)
+    assert calls == [('list_staff_list',{})]
+
+
+def test_eligibility_receives_the_established_enumeration_access():
+    from types import SimpleNamespace
+    from xml.etree import ElementTree
+    from fervis.lookup.grounding.identity import LookupTextResolutionDecision
+    from fervis.lookup.read_eligibility.semantic_prompt import SemanticReadEligibilityTurnPrompt
+    from fervis.lookup.source_reads.access_model import ReadAccessCatalog
+    from fervis.lookup.turn_prompts.projections.response_shape import semantic_identity_resolution_tasks_xml
+
+    case = _identity_case('Ada', catalog=RelationCatalog(reads=(replace(_staff_read(), params=()),)))
+    route = case.task.resolver_routes[0]
+    route = replace(route, compatibility=replace(
+        route.compatibility, lookup_request_param_refs=(),
+        resolution_method=LookupTextResolutionDecision.ENUMERATE_COMPLETE_SOURCE,
+    ))
+    task = replace(case.task, resolver_routes=(route,))
+    request = SimpleNamespace(resolver_catalog=case.catalog,
+                              read_access=ReadAccessCatalog(),
+                              input_term=lambda _: case.input_term)
+    route_payload = SemanticReadEligibilityTurnPrompt(request)._route_payload(task, route.route_ref)
+    rendered = semantic_identity_resolution_tasks_xml({'identity_resolution_tasks': [{
+        'task_ref': task.task_ref,
+        'canonical_options': [{'resolver_routes': [route_payload]}],
+    }]})
+    root = ElementTree.fromstring(rendered)
+    access = root.find('.//resolver/complete_source_access')
+    assert access is not None
+    assert access.attrib == {'available': 'true'}
+
+
+def test_orchestrated_identity_evidence_records_each_tasks_response():
+    from types import SimpleNamespace
+    from fervis.lookup.orchestration.semantic_compilation import _resolve_identity_tasks
+    from fervis.lookup.lineage.source_read_buffer import buffered_source_read_lineage
+    from fervis.lookup.relation_catalog import CatalogEndpointMetadata
+    from fervis.lookup.source_reads.access_model import ReadAccessCatalog
+
+    read = _staff_read()
+    metadata = CatalogEndpointMetadata(
+        catalog_endpoint_key=read.id, endpoint_name=read.endpoint_name,
+        framework_kind='fastapi', source_namespace_kind='fastapi_app',
+        source_namespace_path=('test',), route_method='GET',
+        route_path_template='/staff/', handler_ref='test.staff',
+    )
+    catalog = RelationCatalog(reads=(replace(read, catalog_endpoint=metadata),))
+    lineage = buffered_source_read_lineage(run_id='run_identity', step_id='identity_step')
+    values = []
+    for position, name in enumerate(('Ada', 'Grace')):
+        case = _identity_case(name, catalog=catalog)
+        task = replace(case.task, task_ref=f'task_{position}')
+        selection = replace(case.selection, task_ref=task.task_ref)
+        result = _resolve_identity_tasks(
+            SimpleNamespace(canonical_values=(), parsed=SimpleNamespace(contract=None),
+                            grounding_result=SimpleNamespace(identity_tasks=(task,))),
+            eligibility=SimpleNamespace(identity_outcomes=(selection,)),
+            inputs={case.input_term.id: case.input_term},
+            request=SimpleNamespace(full_catalog=catalog,
+                data_access_port=_DataAccess({'data': [{'staff_id': f'staff_{position}', 'full_name': name}]}),
+                identity_read_lineage=lineage.scope, read_access=ReadAccessCatalog()),
+        )
+        values.extend(result)
+    assert len(lineage.source_reads) == 2
+    read_ids = {read.source_read_id for read in lineage.source_reads}
+    assert len(read_ids) == 2
+    assert all(read.run_id == 'run_identity' for read in lineage.source_reads)
+    assert {ref for value in values for ref in value.certification_refs
+            if ref.startswith('source_read:')} == {f'source_read:{ref}' for ref in read_ids}
+    assert {read.artifact_id for read in lineage.source_reads} == {
+        artifact.artifact_id for artifact in lineage.artifacts
+    }
+    assert all(read.response_hash for read in lineage.source_reads)

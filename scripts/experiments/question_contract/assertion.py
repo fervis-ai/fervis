@@ -30,7 +30,7 @@ from fervis.lookup.question_contract.model import (
     PositionWithTies,
     TemporalBucket,
 )
-from fervis.lookup.semantic_types import CollectionType, IdentifierType
+from fervis.lookup.semantic_types import BooleanType, CollectionType, IdentifierType
 
 
 def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
@@ -341,7 +341,52 @@ def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
                     errors.append(
                         f"ordering {ordering_ref.token} incorrectly uses entity identity"
                     )
+    if context.get("require_boolean_outputs"):
+        for index in parsed.semantic_indexes:
+            for output in index.requested_fact.outputs:
+                ref = index.fact_local_ref_by_local_id[output.expression_ref]
+                if not isinstance(index.inferred_type_by_ref[ref], BooleanType):
+                    errors.append("The requested existence result must be Boolean.")
+    for scope, correlated in (("global", False), ("related", True)):
+        actual = {
+            kind
+            for index in parsed.semantic_indexes
+            for is_correlated, kind in _quantifier_meanings(index)
+            if is_correlated == correlated
+        }
+        for required in context.get(f"required_{scope}_quantifiers", []):
+            if required not in actual:
+                errors.append(f"Required {scope} quantifier {required!r} is missing.")
     return errors
+
+
+def _quantifier_meanings(index):
+    """Inspect used quantifiers modulo Boolean negation, without shape aliases."""
+    meanings = set()
+
+    def visit(ref, negated=False):
+        node = index.expression_by_ref.get(ref)
+        if isinstance(node, BooleanComposition):
+            for child in node.argument_refs:
+                visit(index.fact_local_ref_by_local_id[child], negated ^ (node.operator.value == "not"))
+        elif isinstance(node, Quantify):
+            kind = node.quantifier.value
+            condition_negated = False
+            if negated:
+                condition_negated = kind == "forall"
+                kind = {"exists": "not_exists", "not_exists": "exists", "forall": "exists"}[kind]
+            meanings.add((bool(node.association_refs), kind))
+            visit(index.fact_local_ref_by_local_id[node.condition_ref], condition_negated)
+        else:
+            for child in index.direct_dependencies_by_ref.get(ref, ()):
+                if child in index.expression_by_ref:
+                    visit(child)
+
+    for output in index.requested_fact.outputs:
+        visit(index.fact_local_ref_by_local_id[output.expression_ref])
+    if index.requested_fact.qualification_ref is not None:
+        visit(index.fact_local_ref_by_local_id[index.requested_fact.qualification_ref])
+    return meanings
 
 
 def _coverage_observation_errors(

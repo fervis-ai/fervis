@@ -12,6 +12,7 @@ class FieldBindingRole(StrEnum):
     IDENTITY = "identity"
     OUTPUT = "output"
     PREDICATE = "predicate"
+    REQUEST_ARGUMENT = "request_argument"
 
 
 class SourceKind(StrEnum):
@@ -38,6 +39,7 @@ class RelationSource:
     row_source_id: str = ""
     calendar_id: str = ""
     memory_relation_id: str = ""
+    argument_relation_id: str = ""
     param_bindings: tuple[EndpointParamBinding, ...] = ()
     proof_refs: tuple[str, ...] = ()
 

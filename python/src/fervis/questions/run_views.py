@@ -272,6 +272,9 @@ def _pending_clarification_requests(
 
 
 def _run_error(run: RunView, work: RunWorkSnapshot) -> str | None:
+    # The queue preserves the machine code; runtime lineage retains its details.
+    if work.last_error:
+        return work.last_error
     if run.runtime_errors:
         error = run.runtime_errors[0]
         return error.message or error.error_kind

@@ -706,9 +706,11 @@ def test_provider_runtime_maps_authentication_errors_to_typed_llm_error(
     assert exc.value.code == "llm_api_authentication_error"
 
 
+@pytest.mark.parametrize("error_type", ["rate_limit_error", "invalid_request_error"])
 def test_provider_runtime_maps_rate_limit_errors_to_rate_limit_error(
     fervis_foundation_reset,
     monkeypatch,
+    error_type,
 ):
     def failing_worker(payload, result_queue):
         result_queue.put(
@@ -717,7 +719,7 @@ def test_provider_runtime_maps_rate_limit_errors_to_rate_limit_error(
                 "errorClass": "RateLimitError",
                 "error": "too many requests",
                 "statusCode": "429",
-                "errorType": "rate_limit_error",
+                "errorType": error_type,
             }
         )
 

@@ -116,10 +116,8 @@ from fervis.lookup.source_binding.model import (
     InvocationTargetApplication,
     InvocationValueApplication,
     SourceBindingPlan,
-    SubjectChoiceReview,
     SubjectObligationBinding,
     SubjectObligationRealization,
-    SubjectSurfaceReview,
 )
 from fervis.lookup.source_binding.verification import (
     VerifiedSourceStrategy,
@@ -176,7 +174,7 @@ def _compile_memory_count(
                 origin=origin,
             ),
         ),
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "e1", origin),),
@@ -446,8 +444,7 @@ class _EventDataAccess:
         }
 
 
-@pytest.mark.parametrize("has_ordinary_state", [True, False])
-def test_returned_choice_surface_excludes_nonordinary_rows_before_counting(has_ordinary_state) -> None:
+def test_unqualified_resource_count_preserves_every_returned_state() -> None:
     origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, "event count")
     fact = RequestedFact(
         id="fact_1",
@@ -458,7 +455,7 @@ def test_returned_choice_surface_excludes_nonordinary_rows_before_counting(has_o
         expressions=(
             Aggregate("e1", AggregateFunction.COUNT, "s1", None, False, origin),
         ),
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "e1", origin),),
@@ -504,21 +501,6 @@ def test_returned_choice_surface_excludes_nonordinary_rows_before_counting(has_o
     )
     strategy = _strategy(fact.id, branch)
     request = SemanticSourceBindingRequest(index, strategy, catalog, ())
-    [surface] = catalog.choice_surfaces
-    included_choice_ref = next(
-        value.value_ref for value in surface.values if value.value == "ACTIVE"
-    )
-    mechanic = SourceMechanic(
-        "Filter returned rows by the reviewed status choices.",
-        source.id,
-        (),
-        (
-            catalog.contract_snapshot.ref,
-            surface.surface_ref,
-            *(value.value_ref for value in surface.values),
-        ),
-        SourceMechanicKind.RETURNED_ROW_PREDICATE,
-    )
     set_ref = index.subject_obligation.subject_set_ref.token
     plan = SourceBindingPlan(
         strategy,
@@ -543,33 +525,7 @@ def test_returned_choice_surface_excludes_nonordinary_rows_before_counting(has_o
             (
                 SubjectObligationRealization(
                     branch.branch_id,
-                    (
-                        SubjectSurfaceReview(
-                            owner_set_ref=set_ref,
-                            surface_ref=surface.surface_ref,
-                            surface_mapping_basis=(
-                                "The status surface defines the event population."
-                            ),
-                            choice_reviews=tuple(
-                                SubjectChoiceReview(
-                                    choice_ref=value.value_ref,
-                                    choice_domain_meaning=(
-                                        f"{value.value} event rows."
-                                    ),
-                                    decision_basis=(
-                                        "The choice is an ordinary event state."
-                                        if value.value == "ACTIVE"
-                                        else "The choice is a canceled event state."
-                                    ),
-                                    baseline_included=has_ordinary_state and value.value == "ACTIVE",
-                                    explicit_user_override_applies=False,
-                                )
-                                for value in surface.values
-                            ),
-                            included_choice_refs=(included_choice_ref,) if has_ordinary_state else (),
-                            mechanics=(mechanic,),
-                        ),
-                    ),
+                    (),
                 ),
             ),
         ),
@@ -591,7 +547,7 @@ def test_returned_choice_surface_excludes_nonordinary_rows_before_counting(has_o
     assert execution.fact_result is not None
     assert isinstance(execution.fact_result.outcome, AnswerResult)
     assert execution.fact_result.outcome.projected_rows[0].values == {
-        "fact_1.output_1": 2 if has_ordinary_state else 0
+        "fact_1.output_1": 3
     }
 
 
@@ -630,7 +586,7 @@ def _compile_returned_row_predicate(
                 origin,
             ),
         ),
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=(
             "e1" if qualification_and_aggregate_filter or not aggregate_filter else None
         ),
@@ -768,7 +724,7 @@ def _compile_returned_row_predicate(
                 ),
             )
         },
-        fact_bindings={
+        fact_bindings={} if mechanic_kind is SourceMechanicKind.INVOCATION_PREDICATE else {
             fact_ref: (
                 FactRealization(
                     branch.branch_id,
@@ -953,7 +909,7 @@ def test_co_resident_exists_filters_subject_rows_before_counting() -> None:
                 origin,
             ),
         ),
-        subject=Subject("s_store", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s_store", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref="e_exists",
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "e_count", origin),),
@@ -1172,7 +1128,7 @@ def test_qualifying_identity_set_compiles_as_entity_output(distinct) -> None:
                 origin,
             ),
         ),
-        subject=Subject("s_staff", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s_staff", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref="e_named_staff",
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "s_staff", origin),),
@@ -1473,7 +1429,7 @@ def test_candidate_grain_is_preserved_by_related_set_aggregate() -> None:
         ),
         subject=Subject(
             "s_staff",
-            InstanceInterpretation.NORMAL_BUSINESS_INSTANCE,
+            InstanceInterpretation.RESOURCE_POPULATION,
         ),
         qualification_ref=None,
         grouping_refs=(),
@@ -1659,7 +1615,7 @@ def test_identity_collection_compiles_to_existing_invocation_union() -> None:
                 origin,
             ),
         ),
-        subject=Subject("s_event", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s_event", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref="e_filter",
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "e_count", origin),),
@@ -1689,6 +1645,7 @@ def test_identity_collection_compiles_to_existing_invocation_union() -> None:
         type=RowSourceValueType.STRING,
         allowed_roles=(),
     )
+    from fervis.host_api.contracts.population import ParameterPopulation
     actor_param = RowSourceParam(
         id="actor_id",
         param_ref="source_events.actor_id",
@@ -1696,6 +1653,7 @@ def test_identity_collection_compiles_to_existing_invocation_union() -> None:
         type=RowSourceValueType.STRING,
         source=ParamSource.QUERY,
         required=True,
+        population=ParameterPopulation(field_path="field.actor_id", comparison_operator="equals"),
         entity_target=EntityKeyComponentTarget(
             entity_kind="actor",
             key_id="primary_key",
@@ -1895,10 +1853,15 @@ def test_identity_collection_compiles_to_existing_invocation_union() -> None:
         plan,
         request=request_without_stable_grain,
     )
-    assert isinstance(verified_without_stable_grain, VerifiedSourceStrategy)
+    from fervis.lookup.source_binding.verification import (
+        SourceStrategyVerificationFailure,
+    )
 
-    with pytest.raises(ValueError, match="union requires stable identity fields"):
-        compile_verified_source_strategy(verified_without_stable_grain)
+    assert isinstance(verified_without_stable_grain, SourceStrategyVerificationFailure)
+    assert (
+        "invocation_union_identity:source_events"
+        in verified_without_stable_grain.failed_requirement_refs
+    )
 
 
 def test_declared_association_compiles_to_existing_join_and_grouped_aggregate() -> None:
@@ -1932,7 +1895,7 @@ def test_declared_association_compiles_to_existing_join_and_grouped_aggregate() 
                 origin,
             ),
         ),
-        subject=Subject("s_event", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s_event", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=("f_category",),
         outputs=(
@@ -2162,7 +2125,7 @@ def test_aggregate_arithmetic_compiles_to_one_shared_compute_expression() -> Non
                 origin,
             ),
         ),
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "e2", origin),),

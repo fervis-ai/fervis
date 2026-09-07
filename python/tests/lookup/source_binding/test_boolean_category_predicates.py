@@ -30,7 +30,6 @@ from fervis.lookup.source_binding.schema import (
     build_semantic_source_realization_schema,
     build_semantic_source_binding_schema,
 )
-from fervis.lookup.source_binding.membership import parse_source_membership
 from fervis.lookup.source_binding.verification import (
     verify_source_strategy,
     VerifiedSourceStrategy,
@@ -141,34 +140,31 @@ def test_text_category_uses_boolean_predicate_without_casting_its_raw_value():
     )
     validate(payload, build_semantic_source_realization_schema(request))
     realization = compile_source_realization(payload, request=request)
-    from fervis.lookup.relation_catalog.row_sources.model import RowSourceField, RowSourceValueType
-    unrelated = RowSourceField('other_flag', 'other_flag', 'Unrelated flag', RowSourceValueType.BOOLEAN, ())
+    from fervis.lookup.relation_catalog.row_sources.model import (
+        RowSourceField,
+        RowSourceValueType,
+    )
+
+    unrelated = RowSourceField(
+        "other_flag", "other_flag", "Unrelated flag", RowSourceValueType.BOOLEAN, ()
+    )
     expanded_source = replace(source, fields=(*source.fields, unrelated))
-    expanded = replace(realization.request, source_catalog=replace(realization.request.source_catalog, sources=(expanded_source,)))
-    other_surface = next(item for item in expanded.source_catalog.choice_surfaces if item.target_ref == 'other_flag')
+    expanded = replace(
+        realization.request,
+        source_catalog=replace(
+            realization.request.source_catalog, sources=(expanded_source,)
+        ),
+    )
+    other_surface = next(
+        item
+        for item in expanded.source_catalog.choice_surfaces
+        if item.target_ref == "other_flag"
+    )
     assert expanded.choice_requirement_refs(other_surface, branch_id=branch) == ()
     surface = next(
         s for s in request.source_catalog.choice_surfaces if s.target_ref == "is_active"
     )
     assert {c.value for c in surface.values} == {"false", "true"}
-    membership = parse_source_membership(
-        {
-            branch: {"fact_1:set:s1": {
-                surface.surface_ref: {
-                    "surface_mapping_basis": "Both states are records.",
-                    "choice_reviews": {
-                        c.value: {
-                            "choice_domain_meaning": "Activity flag.",
-                            "decision_basis": "Both states are ordinary records.",
-                            "baseline_decision": "INCLUDE",
-                        }
-                        for c in surface.values
-                    },
-                }
-            }}
-        },
-        realization=realization,
-    )
     requirement = index.boolean_requirements[0].requirement_ref
     binding_payload = {
         "resolved_input_applications": {branch: []},
@@ -189,11 +185,11 @@ def test_text_category_uses_boolean_predicate_without_casting_its_raw_value():
     }
     validate(
         binding_payload,
-        build_semantic_source_binding_schema(membership.realization.request),
+        build_semantic_source_binding_schema(realization.request),
     )
-    plan = compile_source_binding_plan(binding_payload, membership=membership)
+    plan = compile_source_binding_plan(binding_payload, realization=realization)
     assert state_ref not in plan.fact_bindings
-    verified = verify_source_strategy(plan, request=membership.realization.request)
+    verified = verify_source_strategy(plan, request=realization.request)
     assert isinstance(verified, VerifiedSourceStrategy)
     compiled = compile_verified_source_strategy(verified)
     result = invoke_answer_program(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Protocol
 
+from fervis.model_io.structured_output.errors import is_retryable_provider_error
 from fervis.questions.result_data import result_data_clarifications
 
 
@@ -100,7 +101,7 @@ def run_terminal_event(
             "error": {
                 "code": error or "runtime_ask_failed",
                 "message": error or "runtime ask failed",
-                "retryable": False,
+                "retryable": is_retryable_provider_error(error),
             },
         }
     raise ValueError(f"run terminal event does not support status {status}")

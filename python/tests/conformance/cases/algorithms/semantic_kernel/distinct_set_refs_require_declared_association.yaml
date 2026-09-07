@@ -48,7 +48,7 @@ input:
           meaning: facility count
           resolved_input_ref: null
         candidate_set:
-          instance_interpretation: normal_business_instance
+          instance_interpretation: resource_population
         set_graph:
           identity_input_relations: {}
           requested_output_relations: {}

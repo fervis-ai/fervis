@@ -106,7 +106,8 @@ def build_semantic_question_contract_schema(
     conversation_input_refs: tuple[str, ...] = (),
     grouping_value_shapes_by_request: Mapping[
         str, tuple[tuple[str, str | None] | None, ...]
-    ] | None = None,
+    ]
+    | None = None,
 ) -> dict[str, object]:
     if not answer_request_specs:
         raise ValueError("answer request specs are required")
@@ -404,12 +405,18 @@ def _apply_frame_commitments(
         if request.grouping_refs:
             branches = []
             for ref, kind, shape in zip(
-                request.grouping_refs, request.grouping_kinds,
-                request.grouping_value_shapes, strict=True,
+                request.grouping_refs,
+                request.grouping_kinds,
+                request.grouping_value_shapes,
+                strict=True,
             ):
-                branch = cast(dict[str, Any], _grouping_schema(
-                    grouping_kinds=(kind,), grouping_value_shapes=(shape,),
-                ))["oneOf"][0]
+                branch = cast(
+                    dict[str, Any],
+                    _grouping_schema(
+                        grouping_kinds=(kind,),
+                        grouping_value_shapes=(shape,),
+                    ),
+                )["oneOf"][0]
                 branch["properties"]["id"] = {"enum": [ref]}
                 branches.append(branch)
             answer_properties["grouping"]["items"] = {"oneOf": branches}
@@ -419,7 +426,8 @@ def _apply_frame_commitments(
             ordering_branches = []
             for index, value_ref in enumerate(request.ordering_value_refs):
                 branch = deepcopy(
-                    previous_branches[index] if len(previous_branches) > 1
+                    previous_branches[index]
+                    if len(previous_branches) > 1
                     else previous_branches[0]
                 )
                 if value_ref is not None:
@@ -433,23 +441,25 @@ def _apply_frame_commitments(
                         "additionalProperties": False,
                     }
                 ordering_branches.append(branch)
-            unique = list({repr(branch): branch for branch in ordering_branches}.values())
+            unique = list(
+                {repr(branch): branch for branch in ordering_branches}.values()
+            )
             answer_properties["ordering"]["items"] = (
                 unique[0] if len(unique) == 1 else {"anyOf": unique}
             )
 
         graph_properties = answer_properties["set_graph"]["properties"]
-        input_relation_properties = graph_properties[
-            "identity_input_relations"
-        ]["properties"]
+        input_relation_properties = graph_properties["identity_input_relations"][
+            "properties"
+        ]
         for input_ref, metadata in identity_inputs.items():
             relation = input_relation_properties[input_ref]["oneOf"][1]
             relation["properties"]["set"]["properties"]["instance_kind"] = {
                 "enum": [str(metadata["instance_kind"])]
             }
-        output_relation_properties = graph_properties[
-            "requested_output_relations"
-        ]["properties"]
+        output_relation_properties = graph_properties["requested_output_relations"][
+            "properties"
+        ]
         for output_ref, instance_kind in related_output_kinds.items():
             relation = output_relation_properties[output_ref]
             relation["properties"]["set"]["properties"]["instance_kind"] = {
@@ -466,9 +476,7 @@ def _apply_frame_commitments(
                 continue
             branch["properties"] = {
                 "output_ref": properties["output_ref"],
-                "instance_kind": {
-                    "enum": [related_output_kinds[output_refs[0]]]
-                },
+                "instance_kind": {"enum": [related_output_kinds[output_refs[0]]]},
             }
             branch["required"] = list(branch["properties"])
 
@@ -497,15 +505,25 @@ def _apply_frame_commitments(
             names=frozenset(subject_names),
             suffix=suffix,
         )
-    return _order_comparison_operands(without_unreferenced_definitions(schema), input_first=bool(identity_inputs))
+    return _order_comparison_operands(
+        without_unreferenced_definitions(schema), input_first=bool(identity_inputs)
+    )
 
 
-def _order_comparison_operands(schema: dict[str, object], *, input_first: bool) -> dict[str, object]:
+def _order_comparison_operands(
+    schema: dict[str, object], *, input_first: bool
+) -> dict[str, object]:
     def visit(node: object) -> None:
         if isinstance(node, dict):
             properties = node.get("properties", {})
-            if isinstance(properties, dict) and properties.get("kind", {}).get("enum") == ["input_comparison"]:
-                order = ("kind", "input", "operator", "fact") if input_first else ("kind", "fact", "operator", "input")
+            if isinstance(properties, dict) and properties.get("kind", {}).get(
+                "enum"
+            ) == ["input_comparison"]:
+                order = (
+                    ("kind", "input", "operator", "fact")
+                    if input_first
+                    else ("kind", "fact", "operator", "input")
+                )
                 node["properties"] = {key: properties[key] for key in order}
                 node["required"] = list(node["properties"])
             for child in node.values():
@@ -513,6 +531,7 @@ def _order_comparison_operands(schema: dict[str, object], *, input_first: bool) 
         elif isinstance(node, list):
             for child in node:
                 visit(child)
+
     visit(schema)
     return schema
 
@@ -560,9 +579,7 @@ def _expand_identity_comparison_branches(
                 {
                     "kind": {"enum": ["input_ref"]},
                     "input_ref": {"enum": [ref]},
-                    "operand_meaning": {
-                        "enum": [str(metadata["operand_meaning"])]
-                    },
+                    "operand_meaning": {"enum": [str(metadata["operand_meaning"])]},
                     "instance_kind": {"enum": [str(metadata["instance_kind"])]},
                 }
             )
@@ -575,8 +592,7 @@ def _expand_identity_comparison_branches(
                 path["oneOf"] = [
                     item
                     for item in path["oneOf"]
-                    if item["properties"]["kind"]["enum"]
-                    != ["candidate_instance"]
+                    if item["properties"]["kind"]["enum"] != ["candidate_instance"]
                 ]
             typed_properties["fact"] = typed_fact
             expanded.append(typed_branch)
@@ -647,9 +663,7 @@ def _supplied_values_ledger_schema() -> dict[str, object]:
             ),
         }
     )
-    operand_item = {
-        "oneOf": [entity_item, *_non_entity_ledger_item_schemas(common)]
-    }
+    operand_item = {"oneOf": [entity_item, *_non_entity_ledger_item_schemas(common)]}
     selection_limit_properties = _selection_limit_properties()
     return output.SuppliedValuesLedgerOutput.schema(
         {
@@ -773,11 +787,13 @@ def _supplied_input_value_definition(
 
 
 def _answer_request_frame_schema() -> dict[str, object]:
-    standard_results = _frame_result_schemas(candidate_field_by_kind={
-        "one_value_for_population": "population_rows",
-        "one_result_per_qualifying_row": "result_candidates",
-        "one_result_per_group": "grouped_observation_rows",
-    })
+    standard_results = _frame_result_schemas(
+        candidate_field_by_kind={
+            "one_value_for_population": "population_rows",
+            "one_result_per_qualifying_row": "result_candidates",
+            "one_result_per_group": "grouped_observation_rows",
+        }
+    )
     coverage_results = _frame_result_schemas(
         candidate_field_by_kind={
             "one_value_for_population": "coverage_candidates",
@@ -954,7 +970,11 @@ def _row_projection_schema(*, result_kind: str) -> dict[str, object]:
             {
                 "value_ref": {"enum": ["v1", "v2", "v3", "v4"]},
                 "value_kind_basis": {"type": "string", "minLength": 1},
-                "value_kind": {"enum": ["value"] if result_kind == "one_result_per_group" else ["related_entity", "value"]},
+                "value_kind": {
+                    "enum": ["value"]
+                    if result_kind == "one_result_per_group"
+                    else ["related_entity", "value"]
+                },
                 "meaning": {"type": "string", "minLength": 1},
                 "origin": {"$ref": "#/$defs/frame_origin"},
             }
@@ -1243,7 +1263,7 @@ def _semantic_request_schema(
                     "instance_kind": {"type": "string", "minLength": 1},
                     "instance_interpretation": {
                         "enum": [
-                            "normal_business_instance",
+                            "resource_population",
                             "raw_data_record",
                         ]
                     },
@@ -1359,7 +1379,9 @@ def _association_graph_schema(
                     for output_ref in related_output_refs
                 }
             ),
-            "other_related_sets": cast(dict[str, Any], other_graph)["properties"]["related_sets"],
+            "other_related_sets": cast(dict[str, Any], other_graph)["properties"][
+                "related_sets"
+            ],
         }
     )
 
@@ -1490,21 +1512,25 @@ def _grouping_schema(
         strict=True,
     ):
         if grouping_kind == "qualifying_row_identity":
-            branches.append(output.CandidateIdentityGroupingOutput.schema(
-            {
-                **common,
-                "kind": {"enum": ["candidate_instance_identity"]},
-            }
-            ))
+            branches.append(
+                output.CandidateIdentityGroupingOutput.schema(
+                    {
+                        **common,
+                        "kind": {"enum": ["candidate_instance_identity"]},
+                    }
+                )
+            )
             continue
         if grouping_kind == "related_entity_identity":
-            branches.append(output.RelatedIdentityGroupingOutput.schema(
-            {
-                **common,
-                "kind": {"enum": ["related_instance_identity"]},
-                "set_ref": _additional_set_ref_schema(),
-            }
-            ))
+            branches.append(
+                output.RelatedIdentityGroupingOutput.schema(
+                    {
+                        **common,
+                        "kind": {"enum": ["related_instance_identity"]},
+                        "set_ref": _additional_set_ref_schema(),
+                    }
+                )
+            )
             continue
         if grouping_kind != "non_identity_value":
             raise ValueError(f"unknown grouping kind: {grouping_kind}")
@@ -1513,9 +1539,7 @@ def _grouping_schema(
                 {
                     **common,
                     "kind": {"enum": ["value"]},
-                    "expression": _fixed_grouping_value_expression_schema(
-                        value_shape
-                    ),
+                    "expression": _fixed_grouping_value_expression_schema(value_shape),
                 }
             )
         )
@@ -1532,16 +1556,18 @@ def _fixed_grouping_value_expression_schema(
     if kind == "observed_value" and grain is None:
         return _fact_expression_schema(definition="grouping_fact_expression")
     if kind == "computed_value" and grain is None:
-        return {"oneOf": list(_derived_value_schemas(_grouping_value_expression_schema(depth=1))[:2])}
+        return {
+            "oneOf": list(
+                _derived_value_schemas(_grouping_value_expression_schema(depth=1))[:2]
+            )
+        }
     if kind == "condition" and grain is None:
         return _row_condition_expression_schema()
     if kind == "temporal_bucket" and grain is not None:
         return _closed_object(
             {
                 "kind": {"enum": ["temporal_bucket"]},
-                "value": _fact_expression_schema(
-                    definition="grouping_fact_expression"
-                ),
+                "value": _fact_expression_schema(definition="grouping_fact_expression"),
                 "grain": {"enum": [grain]},
             }
         )
@@ -1595,10 +1621,10 @@ def _meaning_origin_definition() -> dict[str, object]:
 
 def _grouping_origin_definition() -> dict[str, object]:
     common = {
-            "group_ref": {"enum": ["g1", "g2", "g3", "g4"]},
-            "grouping_basis": {"type": "string", "minLength": 1},
-            "meaning": {"type": "string", "minLength": 1},
-            "origin": {"$ref": "#/$defs/frame_origin"},
+        "group_ref": {"enum": ["g1", "g2", "g3", "g4"]},
+        "grouping_basis": {"type": "string", "minLength": 1},
+        "meaning": {"type": "string", "minLength": 1},
+        "origin": {"$ref": "#/$defs/frame_origin"},
     }
     observed_value = output.NonTemporalGroupingValueOutput.schema(
         {"kind": {"enum": ["observed_value", "computed_value", "condition"]}}
@@ -1908,12 +1934,18 @@ def _value_output_expression_schema() -> dict[str, object]:
 def _identity_output_expression_schema() -> dict[str, object]:
     return {
         "oneOf": [
-            _closed_object({
-                "kind": {"enum": ["fact"]},
-                "identity_path": _closed_object({"kind": {"enum": ["candidate_instance"]}}),
-                "origin": _source_origin_schema(),
-            }),
-            _closed_object({"kind": {"enum": ["set_ref"]}, "set_ref": {"enum": ["s1"]}}),
+            _closed_object(
+                {
+                    "kind": {"enum": ["fact"]},
+                    "identity_path": _closed_object(
+                        {"kind": {"enum": ["candidate_instance"]}}
+                    ),
+                    "origin": _source_origin_schema(),
+                }
+            ),
+            _closed_object(
+                {"kind": {"enum": ["set_ref"]}, "set_ref": {"enum": ["s1"]}}
+            ),
         ]
     }
 
@@ -1947,6 +1979,7 @@ def _condition_expression_definition(
     allow_identity_collection_input: bool,
     allow_temporal_scope_input: bool,
     allow_coverage: bool,
+    allow_global_quantification: bool = False,
     temporal_fact_definition: str = "temporal_fact_expression",
     boolean_fact_definition: str = "boolean_fact_expression",
     identifier_fact_definition: str = "identifier_fact_expression",
@@ -2086,7 +2119,7 @@ def _condition_expression_definition(
                         "kind": {"enum": ["quantify"]},
                         "quantifier": {"enum": ["exists", "not_exists", "forall"]},
                         "over_set_ref": _local_ref_schema("s"),
-                        "association_refs": _ref_array_schema(),
+                        "association_refs": {**_ref_array_schema(), "minItems": 0 if allow_global_quantification else 1},
                         "condition": quantified_condition,
                     }
                 ),
@@ -2130,9 +2163,7 @@ def _typed_input_expression_schema(*, definition: str) -> dict[str, object]:
     )
 
 
-def _typed_identity_input_expression_schema(
-    *, definition: str
-) -> dict[str, object]:
+def _typed_identity_input_expression_schema(*, definition: str) -> dict[str, object]:
     return _closed_object(
         {
             "kind": {"enum": ["input_ref"]},
@@ -2215,6 +2246,8 @@ def _finite_condition_definitions(
         definitions[f"condition_expression_{depth}"] = _condition_expression_definition(
             value=_value_expression_schema(),
             child=result_child,
+            quantified_child=_row_condition_expression_schema(depth=max(0, depth - 1)),
+            allow_global_quantification=True,
             allow_scalar_input=allow_scalar_input,
             allow_collection_input=allow_collection_input,
             allow_identity_input=allow_identity_input,
@@ -2306,7 +2339,12 @@ def _related_row_expression_schema() -> dict[str, object]:
         {
             "kind": {"enum": ["related_row"]},
             "set_ref": _local_ref_schema("s"),
-            "condition": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/row_condition_expression_3"}]},
+            "condition": {
+                "oneOf": [
+                    {"type": "null"},
+                    {"$ref": "#/$defs/row_condition_expression_3"},
+                ]
+            },
         }
     )
 

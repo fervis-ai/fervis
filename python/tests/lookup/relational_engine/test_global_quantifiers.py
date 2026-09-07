@@ -19,7 +19,6 @@ from fervis.lookup.source_binding.model import (
     FactRealizationKind,
     SourceRealization,
 )
-from fervis.lookup.source_binding.membership import parse_source_membership
 from fervis.lookup.source_binding.parser import compile_source_binding_plan
 from fervis.lookup.source_binding.verification import (
     verify_source_strategy,
@@ -44,7 +43,9 @@ from fervis.lookup.memory.projection import LookupMemory
 )
 @pytest.mark.parametrize("qualification_kind", ("none", "present", "absent"))
 @pytest.mark.parametrize("branch_count", (1, 2))
-def test_unassociated_quantification_returns_one_boolean(quantifier, empty, expected, qualification_kind, branch_count):
+def test_unassociated_quantification_returns_one_boolean(
+    quantifier, empty, expected, qualification_kind, branch_count
+):
     if qualification_kind == "absent":
         expected = quantifier is not Quantifier.EXISTS
     _, _, memory, _, _, original = _compile_memory_count(
@@ -60,13 +61,25 @@ def test_unassociated_quantification_returns_one_boolean(quantifier, empty, expe
                 "has_value", ExpressionUnaryOperator.NOT_NULL, "identifier", fact.origin
             ),
             *(
-                (NullCheck("missing_value", ExpressionUnaryOperator.IS_NULL, "identifier", fact.origin),)
-                if qualification_kind == "absent" else ()
+                (
+                    NullCheck(
+                        "missing_value",
+                        ExpressionUnaryOperator.IS_NULL,
+                        "identifier",
+                        fact.origin,
+                    ),
+                )
+                if qualification_kind == "absent"
+                else ()
             ),
             Quantify("quantified", quantifier, "s1", (), "has_value", fact.origin),
         ),
         outputs=(RequestedOutput("value", "quantified", fact.origin),),
-        qualification_ref={"none": None, "present": "has_value", "absent": "missing_value"}[qualification_kind],
+        qualification_ref={
+            "none": None,
+            "present": "has_value",
+            "absent": "missing_value",
+        }[qualification_kind],
     )
     index = analyze_requested_fact(fact, inputs={}, input_denotations={})
     assert isinstance(index.result_grain, Singleton)
@@ -78,8 +91,16 @@ def test_unassociated_quantification_returns_one_boolean(quantifier, empty, expe
         if s.memory_ref == memory.id
     )
     base_branch = original.request.strategy.branches[0]
-    branches = tuple(replace(base_branch, branch_id=f"branch_{i}", qualification_clause_refs=tuple(
-        clause.clause_ref for clause in index.qualification.clauses)) for i in range(branch_count))
+    branches = tuple(
+        replace(
+            base_branch,
+            branch_id=f"branch_{i}",
+            qualification_clause_refs=tuple(
+                clause.clause_ref for clause in index.qualification.clauses
+            ),
+        )
+        for i in range(branch_count)
+    )
     request = replace(
         original.request,
         index=index,
@@ -89,8 +110,12 @@ def test_unassociated_quantification_returns_one_boolean(quantifier, empty, expe
     branch_ids = tuple(branch.branch_id for branch in branches)
     realization = SourceRealization(
         request,
-        {ref: tuple(replace(values[0], branch_id=branch_id) for branch_id in branch_ids)
-         for ref, values in original.binding_plan.set_bindings.items()},
+        {
+            ref: tuple(
+                replace(values[0], branch_id=branch_id) for branch_id in branch_ids
+            )
+            for ref, values in original.binding_plan.set_bindings.items()
+        },
         {
             index.fact_local_ref_by_local_id["identifier"].token: (
                 FactRealization(
@@ -107,14 +132,14 @@ def test_unassociated_quantification_returns_one_boolean(quantifier, empty, expe
         },
         {},
     )
-    membership = parse_source_membership({branch: {} for branch in branch_ids}, realization=realization)
+    membership = realization
     parsed = compile_source_binding_plan(
         {
             "resolved_input_applications": {branch: [] for branch in branch_ids},
             "finite_choice_applications": {branch: {} for branch in branch_ids},
             "choice_requirement_applications": {branch: {} for branch in branch_ids},
         },
-        membership=membership,
+        realization=membership,
     )
     verified = verify_source_strategy(parsed, request=request)
     assert isinstance(verified, VerifiedSourceStrategy)

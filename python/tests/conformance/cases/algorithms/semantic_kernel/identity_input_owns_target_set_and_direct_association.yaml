@@ -60,7 +60,7 @@ input:
           resolved_input_ref: null
         candidate_set:
           instance_kind: facilities
-          instance_interpretation: normal_business_instance
+          instance_interpretation: resource_population
         set_graph:
           identity_input_relations:
             i1:

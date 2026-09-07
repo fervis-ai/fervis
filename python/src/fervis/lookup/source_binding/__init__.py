@@ -15,7 +15,7 @@ from .model import (
     SubjectChoiceReview,
     SubjectSurfaceReview,
     source_binding_clarification,
-    source_required_inputs_are_satisfiable,
+    source_inputs_allow_candidate_discovery,
 )
 from .parser import compile_source_binding_plan, compile_source_realization
 from .prompt import SemanticSourceBindingTurnPrompt, SemanticSourceRealizationTurnPrompt
@@ -47,5 +47,5 @@ __all__ = [
     "compile_source_binding_plan",
     "verify_source_strategy",
     "source_binding_clarification",
-    "source_required_inputs_are_satisfiable",
+    "source_inputs_allow_candidate_discovery",
 ]

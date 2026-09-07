@@ -15,7 +15,6 @@ from fervis.lookup.source_binding.model import (
     FactRealizationKind,
     SourceRealization,
 )
-from fervis.lookup.source_binding.membership import parse_source_membership
 from fervis.lookup.source_binding.parser import compile_source_binding_plan
 from fervis.lookup.source_binding.verification import (
     verify_source_strategy,
@@ -109,14 +108,14 @@ def test_position_selection_compiles_and_invokes_with_a_typed_parameter(
         },
         {},
     )
-    membership = parse_source_membership({branch: {}}, realization=realization)
+    membership = realization
     parsed = compile_source_binding_plan(
         {
             "resolved_input_applications": {branch: []},
             "finite_choice_applications": {branch: {}},
             "choice_requirement_applications": {branch: {}},
         },
-        membership=membership,
+        realization=membership,
     )
     verified = verify_source_strategy(parsed, request=request)
     assert isinstance(verified, VerifiedSourceStrategy)

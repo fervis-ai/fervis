@@ -67,7 +67,7 @@ def semantic_requested_fact(
         associations=(),
         facts=(() if scalar else (FactTerm("f1", "s1", TextType(), origin),)),
         expressions=expressions,
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=tuple(

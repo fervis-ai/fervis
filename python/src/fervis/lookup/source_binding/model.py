@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from functools import cached_property
+from fervis.lookup.answer_program.expressions import Expression
 from fervis.host_api.contracts import ParameterSemantics
+from fervis.host_api.contracts.population import ParameterPopulation
 from hashlib import sha256
 
 from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
@@ -33,7 +35,6 @@ from fervis.lookup.question_contract import (
     Quantify,
     RelatedRow,
     Coverage,
-    Singleton,
     SetTerm,
     FactLocalRef,
     FactTerm,
@@ -42,11 +43,8 @@ from fervis.lookup.question_contract import (
 )
 from fervis.lookup.qualification import BooleanRequirementUseSite
 from fervis.lookup.relation_catalog.row_sources import RowSourceValueType
-from fervis.lookup.semantic_types import BooleanType, IdentifierType, TextType
+from fervis.lookup.semantic_types import BooleanType, IdentifierType, TextType, CollectionType
 from fervis.lookup.source_binding.param_values import compatible_fact_value_projections
-from fervis.lookup.source_binding.subject_obligations import (
-    derive_subject_choice_membership,
-)
 from fervis.types.enums import StrEnum
 
 
@@ -90,6 +88,9 @@ class SetRealization:
     identity_ref: str | None
     identity_field_refs: tuple[str, ...]
     contract_evidence_refs: tuple[str, ...]
+
+    membership: Expression | None = None
+    population_basis: str = ""
 
 
 @dataclass(frozen=True)
@@ -184,16 +185,7 @@ class SubjectChoiceReview:
     choice_ref: str
     choice_domain_meaning: str
     decision_basis: str
-    baseline_included: bool
-    explicit_user_override_applies: bool
     selection_requirement_refs: tuple[str, ...] = ()
-
-    @property
-    def included(self) -> bool:
-        return derive_subject_choice_membership(
-            baseline_included=self.baseline_included,
-            explicit_user_override_applies=self.explicit_user_override_applies,
-        ).included
 
 
 @dataclass(frozen=True)
@@ -252,10 +244,19 @@ class SourceRealizationUnavailable:
     explanation: str
 
     def __post_init__(self) -> None:
-        if not self.unmet_requirement_refs or len(set(self.unmet_requirement_refs)) != len(self.unmet_requirement_refs):
-            raise ValueError("unavailable realization requires unique unmet requirements")
-        if any(FactLocalRef.from_token(ref).requested_fact_id != self.requested_fact_id for ref in self.unmet_requirement_refs):
-            raise ValueError("unavailable realization references another requested fact")
+        if not self.unmet_requirement_refs or len(
+            set(self.unmet_requirement_refs)
+        ) != len(self.unmet_requirement_refs):
+            raise ValueError(
+                "unavailable realization requires unique unmet requirements"
+            )
+        if any(
+            FactLocalRef.from_token(ref).requested_fact_id != self.requested_fact_id
+            for ref in self.unmet_requirement_refs
+        ):
+            raise ValueError(
+                "unavailable realization references another requested fact"
+            )
         if not self.explanation.strip():
             raise ValueError("unavailable realization requires an explanation")
 
@@ -280,15 +281,32 @@ class SourceBindingClarification:
 
 
 @dataclass(frozen=True)
+class SourcePopulationInterpretation:
+    source_ref: str
+    parameter_ref: str
+    population: ParameterPopulation | None
+    basis: str
+    validation_error: str | None = None
+
+
+@dataclass(frozen=True)
 class SemanticSourceBindingRequest:
     index: RequestedFactSemanticIndex
     strategy: CandidateSourceStrategy
     source_catalog: AvailableSourceCatalog
     canonical_values: tuple[CanonicalInputValue, ...]
     catalog_values: tuple[CatalogProvidedValue, ...] = ()
-    unrestricted_parameter_surfaces: tuple[tuple[str, str], ...] = ()
     realized_fact_fields: tuple[tuple[str, str, str, tuple[str, ...]], ...] = ()
     realized_set_sources: tuple[tuple[str, str, str], ...] = ()
+    population_interpretations: tuple[SourcePopulationInterpretation, ...] = ()
+
+    def parameter_population(self, source_ref: str, parameter_ref: str) -> ParameterPopulation | None:
+        param = next(p for p in self.source_catalog.source(source_ref).params if p.param_ref == parameter_ref)
+        if param.population is not None:
+            return param.population
+        return next((item.population for item in self.population_interpretations
+                     if item.source_ref == source_ref and item.parameter_ref == parameter_ref), None)
+
 
     def row_references_for_set(self, set_ref: str) -> tuple[str, ...]:
         return self._connected_row_domains[set_ref]
@@ -303,12 +321,15 @@ class SemanticSourceBindingRequest:
         """Row identities (or anonymous row sources) with the needed fields."""
         semantic_ref = FactLocalRef.from_token(set_ref)
         owned_refs = tuple(
-            ref for ref in self.index.source_requirement_refs
+            ref
+            for ref in self.index.source_requirement_refs
             if isinstance((term := self.index.term_by_ref[ref]), FactTerm)
             and term.owner_ref == semantic_ref.local_id
             and not isinstance(term.value_type, IdentifierType)
         )
-        observed_refs = tuple(ref for ref in owned_refs if ref in self.index.observed_fact_refs)
+        observed_refs = tuple(
+            ref for ref in owned_refs if ref in self.index.observed_fact_refs
+        )
         eligible_identities = frozenset(self.identity_refs_for_set(set_ref))
         identity_required = any(
             isinstance(term, FactTerm)
@@ -326,10 +347,21 @@ class SemanticSourceBindingRequest:
                 any(self._field_supports_fact(field, ref) for field in source.fields)
                 or (
                     ref not in self.index.observed_fact_refs
-                    and any((row_source_type_supports_semantic_type(param.type, self.index.value_type(ref))
-                            or (param.finite_choices and self._choice_surface_supports_fact(param.type, fact_ref=ref.token)))
-                            and self._parameter_controls_rows(source.id, param.param_ref)
-                            for param in source.params)
+                    and any(
+                        (
+                            row_source_type_supports_semantic_type(
+                                param.type, self.index.value_type(ref)
+                            )
+                            or (
+                                param.finite_choices
+                                and self._choice_surface_supports_fact(
+                                    param.type, fact_ref=ref.token
+                                )
+                            )
+                        )
+                        and self._parameter_controls_rows(source.id, param.param_ref)
+                        for param in source.params
+                    )
                 )
                 for ref in owned_refs
             ):
@@ -343,7 +375,8 @@ class SemanticSourceBindingRequest:
                 for identity in source.identity_evidence
                 if identity.identity_ref in eligible_identities
                 and (
-                    not observed_refs or identity.kind is RowSourceIdentityKind.ENTITY_ROW
+                    not observed_refs
+                    or identity.kind is RowSourceIdentityKind.ENTITY_ROW
                 )
             )
             refs.extend(identities)
@@ -440,11 +473,15 @@ class SemanticSourceBindingRequest:
             self,
             realized_set_sources=tuple(
                 (ref, value.branch_id, value.source_ref)
-                for ref, values in set_bindings.items() for value in values
+                for ref, values in set_bindings.items()
+                for value in values
             ),
-            realized_fact_fields=self.realized_fact_fields or tuple(
+            realized_fact_fields=self.realized_fact_fields
+            or tuple(
                 (ref, value.branch_id, value.source_ref, value.field_refs)
-                for ref, values in fact_bindings.items() for value in values),
+                for ref, values in fact_bindings.items()
+                for value in values
+            ),
             strategy=replace(self.strategy, branches=tuple(branches)),
             source_catalog=catalog,
             catalog_values=tuple(
@@ -617,9 +654,14 @@ class SemanticSourceBindingRequest:
 
     def _field_supports_fact(self, field, ref: FactLocalRef) -> bool:
         return bool(
-            row_source_type_supports_semantic_type(field.type, self.index.value_type(ref))
-            or (ref not in self.index.observed_fact_refs and field.finite_choices
-                and self._choice_surface_supports_fact(field.type, fact_ref=ref.token))
+            row_source_type_supports_semantic_type(
+                field.type, self.index.value_type(ref)
+            )
+            or (
+                ref not in self.index.observed_fact_refs
+                and field.finite_choices
+                and self._choice_surface_supports_fact(field.type, fact_ref=ref.token)
+            )
         )
 
     def _requirement_value_ref(self, requirement_ref: str) -> FactLocalRef:
@@ -738,17 +780,16 @@ class SemanticSourceBindingRequest:
         )
 
     @property
-    def raw_subject_scope_surfaces(self) -> dict[str, SourceChoiceSurface]:
-        """A raw-record subject must explicitly reconsider scoped defaults."""
-        if not isinstance(self.index.subject_obligation, RawDataRecord):
-            return {}
+    def population_scope_surfaces(self) -> dict[str, SourceChoiceSurface]:
+        """Declared row-filter defaults need explicit population coverage decisions."""
         return {
             f"subject_scope:{surface.surface_ref}": surface
             for surface in self.source_catalog.choice_surfaces
             if surface.kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER
             and self._parameter_controls_rows(surface.source_ref, surface.target_ref)
             and any(
-                param.param_ref == surface.target_ref and param.default is not None
+                param.param_ref == surface.target_ref
+                and (param.required or param.default is not None)
                 for param in self.source_catalog.source(surface.source_ref).params
             )
         }
@@ -761,15 +802,23 @@ class SemanticSourceBindingRequest:
         source_required_refs = tuple(
             f"source_required:{target_ref}"
             for target_ref in self._unowned_required_target_refs
+            if target_ref
+            not in {
+                surface.target_ref
+                for surface in self.population_scope_surfaces.values()
+            }
         )
         return (
             *requirement_refs,
             *source_required_refs,
-            *self.raw_subject_scope_surfaces,
         )
 
     def invocation_preserves_population(
-        self, owner_ref: str, *, branch_id: str | None = None
+        self,
+        owner_ref: str,
+        *,
+        branch_id: str | None = None,
+        affected_set_refs: tuple[str, ...] | None = None,
     ) -> bool:
         """A local expression predicate cannot narrow other read consumers."""
         requirement = next(
@@ -798,27 +847,10 @@ class SemanticSourceBindingRequest:
             return bool(clauses) and all(
                 requirement.atom_ref in clause.atom_refs for clause in clauses
             )
-        if requirement.use_site is not BooleanRequirementUseSite.AGGREGATE_FILTER:
-            return False
-        # Grouped aggregates must retain groups with no matching rows, too.
-        if not isinstance(self.index.result_grain, Singleton):
-            return False
-        aggregates = tuple(
-            node
-            for node in self.index.requested_fact.expressions
-            if isinstance(node, Aggregate)
-        )
-        owner = next(
-            (
-                node
-                for node in aggregates
-                if self.index.fact_local_ref_by_local_id[node.id].token
-                == requirement.owner_expression_ref
-            ),
-            None,
-        )
-        return owner is not None and all(
-            node.filter_ref == owner.filter_ref for node in aggregates
+        from fervis.lookup.source_binding.predicate_scope import scoped_predicate_filter
+
+        return scoped_predicate_filter(
+            self.index, requirement, affected_set_refs=affected_set_refs
         )
 
     def invocation_options_for_owner(
@@ -833,7 +865,7 @@ class SemanticSourceBindingRequest:
         requirement_refs = {
             item.requirement_ref for item in self.index.boolean_requirements
         }
-        scope_surface = self.raw_subject_scope_surfaces.get(owner_ref)
+        scope_surface = self.population_scope_surfaces.get(owner_ref)
         if scope_surface is not None:
             return tuple(
                 option
@@ -848,9 +880,12 @@ class SemanticSourceBindingRequest:
             value_refs = frozenset(self.requirement_value_refs(owner_ref))
             from fervis.lookup.question_contract.domains import value_set_dependencies
 
-            dependencies = value_set_dependencies(self.index, self._requirement_value_ref(owner_ref))
+            dependencies = value_set_dependencies(
+                self.index, self._requirement_value_ref(owner_ref)
+            )
             owner_sources = {
-                source for ref, branch_ref, source in self.realized_set_sources
+                source
+                for ref, branch_ref, source in self.realized_set_sources
                 if branch_ref == branch_id and ref in dependencies
             }
             return tuple(
@@ -858,8 +893,11 @@ class SemanticSourceBindingRequest:
                 for option in self.authored_invocation_projection_options
                 if option.source_ref in branch.source_refs
                 and option.value_ref in value_refs
-                and (not self.realized_set_sources or option.source_ref in owner_sources)
-                and self._parameter_controls_rows(option.source_ref, option.target_ref)
+                and (
+                    not self.realized_set_sources or option.source_ref in owner_sources
+                )
+                and self.invocation_target_matches_owner(option.source_ref, option.target_ref,
+                    owner_ref=owner_ref, branch_id=branch_id, projection=option.projection, value_ref=option.value_ref)
             )
         prefix = "source_required:"
         if not owner_ref.startswith(prefix):
@@ -897,12 +935,25 @@ class SemanticSourceBindingRequest:
             and option.value_ref not in boolean_literal_refs
         )
 
-    def unapplied_input_value_refs_for_owner(self, owner_ref: str, *, branch_id: str) -> tuple[str, ...]:
+    def unapplied_input_value_refs_for_owner(
+        self, owner_ref: str, *, branch_id: str
+    ) -> tuple[str, ...]:
         """Resolved values an owner may leave to deterministic row evaluation."""
-        refs = {option.value_ref for option in self.direct_value_options_for_owner(owner_ref, branch_id=branch_id)}
-        if owner_ref in {item.requirement_ref for item in self.index.boolean_requirements}:
-            canonical_refs = {value.canonical_value_id for value in self.canonical_values}
-            refs.update(canonical_refs.intersection(self.requirement_value_refs(owner_ref)))
+        refs = {
+            option.value_ref
+            for option in self.direct_value_options_for_owner(
+                owner_ref, branch_id=branch_id
+            )
+        }
+        if owner_ref in {
+            item.requirement_ref for item in self.index.boolean_requirements
+        }:
+            canonical_refs = {
+                value.canonical_value_id for value in self.canonical_values
+            }
+            refs.update(
+                canonical_refs.intersection(self.requirement_value_refs(owner_ref))
+            )
         return tuple(sorted(refs))
 
     def required_invocation_target_refs(
@@ -911,7 +962,7 @@ class SemanticSourceBindingRequest:
         *,
         branch_id: str,
     ) -> tuple[str, ...]:
-        scope_surface = self.raw_subject_scope_surfaces.get(owner_ref)
+        scope_surface = self.population_scope_surfaces.get(owner_ref)
         if scope_surface is not None:
             return (scope_surface.target_ref,)
         branch = next(
@@ -929,16 +980,83 @@ class SemanticSourceBindingRequest:
         )
 
     def _parameter_controls_rows(self, source_ref: str, target_ref: str) -> bool:
-        return any(param.param_ref == target_ref and param.semantics is ParameterSemantics.OPAQUE_QUERY_PARAM
-                   for param in self.source_catalog.source(source_ref).params)
+        return any(
+            param.param_ref == target_ref
+            and param.semantics is ParameterSemantics.OPAQUE_QUERY_PARAM
+            and not (
+                (population := self.parameter_population(source_ref, target_ref)) is not None
+                and population.preserves_population
+            )
+            for param in self.source_catalog.source(source_ref).params
+        )
 
-    def _surface_matches_realized_fact(self, surface: SourceChoiceSurface, fact_ref: str, branch_id: str) -> bool:
+    def _parameter_correspondence_fields(self, source_ref: str, target_ref: str) -> frozenset[str]:
+        from fervis.lookup.source_binding.population_values import population_field
+        population = self.parameter_population(source_ref, target_ref)
+        source = self.source_catalog.source(source_ref)
+        field = population_field(source, population)
+        if population is None or not population.value_mapping or field is None or not field.finite_choices:
+            return frozenset()
+        return frozenset((field.field_ref,))
+
+    def invocation_target_matches_owner(self, source_ref: str, target_ref: str, *, owner_ref: str, branch_id: str, projection: ValueProjectionKind = ValueProjectionKind.WHOLE_VALUE, value_ref: str | None = None) -> bool:
+        """A returned fact fixes the property an invocation may constrain."""
+        if not self._parameter_controls_rows(source_ref, target_ref):
+            return False
+        source = self.source_catalog.source(source_ref)
+        param = next(item for item in source.params if item.param_ref == target_ref)
+        fields = set(self._parameter_correspondence_fields(source_ref, target_ref))
+        node = self.index.expression_by_ref.get(self._requirement_value_ref(owner_ref))
+        canonical = {item.canonical_value_id: item for item in self.canonical_values}
+        canonical_value = canonical.get(value_ref) if value_ref is not None else None
+        if canonical_value is not None and value_ref not in self.requirement_value_refs(owner_ref):
+            return False
+        left = self.index.fact_local_ref_by_local_id.get(getattr(node, "left_ref", ""))
+        right = getattr(node, "right_ref", None)
+        direct_comparison = left is not None and isinstance(self.index.term_by_ref.get(left), FactTerm) and right in self.index.input_by_ref
+        if canonical_value is not None:
+            direct_comparison = direct_comparison and canonical_value.input_ref == right
+        population = self.parameter_population(source_ref, target_ref)
+        if population is not None and population.comparison_operator:
+            from fervis.lookup.source_binding.population_values import parameter_comparison_field
+            try:
+                field = parameter_comparison_field(source, param, population)
+            except ValueError:
+                return False
+            wanted_operator = getattr(getattr(node, "operator", None), "value", None)
+            same_predicate = wanted_operator == population.comparison_operator
+            equality_union = (wanted_operator == "in" and population.comparison_operator == "equals"
+                and isinstance(right, str) and right in self.index.input_by_ref and isinstance(self.index.input_by_ref[right].value_type, CollectionType)
+                and param.type not in {RowSourceValueType.ARRAY, RowSourceValueType.LIST})
+            if direct_comparison and projection in {ValueProjectionKind.WHOLE_VALUE, ValueProjectionKind.IDENTITY_COMPONENT} and (same_predicate or equality_union):
+                fields.add(field.field_ref)
+        for fact_ref in self.requirement_fact_refs(owner_ref):
+            chosen = [(ref_source, refs) for ref, branch, ref_source, refs in self.realized_fact_fields
+                      if ref == fact_ref and branch == branch_id]
+            if chosen and not any(ref_source == source_ref and bool(fields.intersection(refs)) for ref_source, refs in chosen):
+                return False
+        return True
+
+    def _surface_matches_realized_fact(
+        self, surface: SourceChoiceSurface, fact_ref: str, branch_id: str
+    ) -> bool:
+        chosen = tuple(
+            (source, fields)
+            for ref, branch, source, fields in self.realized_fact_fields
+            if ref == fact_ref and branch == branch_id
+        )
         if surface.kind is not SourceChoiceSurfaceKind.RETURNED_FIELD:
-            return self._parameter_controls_rows(surface.source_ref, surface.target_ref)
-        chosen = tuple((source, fields) for ref, branch, source, fields in self.realized_fact_fields
-                       if ref == fact_ref and branch == branch_id)
-        return not chosen or any(surface.source_ref == source and surface.target_ref in fields
-                                 for source, fields in chosen)
+            if not self._parameter_controls_rows(surface.source_ref, surface.target_ref):
+                return False
+            if not chosen:
+                return True
+            fields = self._parameter_correspondence_fields(surface.source_ref, surface.target_ref)
+            return any(source_ref == surface.source_ref and bool(fields.intersection(chosen_fields))
+                       for source_ref, chosen_fields in chosen)
+        return not chosen or any(
+            surface.source_ref == source and surface.target_ref in fields
+            for source, fields in chosen
+        )
 
     def _requirement_is_row_predicate(self, requirement_ref: str) -> bool:
         ref = self._requirement_value_ref(requirement_ref)
@@ -996,7 +1114,10 @@ class SemanticSourceBindingRequest:
             )
             and (fact_refs := self.requirement_fact_refs(requirement.requirement_ref))
             and len(fact_refs) == 1
-            and all(self._surface_matches_realized_fact(surface, ref, branch_id) for ref in fact_refs)
+            and all(
+                self._surface_matches_realized_fact(surface, ref, branch_id)
+                for ref in fact_refs
+            )
             and all(
                 self._choice_surface_supports_fact(
                     source_type,
@@ -1008,11 +1129,6 @@ class SemanticSourceBindingRequest:
         required_owner = self._required_target_owners.get(surface.target_ref)
         return (
             *boolean_refs,
-            *(
-                owner
-                for owner, scoped in self.raw_subject_scope_surfaces.items()
-                if scoped.surface_ref == surface.surface_ref
-            ),
             *(
                 (required_owner,)
                 if required_owner == f"source_required:{surface.target_ref}"
@@ -1083,8 +1199,15 @@ class SemanticSourceBindingRequest:
             surface,
             branch_id=branch_id,
         )
-        # A logical Boolean property need not have the same polarity as an
-        # API flag (for example, inactive can bind is_active=false).
+        if surface.kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER:
+            from fervis.lookup.source_binding.population_values import covers_population
+            source = self.source_catalog.source(surface.source_ref)
+            param = next(param for param in source.params if param.param_ref == surface.target_ref)
+            effective = replace(param, population=self.parameter_population(source.id, param.param_ref))
+            if covers_population(source, effective, (choice.value,)):
+                boolean_owners = {item.requirement_ref for item in self.index.boolean_requirements}
+                return tuple(ref for ref in requirement_refs if ref not in boolean_owners)
+        # A logical Boolean property need not have the same polarity as an API flag.
         return requirement_refs
 
     def explicit_subject_requirement_refs(
@@ -1105,7 +1228,22 @@ class SemanticSourceBindingRequest:
         param = next(
             item for item in source.params if item.param_ref == surface.target_ref
         )
-        return requires_caller_supplied_input(param)
+        return requires_caller_supplied_input(param) and not self.access_supplies(source.id,param.param_ref)
+
+    def access_supplies(self, source_ref: str, parameter_ref: str) -> bool:
+        source=self.source_catalog.source(source_ref)
+        return parameter_ref in self.source_catalog.read_access.supplied_parameters(source)
+
+    def complete_read_arguments(self, source_ref: str, parameter_ref: str) -> tuple[str, ...]:
+        from fervis.lookup.source_binding.population_values import population_values
+
+        source = self.source_catalog.source(source_ref)
+        param = next(item for item in source.params if item.param_ref == parameter_ref)
+        if param.semantics is not ParameterSemantics.OPAQUE_QUERY_PARAM:
+            return ()
+        return population_values(source, replace(
+            param, population=self.parameter_population(source_ref, parameter_ref)
+        ))
 
     @property
     def _required_target_owners(self) -> dict[str, str]:
@@ -1115,12 +1253,15 @@ class SemanticSourceBindingRequest:
         owners: dict[str, str] = {}
         for source in self.source_catalog.sources:
             for param in source.params:
-                if not param.required or param.default is not None:
+                if (not param.required or param.default is not None
+                        or self.complete_read_arguments(source.id, param.param_ref)
+                        or self.access_supplies(source.id,param.param_ref)):
                     continue
                 matching_requirements = tuple(
                     requirement_ref
                     for requirement_ref in requirement_refs
-                    if self._parameter_controls_rows(source.id, param.param_ref) and any(
+                    if self._parameter_controls_rows(source.id, param.param_ref)
+                    and any(
                         option.target_ref == param.param_ref
                         and option.value_ref
                         in self.requirement_value_refs(requirement_ref)
@@ -1159,6 +1300,8 @@ def source_binding_clarification(
                     not param.required
                     or param.default is not None
                     or (source_ref, param.param_ref) in options
+                    or request.complete_read_arguments(source_ref, param.param_ref)
+                    or request.access_supplies(source_ref,param.param_ref)
                 ):
                     continue
                 missing.append(
@@ -1171,7 +1314,9 @@ def source_binding_clarification(
                         target_ref=param.param_ref,
                         label=param.description or param.name,
                         value_type=param.type.value,
-                        allowed_values=tuple(str(item) for item in param.finite_choices),
+                        allowed_values=tuple(
+                            str(item) for item in param.finite_choices
+                        ),
                         evidence_refs=(
                             request.source_catalog.contract_snapshot.ref,
                             source_ref,
@@ -1186,15 +1331,29 @@ def source_binding_clarification(
     )
 
 
-def source_required_inputs_are_satisfiable(
+def source_inputs_allow_candidate_discovery(
     source,
     *,
     values: tuple[FactValue, ...],
+    read_access=None,
 ) -> bool:
-    """Whether current values can supply every caller-required source input."""
+    """Retain candidates with values or API controls awaiting interpretation.
+
+    This is recall eligibility, not execution authority. Required opaque API
+    controls remain candidates until source population evidence is interpreted;
+    binding still requires a concrete, verified argument or clarification.
+    """
+    from fervis.lookup.relation_catalog.row_sources import RowSourceKind
+
+    from .population_values import supports_population_argument
 
     return all(
         not requires_caller_supplied_input(param)
+        or (read_access is not None and param.param_ref in read_access.supplied_parameters(source))
+        or (source.kind is RowSourceKind.API_READ
+            and param.source == "query"
+            and param.semantics is ParameterSemantics.OPAQUE_QUERY_PARAM
+            and supports_population_argument(param))
         or bool(param.finite_choices)
         or any(
             compatible_fact_value_projections(

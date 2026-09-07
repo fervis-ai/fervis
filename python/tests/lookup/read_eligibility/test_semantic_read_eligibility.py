@@ -89,17 +89,19 @@ def test_read_eligibility_assesses_one_api_read_instead_of_its_row_paths() -> No
 
 def test_read_eligibility_sees_declared_cross_read_relations() -> None:
     [index] = _semantic_contract().semantic_indexes
-    catalog = RelationCatalog(
-        reads=(_location_with_area_read(), _area_read())
-    )
+    catalog = RelationCatalog(reads=(_location_with_area_read(), _area_read()))
     request = _request(index=index, catalog=catalog)
 
-    prompt = SemanticReadEligibilityTurnPrompt(request).to_model_invocation(
-        build_turn_prompt_context(
-            current_question="How many locations are in an area?",
-            conversation_context={},
+    prompt = (
+        SemanticReadEligibilityTurnPrompt(request)
+        .to_model_invocation(
+            build_turn_prompt_context(
+                current_question="How many locations are in an area?",
+                conversation_context={},
+            )
         )
-    ).prompt_text
+        .prompt_text
+    )
 
     assert (
         '<relation left_source="list_location_list" '
@@ -545,9 +547,7 @@ def _semantic_contract() -> ParsedSemanticQuestionContract:
                                     "ordering_request_basis": (
                                         "The question requests no ordering."
                                     ),
-                                    "ordering": {
-                                        "kind": "no_ordering_requested"
-                                    },
+                                    "ordering": {"kind": "no_ordering_requested"},
                                     "selection": {"kind": "all_results"},
                                 },
                             },
@@ -592,7 +592,7 @@ def _semantic_contract() -> ParsedSemanticQuestionContract:
                         "origin": _origin("staff members named Ada"),
                         "candidate_set": {
                             "instance_kind": "staff members",
-                            "instance_interpretation": "normal_business_instance",
+                            "instance_interpretation": "resource_population",
                         },
                         "set_graph": {
                             "identity_input_relations": {"i1": None},

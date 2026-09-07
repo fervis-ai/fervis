@@ -1039,7 +1039,7 @@ def _question_contract(
                 subject=Subject(
                     set_ref="s1",
                     instance_interpretation=(
-                        InstanceInterpretation.NORMAL_BUSINESS_INSTANCE
+                        InstanceInterpretation.RESOURCE_POPULATION
                     ),
                 ),
                 qualification_ref=None,

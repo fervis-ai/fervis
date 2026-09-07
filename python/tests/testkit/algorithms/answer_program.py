@@ -28,7 +28,7 @@ from fervis.lookup.answer_program.instantiation import (
     instantiate_answer_program,
 )
 from fervis.lookup.answer_program.invocation import RuntimePorts, invoke_answer_program
-from fervis.lookup.answer_program.instantiation import _instantiate_operations
+from fervis.lookup.answer_program.instantiation import instantiate_relation_operations
 from fervis.lookup.answer_program.revisions import (
     apply_capability,
     canonical_capability_application_json,
@@ -374,7 +374,7 @@ def run_answer_program_order_take_case(payload: dict[str, Any]) -> list[str]:
             value=str(input_payload["value"]),
         ),
     )
-    _operations, inputs = _instantiate_operations(
+    _operations, inputs = instantiate_relation_operations(
         AnswerProgram(
             operations=(
                 Operation(
@@ -429,7 +429,7 @@ def run_answer_program_projected_operation_inputs_case(
             value="day",
         ),
     )
-    _operations, inputs = _instantiate_operations(
+    _operations, inputs = instantiate_relation_operations(
         AnswerProgram(
             parameters=(parameter,),
             operations=(

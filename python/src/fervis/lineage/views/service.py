@@ -793,6 +793,8 @@ def _proof_view(
         contributions=_contributions(payload),
         applied_inputs=_applied_inputs(payload),
         source_reads=proof_source_reads,
+        required_source_read_ids=tuple(sorted(proof_source_read_ids(payload))),
+        execute_step_id=proof_row.execute_step_id,
     )
 
 

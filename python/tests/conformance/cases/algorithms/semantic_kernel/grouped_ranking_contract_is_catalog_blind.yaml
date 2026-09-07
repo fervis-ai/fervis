@@ -74,7 +74,7 @@ input:
           resolved_input_ref: null
         candidate_set:
           instance_kind: delivery occurrences
-          instance_interpretation: normal_business_instance
+          instance_interpretation: resource_population
         set_graph:
           identity_input_relations: {}
           requested_output_relations: {}

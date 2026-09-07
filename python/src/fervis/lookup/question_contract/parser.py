@@ -1340,7 +1340,7 @@ class _NestedExpressionParser:
         self._terms = terms
         self._origin_for = origin_for
         self._facts: list[FactTerm] = []
-        self._fact_refs_by_origin: dict[tuple[str, SourceOrigin], list[str]] = {}
+        self._fact_refs_by_origin: dict[tuple[str, SourceOrigin, bool], list[str]] = {}
         self._expressions: list[ExpressionNode] = []
         self._expression_ref_by_value: dict[ExpressionNode, str] = {}
         self._expression_ref_by_group_ref: dict[str, str] = {}
@@ -1538,7 +1538,10 @@ class _NestedExpressionParser:
         value_type: ScalarType,
         origin: SourceOrigin,
     ) -> str:
-        key = (observed_for_ref, origin)
+        # Identity and observed-property terms remain different even when their
+        # prose origin is equal. Type refinement must not turn a returned value
+        # into an identity after output validation has already accepted it.
+        key = (observed_for_ref, origin, isinstance(value_type, IdentifierType))
         for existing in self._fact_refs_by_origin.get(key, ()):
             index = next(
                 index for index, fact in enumerate(self._facts) if fact.id == existing

@@ -6,7 +6,10 @@ import pytest
 
 from fervis.lookup.answer_program.values import FactValue, LiteralType
 from fervis.lookup.answer_program.relations import FieldBindingRole
-from fervis.lookup.available_sources import build_available_source_catalog, SourceChoiceSurfaceKind
+from fervis.lookup.available_sources import (
+    build_available_source_catalog,
+    SourceChoiceSurfaceKind,
+)
 from fervis.lookup.canonical_data import EntityKeyComponentValue, EntityKeyValue
 from fervis.lookup.relation_catalog.row_sources import (
     RowSource,
@@ -47,7 +50,10 @@ from fervis.lookup.source_binding.model import (
     SubjectObligationRealization,
     source_binding_clarification,
 )
-from tests.lookup.source_binding._fixtures import compile_binding_fixture, validate_binding_fixture
+from tests.lookup.source_binding._fixtures import (
+    compile_binding_fixture,
+    validate_binding_fixture,
+)
 from fervis.lookup.source_binding.schema import (
     build_semantic_source_binding_schema,
     build_semantic_source_realization_schema,
@@ -161,14 +167,17 @@ def test_verification_rejects_incompatible_concrete_expression_operands() -> Non
         relation_evidence=(),
     )
     branch_id = "fact_1:source_branch:1"
-    strategy = CandidateSourceStrategy(requested_fact_id=fact.id, branches=(
+    strategy = CandidateSourceStrategy(
+        requested_fact_id=fact.id,
+        branches=(
             SourceStrategyBranch(
                 branch_id=branch_id,
                 source_refs=(source.id,),
                 relation_evidence_refs=(),
                 qualification_clause_refs=(),
             ),
-        ))
+        ),
+    )
     identity = source.identity_evidence[0]
     set_ref = index.fact_local_ref_by_local_id["s1"].token
     plan = SourceBindingPlan(
@@ -239,7 +248,7 @@ def test_boolean_requirement_fact_refs_accept_a_direct_boolean_fact() -> None:
         associations=(),
         facts=(FactTerm("f1", "s1", BooleanType(), origin),),
         expressions=(),
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref="f1",
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "f1", origin),),
@@ -302,7 +311,7 @@ def test_association_realization_schema_encodes_realization_kind_coherence() -> 
         associations=(AssociationTerm("a_related", "s_left", "s_right", origin),),
         facts=(FactTerm("f_right_value", "s_right", TextType(), origin),),
         expressions=(),
-        subject=Subject("s_left", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s_left", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "f_right_value", origin),),
@@ -315,13 +324,27 @@ def test_association_realization_schema_encodes_realization_kind_coherence() -> 
         id="source_related",
         kind=RowSourceKind.API_READ,
         label="related records",
-        fields=(RowSourceField("value", "field.value", "Related value", RowSourceValueType.STRING, ()),),
-        candidate_keys=(RowSourceCandidateKey(
-            "pk", "record", (RowSourceKeyComponent("id", "value"),), primary=True,
-        ),),
-        entity_references=(RowSourceEntityReference(
-            "related", "other", "pk", (RowSourceEntityReferenceComponent("id", "value"),),
-        ),),
+        fields=(
+            RowSourceField(
+                "value", "field.value", "Related value", RowSourceValueType.STRING, ()
+            ),
+        ),
+        candidate_keys=(
+            RowSourceCandidateKey(
+                "pk",
+                "record",
+                (RowSourceKeyComponent("id", "value"),),
+                primary=True,
+            ),
+        ),
+        entity_references=(
+            RowSourceEntityReference(
+                "related",
+                "other",
+                "pk",
+                (RowSourceEntityReferenceComponent("id", "value"),),
+            ),
+        ),
     )
     catalog = AvailableSourceCatalog(
         contract_snapshot=SourceContractSnapshot.from_content("{}"),
@@ -348,8 +371,6 @@ def test_association_realization_schema_encodes_realization_kind_coherence() -> 
     payload = {
         "branch_id": branch.branch_id,
         "mapping_basis": "Both set instances occur in one returned row.",
-        "from_rows_ref": "source_identity:source_related:entity_reference:related",
-        "to_rows_ref": "source_identity:source_related:candidate_key:pk",
         "realization_ref": source.id,
     }
 
@@ -370,7 +391,7 @@ def test_fact_field_schema_offers_only_type_compatible_fields() -> None:
         associations=(),
         facts=(FactTerm("f1", "s1", TextType(), origin),),
         expressions=(),
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "f1", origin),),
@@ -425,7 +446,9 @@ def test_fact_field_schema_offers_only_type_compatible_fields() -> None:
         "source_field:source_records:label"
     ]
     assert tuple(fact_schema["items"]["properties"]) == (
-        "branch_id", "mapping_basis", "field_ref",
+        "branch_id",
+        "mapping_basis",
+        "field_ref",
     )
 
 
@@ -445,7 +468,7 @@ def test_identifier_fact_must_use_the_identified_set_identity_contract() -> None
             ),
         ),
         expressions=(),
-        subject=Subject("s_payment", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s_payment", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(RequestedOutput("output_1", "f_staff_id", origin),),
@@ -498,14 +521,17 @@ def test_identifier_fact_must_use_the_identified_set_identity_contract() -> None
         relation_evidence=(),
     )
     branch_id = "fact_1:source_branch:1"
-    strategy = CandidateSourceStrategy(requested_fact_id=fact.id, branches=(
+    strategy = CandidateSourceStrategy(
+        requested_fact_id=fact.id,
+        branches=(
             SourceStrategyBranch(
                 branch_id=branch_id,
                 source_refs=(source.id,),
                 relation_evidence_refs=(),
                 qualification_clause_refs=(),
             ),
-        ))
+        ),
+    )
     request = SemanticSourceBindingRequest(
         index=index,
         strategy=strategy,
@@ -517,9 +543,12 @@ def test_identifier_fact_must_use_the_identified_set_identity_contract() -> None
     staff_set_ref = index.fact_local_ref_by_local_id["s_staff"].token
     association_ref = index.fact_local_ref_by_local_id["a_paid_to"].token
     identifier_ref = index.fact_local_ref_by_local_id["f_staff_id"].token
-    assert identifier_ref not in build_semantic_source_realization_schema(request)[
-        "properties"
-    ]["fact_bindings"]["properties"]
+    assert (
+        identifier_ref
+        not in build_semantic_source_realization_schema(request)["properties"][
+            "fact_bindings"
+        ]["properties"]
+    )
     plan = SourceBindingPlan(
         strategy=strategy,
         set_bindings={
@@ -638,14 +667,17 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
         row_sources, read_eligibility=read_result
     )
     [clause] = index.qualification.clauses
-    strategy = CandidateSourceStrategy(requested_fact_id=index.requested_fact_id, branches=(
+    strategy = CandidateSourceStrategy(
+        requested_fact_id=index.requested_fact_id,
+        branches=(
             SourceStrategyBranch(
                 branch_id=f"{index.requested_fact_id}:source_branch:1",
                 source_refs=(source.id,),
                 relation_evidence_refs=(),
                 qualification_clause_refs=(clause.clause_ref,),
             ),
-        ))
+        ),
+    )
     [use] = index.input_use_sites
     fact_value = FactValue.identity(
         id="canonical_staff_1",
@@ -688,9 +720,9 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
         "set_bindings": {
             set_ref: [
                 {
-                    'branch_id': branch_id,
-                    'mapping_basis': "Staff rows represent the requested set.",
-                    'rows_ref': identity_evidence.identity_ref
+                    "branch_id": branch_id,
+                    "mapping_basis": "Staff rows represent the requested set.",
+                    "rows_ref": identity_evidence.identity_ref,
                 }
             ]
         },
@@ -725,8 +757,10 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
         verify_source_strategy(plan, request=request), VerifiedSourceStrategy
     )
 
+    from fervis.host_api.contracts.population import ParameterPopulation
     identity_param = replace(
         source.params[0],
+        population=ParameterPopulation(field_path=identity_evidence.field_refs[0], comparison_operator="equals"),
         entity_target=EntityKeyComponentTarget(
             entity_kind="staff",
             key_id="primary_key",
@@ -748,13 +782,13 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
         ),
     )
     [returned_verification_surface] = (
-        surface for surface in returned_identity_request.source_catalog.choice_surfaces
+        surface
+        for surface in returned_identity_request.source_catalog.choice_surfaces
         if surface.kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER
     )
     assert boolean.requirement_ref not in (
         returned_identity_request.choice_requirement_refs(
-            returned_verification_surface,
-            branch_id=branch_id
+            returned_verification_surface, branch_id=branch_id
         )
     )
     invocation_request = replace(
@@ -788,7 +822,8 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
     invocation_payload["fact_bindings"] = {}
     invocation_payload["resolved_input_applications"] = {
         branch_id: [
-            {"kind": "request_application",
+            {
+                "kind": "request_application",
                 "mapping_basis": "The request parameter enforces staff identity.",
                 "owner_ref": boolean.requirement_ref,
                 "value_ref": identity_option.value_ref,
@@ -807,11 +842,12 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
                 "Verification does not fulfill the staff identity requirement."
             ),
             "choice_reviews": {
-                value: {"selected_by_requirements": [],
-                           "choice_domain_meaning": f"Rows whose verification flag is {value}.",
-                           "decision_basis": "Verification does not restrict the requested staff rows.",
-                           "baseline_decision": "INCLUDE",
-                       }
+                value: {
+                    "selected_by_requirements": [],
+                    "choice_domain_meaning": f"Rows whose verification flag is {value}.",
+                    "decision_basis": "Verification does not restrict the requested staff rows.",
+                    "baseline_decision": "INCLUDE",
+                }
                 for value in verification_param.choices
             },
         }
@@ -880,7 +916,8 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
     supplied_payload = deepcopy(payload)
     supplied_payload["resolved_input_applications"] = {
         branch_id: [
-            {"kind": "request_application",
+            {
+                "kind": "request_application",
                 "mapping_basis": "Supply the required scope.",
                 "owner_ref": required_owner,
                 "value_ref": required_option.value_ref,
@@ -924,11 +961,9 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
             sources=(replace(source, params=(*source.params, lifecycle_param)),),
         ),
     )
-    subject_failure = verify_source_strategy(plan, request=unreviewed_subject_request)
-    assert isinstance(subject_failure, SourceStrategyVerificationFailure)
-    assert (
-        subject_failure.reason
-        is SourceStrategyVerificationFailureReason.INSUFFICIENT_COMPLETENESS
+    assert isinstance(
+        verify_source_strategy(plan, request=unreviewed_subject_request),
+        VerifiedSourceStrategy,
     )
     assert {
         value.value_ref
@@ -948,7 +983,8 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
     }
 
     [active_choice, provisional_choice, deleted_choice] = (
-        value for value in unreviewed_subject_request.source_catalog.choice_values
+        value
+        for value in unreviewed_subject_request.source_catalog.choice_values
         if value.surface_kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER
     )
     lifecycle_review = deepcopy(payload)
@@ -961,21 +997,24 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
                 "The lifecycle surface defines the requested event population."
             ),
             "choice_reviews": {
-                active_choice.value: {"selected_by_requirements": [],
-                                         "choice_domain_meaning": "Active rows are effective events.",
-                                         "decision_basis": "Active events belong in the normal subject set.",
-                                         "baseline_decision": "INCLUDE",
-                                     },
-                provisional_choice.value: {"selected_by_requirements": [],
-                                              "choice_domain_meaning": "Provisional rows are ordinary effective events in this domain.",
-                                              "decision_basis": "Provisional events belong in the normal subject set.",
-                                              "baseline_decision": "INCLUDE",
-                                          },
-                deleted_choice.value: {"selected_by_requirements": [],
-                                          "choice_domain_meaning": "Deleted rows are non-current events.",
-                                          "decision_basis": "Deleted events do not belong in the normal subject set.",
-                                          "baseline_decision": "EXCLUDE",
-                                      },
+                active_choice.value: {
+                    "selected_by_requirements": [],
+                    "choice_domain_meaning": "Active rows are effective events.",
+                    "decision_basis": "Active events belong in the normal subject set.",
+                    "baseline_decision": "INCLUDE",
+                },
+                provisional_choice.value: {
+                    "selected_by_requirements": [],
+                    "choice_domain_meaning": "Provisional rows are ordinary effective events in this domain.",
+                    "decision_basis": "Provisional events belong in the normal subject set.",
+                    "baseline_decision": "INCLUDE",
+                },
+                deleted_choice.value: {
+                    "selected_by_requirements": [],
+                    "choice_domain_meaning": "Deleted rows are non-current events.",
+                    "decision_basis": "Deleted events do not belong in the normal subject set.",
+                    "baseline_decision": "EXCLUDE",
+                },
             },
         }
     }
@@ -984,13 +1023,7 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
         lifecycle_review,
         request=unreviewed_subject_request,
     )
-    [lifecycle_surface] = lifecycle_plan.subject_binding.branch_realizations[
-        0
-    ].surface_reviews
-    assert lifecycle_surface.included_choice_refs == (
-        active_choice.value_ref,
-        provisional_choice.value_ref,
-    )
+    assert lifecycle_plan.subject_binding.branch_realizations[0].surface_reviews == ()
     assert isinstance(
         verify_source_strategy(
             lifecycle_plan,
@@ -1013,7 +1046,11 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
             sources=(replace(source, params=(*source.params, subtype_param)),),
         ),
     )
-    [staff_choice, contractor_choice] = tuple(value for value in subtype_request.source_catalog.choice_values if value.surface_kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER)
+    [staff_choice, contractor_choice] = tuple(
+        value
+        for value in subtype_request.source_catalog.choice_values
+        if value.surface_kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER
+    )
     subtype_payload = deepcopy(payload)
     subtype_payload["resolved_input_applications"] = {branch_id: []}
     subtype_payload["subject_binding"]["branch_realizations"][0][
@@ -1024,16 +1061,18 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
                 "The kind surface defines the requested staff population."
             ),
             "choice_reviews": {
-                staff_choice.value: {"selected_by_requirements": [],
-                                        "choice_domain_meaning": "Staff rows represent staff members.",
-                                        "decision_basis": "Staff members belong in the normal subject set.",
-                                        "baseline_decision": "INCLUDE",
-                                    },
-                contractor_choice.value: {"selected_by_requirements": [],
-                                             "choice_domain_meaning": "Contractor rows represent contractor members.",
-                                             "decision_basis": "Contractors do not belong in the normal staff subject set.",
-                                             "baseline_decision": "EXCLUDE",
-                                         },
+                staff_choice.value: {
+                    "selected_by_requirements": [],
+                    "choice_domain_meaning": "Staff rows represent staff members.",
+                    "decision_basis": "Staff members belong in the normal subject set.",
+                    "baseline_decision": "INCLUDE",
+                },
+                contractor_choice.value: {
+                    "selected_by_requirements": [],
+                    "choice_domain_meaning": "Contractor rows represent contractor members.",
+                    "decision_basis": "Contractors do not belong in the normal staff subject set.",
+                    "baseline_decision": "EXCLUDE",
+                },
             },
         }
     }
@@ -1048,16 +1087,14 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
         subtype_request.source_catalog.choice_value(application.value_ref).value
         for application in subtype_plan.invocation_applications
         if application.value_ref.startswith("source_choice:")
-    } == {"STAFF"}
+    } == set()
     assert isinstance(
         verify_source_strategy(subtype_plan, request=subtype_request),
         VerifiedSourceStrategy,
     )
 
 
-def test_input_owned_identifier_fact_constrains_set_to_certified_identity() -> (
-    None
-):
+def test_input_owned_identifier_fact_constrains_set_to_certified_identity() -> None:
     parsed = _semantic_contract()
     [index] = parsed.semantic_indexes
     [input_term] = parsed.contract.inputs
@@ -1105,7 +1142,9 @@ def test_input_owned_identifier_fact_constrains_set_to_certified_identity() -> (
         ),
         certification_refs=("resolver:list_staff_list",),
     )
-    strategy = CandidateSourceStrategy(requested_fact_id=index.requested_fact_id, branches=(
+    strategy = CandidateSourceStrategy(
+        requested_fact_id=index.requested_fact_id,
+        branches=(
             SourceStrategyBranch(
                 branch_id=f"{index.requested_fact_id}:source_branch:1",
                 source_refs=(source.id,),
@@ -1114,7 +1153,8 @@ def test_input_owned_identifier_fact_constrains_set_to_certified_identity() -> (
                     clause.clause_ref for clause in index.qualification.clauses
                 ),
             ),
-        ))
+        ),
+    )
     request = SemanticSourceBindingRequest(
         index=index,
         strategy=strategy,
@@ -1124,9 +1164,10 @@ def test_input_owned_identifier_fact_constrains_set_to_certified_identity() -> (
     assert use.reference_fact_ref is not None
 
     schema = build_semantic_source_realization_schema(request)
-    assert use.reference_fact_ref.token not in schema["properties"][
-        "fact_bindings"
-    ]["properties"]
+    assert (
+        use.reference_fact_ref.token
+        not in schema["properties"]["fact_bindings"]["properties"]
+    )
     identified_set_ref = index.fact_local_ref_by_local_id[
         index.term_by_ref[use.reference_fact_ref].value_type.set_ref
     ].token

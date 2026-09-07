@@ -249,7 +249,7 @@ ExpressionNode: TypeAlias = (
 
 
 class InstanceInterpretation(StrEnum):
-    NORMAL_BUSINESS_INSTANCE = "normal_business_instance"
+    RESOURCE_POPULATION = "resource_population"
     RAW_DATA_RECORD = "raw_data_record"
 
 
@@ -298,7 +298,9 @@ class PositionWithTies:
     limit_input_ref: str
 
 
-ResultSelection: TypeAlias = AllResults | FirstRankWithTies | TakeWithBoundaryTies | PositionWithTies
+ResultSelection: TypeAlias = (
+    AllResults | FirstRankWithTies | TakeWithBoundaryTies | PositionWithTies
+)
 
 
 @dataclass(frozen=True)

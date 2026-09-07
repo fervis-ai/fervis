@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
+
 from fervis.lookup.source_binding.model import SemanticSourceBindingRequest
-from fervis.lookup.source_binding.membership import SourceMembership
+from fervis.lookup.source_binding.model import SourceRealization
 from fervis.lookup.available_sources import SourceChoiceSurfaceKind, SourceFieldBinding
 from fervis.lookup.source_binding.schema import (
     build_semantic_source_binding_schema,
     build_semantic_source_realization_schema,
     build_unavailable_source_realization_schema,
-)
-from fervis.lookup.source_binding.subject_obligations import (
-    NORMAL_INSTANCE_EXCLUDED_STATE_ROLES,
 )
 from fervis.lookup.question_contract import (
     FactTerm,
@@ -56,7 +54,9 @@ class _SourcePromptBase(TurnPromptBase):
                 "Semantic requirements:", self._requirements_payload(), indent=2
             ),
             builder.json_section(
-                "Available binding scope and sources:", self._sources_payload(), indent=2
+                "Available binding scope and sources:",
+                self._sources_payload(),
+                indent=2,
             ),
             builder.json_section(
                 "Canonical input values:", self._values_payload(), indent=2
@@ -64,15 +64,26 @@ class _SourcePromptBase(TurnPromptBase):
         )
 
     def _choice_surface_payload(self, source_ref, target_ref, kind):
-        surface = self.request.source_catalog.choice_surface_at(source_ref, target_ref, kind)
+        surface = self.request.source_catalog.choice_surface_at(
+            source_ref, target_ref, kind
+        )
         return {
             "choice_surface_ref": surface.surface_ref if surface is not None else None,
             "choices": [
-                {"value_ref": value.value_ref, "value": value.value, "label": value.label,
-                 "explicit_subject_requirement_refs": list(dict.fromkeys(
-                     ref for branch in self.request.strategy.branches
-                     for ref in self.request.explicit_subject_requirement_refs(value, branch_id=branch.branch_id)
-                 ))}
+                {
+                    "value_ref": value.value_ref,
+                    "value": value.value,
+                    "label": value.label,
+                    "explicit_subject_requirement_refs": list(
+                        dict.fromkeys(
+                            ref
+                            for branch in self.request.strategy.branches
+                            for ref in self.request.explicit_subject_requirement_refs(
+                                value, branch_id=branch.branch_id
+                            )
+                        )
+                    ),
+                }
                 for value in (surface.values if surface is not None else ())
             ],
         }
@@ -104,15 +115,7 @@ class _SourcePromptBase(TurnPromptBase):
                 "kind": (
                     "RAW_DATA_RECORD"
                     if isinstance(index.subject_obligation, RawDataRecord)
-                    else "NORMAL_BUSINESS_INSTANCE"
-                ),
-                "excluded_state_roles": (
-                    []
-                    if isinstance(index.subject_obligation, RawDataRecord)
-                    else [
-                        {"role": item.role.value, "definition": item.definition}
-                        for item in NORMAL_INSTANCE_EXCLUDED_STATE_ROLES
-                    ]
+                    else "RESOURCE_POPULATION"
                 ),
             },
         }
@@ -135,16 +138,24 @@ class _SourcePromptBase(TurnPromptBase):
                     "description": source.description,
                     "row_path": source.row_path,
                     "row_cardinality": source.row_cardinality.value,
+                    "request_parameters_supplied_by_complete_traversal": sorted(self.request.source_catalog.read_access.supplied_parameters(source)),
                     "parent_row_path": source.parent_row_path,
                     "fields": [
                         {
                             "field_ref": SourceFieldBinding(source.id, field).ref,
                             "response_path": field.response_path,
                             "label": field.label,
+                            "description": field.description,
                             "type": field.type.value,
-                            **({"fixed_value":field.declared_entity_kind} if field.declared_entity_kind else {}),
+                            **(
+                                {"fixed_value": field.declared_entity_kind}
+                                if field.declared_entity_kind
+                                else {}
+                            ),
                             **self._choice_surface_payload(
-                                source.id, field.field_ref, SourceChoiceSurfaceKind.RETURNED_FIELD,
+                                source.id,
+                                field.field_ref,
+                                SourceChoiceSurfaceKind.RETURNED_FIELD,
                             ),
                         }
                         for field in source.fields
@@ -160,6 +171,7 @@ class _SourcePromptBase(TurnPromptBase):
                         }
                         for key in source.candidate_keys
                     ],
+                    "union_identity_field_refs": list(source.stable_grain_field_refs),
                     "parameters": [
                         {
                             "parameter_ref": item.param_ref,
@@ -167,8 +179,17 @@ class _SourcePromptBase(TurnPromptBase):
                             "description": item.description,
                             "type": item.type.value,
                             "required": item.required,
+                            "default": item.default,
+                            "default_is_known": item.default_is_known,
+                            "complete_read_arguments": list(self.request.complete_read_arguments(source.id, item.param_ref)),
+                            "row_admission": (
+                                population.to_public_dict()
+                                if (population := self.request.parameter_population(source.id, item.param_ref)) is not None else None
+                            ),
                             **self._choice_surface_payload(
-                                source.id, item.param_ref, SourceChoiceSurfaceKind.REQUEST_PARAMETER,
+                                source.id,
+                                item.param_ref,
+                                SourceChoiceSurfaceKind.REQUEST_PARAMETER,
                             ),
                             "identity_target": (
                                 None
@@ -229,11 +250,10 @@ class _SourcePromptBase(TurnPromptBase):
         }
 
 
-
 SOURCE_REALIZATION_OUTCOME_INSTRUCTION = (
     "Use submit_source_realization only when the shown rows, fields, and relationships semantically realize every required set and fact. "
     "If they do not, use report_unavailable_source_realization and identify the unmet requirement refs. "
-    "Candidate rows may contain extra members when the shown categories or filters can isolate the requested population; ordinary membership and input application are bound next. "
+    "Candidate rows may cover a broader population only when the shown fields can define the logical set. An independent population interpretation must establish executable membership before binding or execution. "
     "Do not substitute a different population or field merely because it is the only structurally compatible choice. "
     "A count or other summary on parent rows does not make those rows instances of the summarized population."
 )
@@ -252,15 +272,22 @@ class SemanticSourceRealizationTurnPrompt(_SourcePromptBase):
     turn_task = "select source rows, fields, and declared relationships for the semantic contract"
 
     def instruction_sections(self, builder):
-        return (builder.instruction_block("Source realization", (
-            "The sources are candidates. Select the rows that represent each declared set and the fields that realize its facts.",
-            "Each association chooses from_rows_ref, to_rows_ref, and realization_ref together from its shown structurally compatible options. These bind the association's declared from_set_ref and to_set_ref.",
-            "A set shared by multiple associations must use the same rows_ref in every association. set_bindings contains only isolated sets without associations; their rows_ref is selected directly.",
-            "Each identity identifies its declared entity kind. A primary key identifies the source row; an entity-reference key identifies the referenced entity.",
-            "Every observed fact requires one field_ref. A fact about a set uses that set's chosen rows. A referenced identity cannot supply scalar fields of the referenced entity.",
-            "Bind a qualification-only fact whenever a returned field expresses it. Leave it unbound only when source predicate mechanics can realize it. Input application and ordinary-instance membership are bound in the next step.",
-            SOURCE_REALIZATION_OUTCOME_INSTRUCTION,
-        )),)
+        return (
+            builder.instruction_block(
+                "Source realization",
+                (
+                    "The sources are candidates. Select the rows that represent each declared set and the fields that realize its facts.",
+                    "Sources describe logical row populations. complete_read_arguments supplies verified controls for retrieving every row with respect to that parameter. When union_identity_field_refs is nonempty, multiple arguments are alternative requests whose results the engine unions using that identity; one unrestricted HTTP request is not required. Population and invocation coverage are verified before execution.",
+                    "request_parameters_supplied_by_complete_traversal are operational inputs obtained from other source rows by the execution engine. They do not require user-supplied identities. Select the resulting logical population on its declared row meaning and fields; its prerequisite reads are already part of the access plan.",
+                    "Each logical set must have an explicit set_binding. Its mapping_basis explains why the selected rows or referenced identities represent that set's instance kind; structural link compatibility does not establish this meaning.",
+                    "Each association selects only relationship evidence connecting its already assigned endpoints. It cannot choose or change either endpoint population. Shared sets have exactly one assignment per branch.",
+                    "Each identity identifies its declared entity kind. A primary key identifies the source row; an entity-reference key identifies the referenced entity.",
+                    "A fact used as a returned value or arithmetic operand requires a field_ref on its chosen rows. A referenced identity cannot supply scalar fields of the referenced entity.",
+                    "For a qualification-only fact, bind a returned field only when it expresses that fact. When a request predicate supplies the qualification and no returned field expresses it, use an empty fact_bindings array. Do not attach another field as a placeholder for an invocation predicate. Input application and exact request predicates are bound in the next step.",
+                    SOURCE_REALIZATION_OUTCOME_INSTRUCTION,
+                ),
+            ),
+        )
 
     def _requirements_payload(self):
         payload = super()._requirements_payload()
@@ -268,11 +295,17 @@ class SemanticSourceRealizationTurnPrompt(_SourcePromptBase):
             ref = FactLocalRef.from_token(item["requirement_ref"])
             term = self.request.index.term_by_ref[ref]
             if isinstance(term, FactTerm):
-                item["owner_ref"] = self.request.index.fact_local_ref_by_local_id[term.owner_ref].token
-                item["observed_value_required"] = ref in self.request.index.observed_fact_refs
+                item["owner_ref"] = self.request.index.fact_local_ref_by_local_id[
+                    term.owner_ref
+                ].token
+                item["observed_value_required"] = (
+                    ref in self.request.index.observed_fact_refs
+                )
             elif ref.kind.value == "set":
                 item["rows_refs"] = list(self.request.row_references_for_set(ref.token))
-        from fervis.lookup.source_binding.association_choices import association_endpoints
+        from fervis.lookup.source_binding.association_choices import (
+            association_endpoints,
+        )
 
         for item in payload["associations"]:
             item["from_set_ref"], item["to_set_ref"] = association_endpoints(
@@ -281,18 +314,28 @@ class SemanticSourceRealizationTurnPrompt(_SourcePromptBase):
         return payload
 
     def response_contract(self):
-        return ProviderResponseContract(provider_schema={
-            spec.name: spec.input_schema for spec in self.tool_contract().tool_specs
-        })
+        return ProviderResponseContract(
+            provider_schema={
+                spec.name: spec.input_schema for spec in self.tool_contract().tool_specs
+            }
+        )
 
     def tool_contract(self):
-        return ProviderToolContract(tool_specs=(
-            required_tool_spec(
-                tool_name="submit_source_realization", tool_description="Submit source row and field realizations.",
-                input_schema=build_semantic_source_realization_schema(self.request),
-            ),
-            unavailable_source_realization_tool_spec(tuple(ref.token for ref in sorted(self.request.index.source_requirement_refs))),
-        ))
+        return ProviderToolContract(
+            tool_specs=(
+                required_tool_spec(
+                    tool_name="submit_source_realization",
+                    tool_description="Submit source row and field realizations.",
+                    input_schema=build_semantic_source_realization_schema(self.request),
+                ),
+                unavailable_source_realization_tool_spec(
+                    tuple(
+                        ref.token
+                        for ref in sorted(self.request.index.source_requirement_refs)
+                    )
+                ),
+            )
+        )
 
 
 SOURCE_INPUT_APPLICATION_INSTRUCTION = (
@@ -309,22 +352,44 @@ class SemanticSourceBindingTurnPrompt(_SourcePromptBase):
     turn_name = "source binding"
     turn_task = "bind inputs and population controls to the fixed source realization"
 
-    def __init__(self, membership: SourceMembership):
-        super().__init__(membership.realization.request)
-        self.realization = membership.realization
-        self.membership = membership
+    def __init__(self, realization: SourceRealization):
+        super().__init__(realization.request)
+        self.realization = realization
 
     def data_sections(self, builder):
         fixed = {
-            "sets": {ref: [{"source_ref": value.source_ref, "identity_ref": value.identity_ref}
-                            for value in values] for ref, values in self.realization.set_bindings.items()},
-            "facts": {ref: [{"source_ref": value.source_ref, "field_refs": list(value.field_refs)}
-                             for value in values] for ref, values in self.realization.fact_bindings.items()},
-            "associations": {ref: [{"source_refs": list(value.source_refs), "relation_evidence_ref": value.relation_evidence_ref}
-                                    for value in values] for ref, values in self.realization.association_bindings.items()},
+            "sets": {
+                ref: [
+                    {"source_ref": value.source_ref, "identity_ref": value.identity_ref}
+                    for value in values
+                ]
+                for ref, values in self.realization.set_bindings.items()
+            },
+            "facts": {
+                ref: [
+                    {
+                        "source_ref": value.source_ref,
+                        "field_refs": list(value.field_refs),
+                    }
+                    for value in values
+                ]
+                for ref, values in self.realization.fact_bindings.items()
+            },
+            "associations": {
+                ref: [
+                    {
+                        "source_refs": list(value.source_refs),
+                        "relation_evidence_ref": value.relation_evidence_ref,
+                    }
+                    for value in values
+                ]
+                for ref, values in self.realization.association_bindings.items()
+            },
         }
-        return (*super().data_sections(builder), builder.json_section("Fixed realizations:", fixed, indent=2),
-                builder.json_section("Fixed ordinary membership:", self.membership.reviews, indent=2))
+        return (
+            *super().data_sections(builder),
+            builder.json_section("Fixed realizations:", fixed, indent=2),
+        )
 
     def instruction_sections(
         self, builder: TurnPromptBuilder
@@ -349,19 +414,18 @@ class SemanticSourceBindingTurnPrompt(_SourcePromptBase):
                     "application_basis states why the selected request surface and choices realize that requirement.",
                     "surface_ref is the one request parameter whose declared meaning expresses the requirement.",
                     "selected_choice_values contains every choice on that surface that satisfies the requirement.",
-                    "Required-source owners select the choices required to invoke that source.",
-                    "For a raw-record subject, subject_scope owners reconsider defaults that may hide requested records. Select the declared choices that expose the requested raw-record scope.",
-                    "Normal-instance reviews do not own requirement application.",
+                    "Required-source owners select the choices required to invoke that source. A finite parameter domain does not prove its result sets cover the requested population; do not invent a population restriction.",
+                    "Every population restriction must implement a shown question requirement or declared invocation requirement.",
                 ),
             ),
             builder.instruction_block(
                 "Choice requirement correspondence",
                 (
-                    "Ordinary membership is fixed evidence. It was classified without explicit question qualifications and cannot be changed here.",
+                    "Preserve the API resource population unless a shown requirement narrows it. Lifecycle state alone is not authority to exclude a resource.",
                     "choice_requirement_applications is keyed by branch, surface, and choice. It states which exact choices satisfy each shown predicate, whether or not that predicate can be pushed into an invocation.",
                     "For each choice, write mapping_basis explaining which shown requirement predicates that exact value satisfies, then selected_by_requirements listing those requirement refs. Use an empty list when this field or choice does not implement a shown predicate.",
                     "A requirement ref means the complete signed predicate. Its presence selects that exact choice as satisfying the predicate; it does not merely say that the choice exists in the same source.",
-                    "An explicit predicate may select a choice excluded from ordinary membership. The runtime combines the fixed baseline with these explicit applications and preserves the full Boolean qualification.",
+                    "The runtime applies these choices only within the Boolean requirement that owns them, preserving the full qualification expression.",
                 ),
             ),
             builder.instruction_block(

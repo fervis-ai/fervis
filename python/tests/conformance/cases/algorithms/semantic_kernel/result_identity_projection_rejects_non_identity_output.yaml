@@ -62,7 +62,7 @@ input:
           meaning: store with highest sales this month
           resolved_input_ref: null
         candidate_set:
-          instance_interpretation: normal_business_instance
+          instance_interpretation: resource_population
         set_graph:
           related_sets:
           - association:

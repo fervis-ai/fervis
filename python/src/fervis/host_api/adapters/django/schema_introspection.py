@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from inspect import getattr_static
 from types import GenericAlias, NoneType, UnionType
 from typing import TypeAlias, Union, get_args, get_origin, get_type_hints
 
@@ -22,7 +23,7 @@ from fervis.host_api.contracts import (
     ParameterContract,
     ResponseFieldContract,
 )
-from fervis.host_api.contracts.values import ContractValue
+from fervis.host_api.contracts.values import ContractValue, serialize_parameter_default
 
 
 @dataclass(frozen=True)
@@ -321,6 +322,7 @@ def _inspect_serializer(
                     name=output_name,
                     type=field_type,
                     path=output_path,
+                    nullable=_response_nullable(serializer_field),
                 )
             )
             nested_schema = _inspect_serializer(
@@ -426,6 +428,14 @@ def _nested_key_binding(
     return owner_model, model_field
 
 
+def _response_nullable(field: serializers.Field) -> bool:
+    # DRF omits missing optional fields; absence cannot prove a closed value domain.
+    return bool(field.allow_null) or (
+        not field.required
+        and (field.default is serializers.empty or field.default is None or callable(field.default))
+    )
+
+
 def _response_field(
     name: str,
     field: serializers.Field,
@@ -438,6 +448,7 @@ def _response_field(
         path=path,
         description=str(getattr(field, "help_text", "") or ""),
         choices=_choices(field),
+        nullable=_response_nullable(field),
     )
 
 
@@ -653,7 +664,8 @@ def query_params_from_serializer(
                 description=str(getattr(field, "help_text", "") or ""),
                 choices=_choices(field),
                 choice_labels=_choice_labels(field),
-                default=_json_safe_default(getattr(field, "default", None)),
+                default=_json_safe_default(field.default, choice_tokens=bool(_choices(field))),
+                default_is_known=field.default is serializers.empty or not callable(field.default),
                 source="query",
                 entity_target=_query_param_entity_target(
                     name,
@@ -672,7 +684,9 @@ def path_param_entity_target(
     param_name: str,
     declared_field: models.Field | None = None,
 ) -> EntityKeyComponentTargetContract | None:
-    identity = _path_param_identity(model, param_name=param_name, declared_field=declared_field)
+    identity = _path_param_identity(
+        model, param_name=param_name, declared_field=declared_field
+    )
     if identity is None:
         return None
     target_model, target_field = identity
@@ -689,7 +703,9 @@ def path_param_candidate_key_authority(
     param_name: str,
     declared_field: models.Field | None = None,
 ) -> CandidateKeyAuthorityContract | None:
-    identity = _path_param_identity(model, param_name=param_name, declared_field=declared_field)
+    identity = _path_param_identity(
+        model, param_name=param_name, declared_field=declared_field
+    )
     if identity is None:
         return None
     target_model, target_field = identity
@@ -818,7 +834,28 @@ def _field_type(field: serializers.Field) -> str:
         method_type = _serializer_method_field_type(field)
         if method_type:
             return method_type
+    if type(field) is serializers.ReadOnlyField:
+        property_type = _readonly_property_type(field)
+        if property_type:
+            return property_type
     return _FIELD_TYPE_MAP.get(field.__class__.__name__, "any")
+
+
+def _readonly_property_type(field: serializers.ReadOnlyField) -> str:
+    model = _serializer_model(type(field.parent))
+    if model is None or field.source == "*":
+        return ""
+    source = _serializer_field_source(str(field.field_name or ""), field)
+    if "." in source:
+        path, source = source.rsplit(".", 1)
+        _, relation = _resolve_model_field(model, source_path=path)
+        model = _related_model(relation) if relation is not None else None
+        if model is None:
+            return ""
+    descriptor = getattr_static(model, source, None)
+    if not isinstance(descriptor, property) or descriptor.fget is None:
+        return ""
+    return _python_type_name(_return_annotation(descriptor.fget))
 
 
 def _serializer_method_field_type(field: serializers.SerializerMethodField) -> str:
@@ -886,14 +923,13 @@ def _choice_labels(field: serializers.Field) -> dict[str, str]:
 
 def _json_safe_default(
     value: ContractValue | Callable[[], ContractValue],
+    *, choice_tokens: bool = False,
 ) -> ContractValue:
     if value is serializers.empty:
         return None
     if callable(value):
         return None
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
+    return serialize_parameter_default(value, choice_tokens=choice_tokens)
 
 
 def _query_param_entity_target(

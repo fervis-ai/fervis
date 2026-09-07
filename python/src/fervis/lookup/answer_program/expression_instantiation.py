@@ -55,6 +55,27 @@ class ResolvedEndpointArg:
 class InstantiatedProgramInputs:
     endpoint_args: tuple[ResolvedEndpointArg, ...] = ()
 
+    @property
+    def values_by_relation(self) -> dict[str, dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for arg in self.endpoint_args:
+            grouped.setdefault(arg.relation_id,{})[arg.param_ref]=arg.value
+        return grouped
+
+    @property
+    def proofs_by_relation(self) -> dict[str, tuple[str, ...]]:
+        grouped: dict[str, list[str]] = {}
+        for arg in self.endpoint_args:
+            grouped.setdefault(arg.relation_id,[]).extend(arg.proof_refs)
+        return {key:tuple(dict.fromkeys(refs)) for key,refs in grouped.items()}
+
+    @property
+    def proofs_by_parameter(self) -> dict[str, dict[str, tuple[str, ...]]]:
+        grouped: dict[str, dict[str, tuple[str, ...]]] = {}
+        for arg in self.endpoint_args:
+            grouped.setdefault(arg.relation_id,{})[arg.param_ref]=arg.proof_refs
+        return grouped
+
 
 def instantiate_program_expressions(
     *,
@@ -116,6 +137,11 @@ def _append_relation_source_endpoint_args(
                 raise VerificationError(
                     f"relation {relation.id} references unknown source param"
                 ) from exc
+            from fervis.lookup.answer_program.expressions import expression_references
+            if expression_references(binding.value_expr).fields:
+                if not relation.source.argument_relation_id:
+                    raise VerificationError("row-valued request argument requires an argument relation")
+                continue
             resolved = _resolve_endpoint_binding(
                 binding,
                 row_source=row_source,
@@ -134,10 +160,12 @@ def _append_relation_source_endpoint_args(
                 if isinstance(resolved.value, tuple)
                 else (resolved.value,)
             )
-            if param.choices and any(value not in param.choices for value in values):
-                raise VerificationError(
-                    f"relation {relation.id} param binding has unknown choice"
-                )
+            from fervis.lookup.relation_catalog.parameter_values import require_catalog_parameter_choice
+            try:
+                for value in values:
+                    require_catalog_parameter_choice(value,type_name=param.type.value,choices=param.choices)
+            except ValueError as exc:
+                raise VerificationError(f"relation {relation.id} param binding has unknown choice") from exc
             _append_endpoint_arg(
                 endpoint_args,
                 endpoint_arg_targets=endpoint_arg_targets,

@@ -117,6 +117,8 @@ class RuntimeErrorKind(StrEnum):
 
 
 class SourceInspectionPhase(StrEnum):
+    IDENTITY = "identity"
+    CONTINUATION_IDENTITY = "continuation_identity"
     CONTINUATION = "continuation"
     SEMANTIC = "semantic"
     EXECUTION = "execution"
@@ -136,6 +138,8 @@ class RunStepKey(StrEnum):
     GROUNDING = "grounding"
     READ_ELIGIBILITY = "read_eligibility"
     PLAN_SELECTION = "plan_selection"
+    SOURCE_ACCESS = "source_access"
+    SOURCE_POPULATION = "source_population"
     SOURCE_REALIZATION = "source_realization"
     SOURCE_BINDING = "source_binding"
     VERIFY = "verify"

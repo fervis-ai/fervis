@@ -37,68 +37,36 @@ class OccurrenceScope:
     def for_source(self, source_ref: str) -> tuple[ReadOccurrence, ...]:
         return tuple(item for item in self.occurrences if item.source_ref == source_ref)
 
-    def choice_included(
-        self, request, choice, *, source_ref: str, occurrence_ref: str
-    ) -> bool:
-        return choice.baseline_included or (
-            choice.explicit_user_override_applies
-            and any(
-                self.owner_applies(
-                    request, owner, source_ref=source_ref, occurrence_ref=occurrence_ref
-                )
-                for owner in choice.selection_requirement_refs
-            )
-        )
-
     def applications_for(
         self, request, plan, *, branch_id: str, occurrence: ReadOccurrence
     ):
         """The invocation applications actually allocated to one logical read."""
-        allocated = []
-        for application in plan.invocation_applications:
-            if (
-                application.branch_id != branch_id
-                or application.source_ref != occurrence.source_ref
-            ):
-                continue
-            if not self.owner_applies(
+        return tuple(
+            application
+            for application in plan.invocation_applications
+            if application.branch_id == branch_id
+            and application.source_ref == occurrence.source_ref
+            and self.owner_applies(
                 request,
                 application.owner_ref,
                 source_ref=occurrence.source_ref,
                 occurrence_ref=occurrence.id,
-            ):
-                continue
-            choices = (
-                choice
-                for branch in plan.subject_binding.branch_realizations
-                if branch.branch_id == branch_id
-                for review in branch.surface_reviews
-                if review.owner_set_ref is None
-                or self.for_set(review.owner_set_ref).id == occurrence.id
-                for choice in review.choice_reviews
-                if choice.choice_ref == application.value_ref
             )
-            if all(
-                self.choice_included(
-                    request,
-                    choice,
-                    source_ref=occurrence.source_ref,
-                    occurrence_ref=occurrence.id,
-                )
-                for choice in choices
-            ):
-                allocated.append(application)
-        return tuple(allocated)
+        )
 
     def owner_applies(
         self, request, owner_ref: str | None, *, source_ref: str, occurrence_ref: str
     ) -> bool:
         from fervis.lookup.question_contract.domains import value_set_dependencies
 
-        if owner_ref is not None and owner_ref.startswith("membership:"):
-            return (
-                self.for_set(owner_ref.removeprefix("membership:")).id == occurrence_ref
+        from fervis.lookup.source_binding.population_values import population_owner
+
+        if owner_ref is not None and owner_ref.startswith("read_population:"):
+            return any(
+                owner_ref == population_owner(occurrence_ref, param.param_ref)
+                for param in request.source_catalog.source(source_ref).params
             )
+
         requirement = next(
             (
                 item
@@ -155,6 +123,8 @@ def occurrence_scope(request, plan, branch_id: str) -> OccurrenceScope:
                 raise ValueError("co-resident roles require one producer")
             if value.source_refs != (bound[left].source_ref,):
                 raise ValueError("co-resident evidence must name its producer")
+            if bound[left].membership is not None or bound[right].membership is not None:
+                continue
             lroot, rroot = root(left), root(right)
             if lroot != rroot:
                 members = tuple(ref for ref in bound if root(ref) in {lroot, rroot})
@@ -188,6 +158,14 @@ def occurrence_scope(request, plan, branch_id: str) -> OccurrenceScope:
     links = []
     for ref, left_set, right_set, value in associations:
         if value.kind is AssociationRealizationKind.CO_RESIDENT:
+            left, right = temporary.for_set(left_set), temporary.for_set(right_set)
+            if left.id != right.id:
+                source = request.source_catalog.source(left.source_ref)
+                grain = source.stable_grain_field_refs
+                if not grain:
+                    raise ValueError("separate co-resident memberships require a stable source row key")
+                fields = tuple(next(field.id for field in source.fields if field.field_ref == field_ref) for field_ref in grain)
+                links.append(OccurrenceLink(ref, left.id, right.id, fields, fields))
             continue
         evidence = next(
             e

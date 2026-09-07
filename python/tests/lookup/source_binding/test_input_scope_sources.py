@@ -12,7 +12,7 @@ def test_manager_threshold_cannot_filter_an_independent_employee_source():
     ))
     edges = row_source_relation_evidence((source, manager_source))
     edge = next(e for e in edges if e.left_source_ref == source.id and e.right_source_ref == manager_source.id)
-    request = replace(verified.request,
+    request = replace(verified.request, realized_fact_fields=(),
         source_catalog=replace(verified.request.source_catalog, sources=(source, manager_source), relation_evidence=edges),
         strategy=replace(verified.request.strategy, branches=tuple(
             replace(branch, source_refs=(source.id, manager_source.id), relation_evidence_refs=tuple(e.evidence_ref for e in edges))

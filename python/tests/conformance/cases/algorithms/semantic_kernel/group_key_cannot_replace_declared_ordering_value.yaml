@@ -60,7 +60,7 @@ input:
           meaning: courier with most deliveries
           resolved_input_ref: null
         candidate_set:
-          instance_interpretation: normal_business_instance
+          instance_interpretation: resource_population
         set_graph:
           related_sets:
           - association:

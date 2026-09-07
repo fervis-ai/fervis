@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
-from fervis.lookup.available_sources import SourceChoiceSurfaceKind
 
 from fervis.lookup.qualification import (
     BooleanAtomRef,
@@ -76,8 +75,16 @@ def verify_source_strategy(
     request: SemanticSourceBindingRequest,
 ) -> SourceStrategyVerificationOutcome:
     try:
+        from fervis.lookup.source_binding.membership import validate_membership
+        for realizations in plan.set_bindings.values():
+            for realization in realizations:
+                if realization.membership is not None:
+                    validate_membership(realization.membership,
+                        source=request.source_catalog.source(realization.source_ref), request=request)
         request = request.for_bindings(
-            plan.set_bindings, plan.fact_bindings, plan.association_bindings,
+            plan.set_bindings,
+            plan.fact_bindings,
+            plan.association_bindings,
         )
     except ValueError:
         return _failure(SourceStrategyVerificationFailureReason.INVALID_BINDING)
@@ -160,7 +167,9 @@ def _verify_set_identities(
                 contract
                 for item in set_realizations
                 if item.branch_id == fact_realization.branch_id
-                for contract in (_identity_contract(item.identity_ref, request=request),)
+                for contract in (
+                    _identity_contract(item.identity_ref, request=request),
+                )
                 if contract is not None
             }
             if fact_contract is None or fact_contract not in set_contracts:
@@ -335,32 +344,81 @@ def _verify_invocation_completeness(
 ) -> SourceStrategyVerificationFailure | None:
     failed: list[str] = []
     for owner_ref, realizations in plan.boolean_bindings.items():
-        if any(not request.invocation_preserves_population(owner_ref, branch_id=realization.branch_id)
-               for realization in realizations) and any(
+        if any(
+            not request.invocation_preserves_population(
+                owner_ref, branch_id=realization.branch_id
+            )
+            for realization in realizations
+        ) and any(
             mechanic.kind is SourceMechanicKind.INVOCATION_PREDICATE
-            for realization in realizations for mechanic in realization.mechanics
+            for realization in realizations
+            for mechanic in realization.mechanics
         ):
             failed.append(owner_ref)
     for application in plan.invocation_applications:
-        if application.owner_ref is not None and not request.invocation_preserves_population(application.owner_ref, branch_id=application.branch_id):
+        if (
+            application.owner_ref is not None
+            and not request.invocation_preserves_population(
+                application.owner_ref, branch_id=application.branch_id
+            )
+        ):
             failed.append(application.owner_ref)
+        if application.owner_ref in {item.requirement_ref for item in request.index.boolean_requirements} and any(
+            not request.invocation_target_matches_owner(application.source_ref, target.target_ref,
+                owner_ref=application.owner_ref, branch_id=application.branch_id, projection=target.projection, value_ref=target.value_ref)
+            for target in application.target_applications
+        ):
+            failed.append(application.owner_ref)
+        choice = next((item for item in request.source_catalog.choice_values if item.value_ref == application.value_ref), None)
+        if choice is not None and application.owner_ref in {item.requirement_ref for item in request.index.boolean_requirements}:
+            if application.owner_ref not in request.choice_value_requirement_refs(choice, branch_id=application.branch_id):
+                failed.append(application.owner_ref)
+    from fervis.lookup.source_binding.population_values import contradictory_request_predicates
+    failed.extend(contradictory_request_predicates(plan, request=request))
     from fervis.lookup.source_binding.occurrences import occurrence_scope
 
     for branch in request.strategy.branches:
         scope = occurrence_scope(request, plan, branch.branch_id)
         for occurrence in scope.occurrences:
+            applications = scope.applications_for(
+                request, plan, branch_id=branch.branch_id, occurrence=occurrence
+            )
+            failed.extend(
+                application.owner_ref
+                for application in applications
+                if application.owner_ref is not None
+                and not request.invocation_preserves_population(
+                    application.owner_ref,
+                    branch_id=branch.branch_id,
+                    affected_set_refs=occurrence.set_refs,
+                )
+            )
             applied = {
                 target.target_ref
-                for application in scope.applications_for(
-                    request, plan, branch_id=branch.branch_id, occurrence=occurrence
-                )
+                for application in applications
                 for target in application.target_applications
             }
             source = request.source_catalog.source(occurrence.source_ref)
+            from fervis.lookup.source_binding.invocation_bindings import (
+                invocation_binding_sets,
+            )
+
+            try:
+                alternatives = invocation_binding_sets(
+                    request=request,
+                    plan=plan,
+                    scope=scope,
+                    occurrence=occurrence,
+                    branch_id=branch.branch_id,
+                )
+                if len(alternatives) > 1 and not source.stable_grain_field_refs:
+                    failed.append(f"invocation_union_identity:{occurrence.id}")
+            except ValueError:
+                failed.append(f"invocation_alternatives:{occurrence.id}")
             missing = {
                 param.param_ref
                 for param in source.params
-                if requires_caller_supplied_input(param)
+                if requires_caller_supplied_input(param) and not request.access_supplies(source.id,param.param_ref)
             } - applied
             failed.extend(sorted(missing))
     if failed:
@@ -436,60 +494,38 @@ def _subject_guarantee(
         )
     for branch in request.strategy.branches:
         realization = realizations_by_branch[branch.branch_id]
-        allowed_surfaces = {
+        from fervis.lookup.source_binding.choice_requirements import (
+            requirement_choice_surfaces,
+        )
+
+        expected = {
             surface.surface_ref
-            for source_ref in branch.source_refs
-            for surface in request.source_catalog.choice_surfaces
-            if surface.source_ref == source_ref
+            for surface in requirement_choice_surfaces(request, branch.branch_id)
         }
-        from fervis.lookup.source_binding.membership import membership_scopes
-        from fervis.lookup.source_binding.model import SourceRealization
-        scopes = membership_scopes(SourceRealization(request, plan.set_bindings, plan.fact_bindings, plan.association_bindings))[branch.branch_id]
-        from fervis.lookup.source_binding.occurrences import occurrence_scope
-        occurrences = occurrence_scope(request, plan, branch.branch_id)
-        expected_reviews = {(scope.owner_set_ref, surface.surface_ref) for scope in scopes for surface in scope.surfaces}
-        reviewed = {(review.owner_set_ref, review.surface_ref) for review in realization.surface_reviews}
-        allowed_reviews = expected_reviews | {(None, ref) for ref in allowed_surfaces}
-        if (len(reviewed) != len(realization.surface_reviews)
-            or not expected_reviews <= reviewed or not reviewed <= allowed_reviews):
-            failed.append(realization.branch_id)
+        reviewed = [review.surface_ref for review in realization.surface_reviews]
+        if len(set(reviewed)) != len(reviewed) or set(reviewed) != expected:
+            failed.append(branch.branch_id)
             continue
         for review in realization.surface_reviews:
             surface = request.source_catalog.choice_surface(review.surface_ref)
-            def applies(owner_ref):
-                return review.owner_set_ref is None or occurrences.owner_applies(request, owner_ref, source_ref=surface.source_ref, occurrence_ref=occurrences.for_set(review.owner_set_ref).id)
-            if (review.owner_set_ref is None or surface.declared_entity_kind) and any(
-                not choice.baseline_included or choice.explicit_user_override_applies for choice in review.choice_reviews
-            ):
+            if review.owner_set_ref is not None:
                 failed.append(review.surface_ref)
-            explicit_choices = set()
+            if {c.choice_ref for c in review.choice_reviews} != {
+                c.value_ref for c in surface.values
+            }:
+                failed.append(review.surface_ref)
             for choice in review.choice_reviews:
-                allowed = set(request.explicit_subject_requirement_refs(
-                    request.source_catalog.choice_value(choice.choice_ref), branch_id=branch.branch_id))
-                allowed.update(application.owner_ref for application in plan.invocation_applications
-                    if application.branch_id == branch.branch_id and application.value_ref == choice.choice_ref
-                    and application.owner_ref in {item.requirement_ref for item in request.index.boolean_requirements})
-                selected = set(choice.selection_requirement_refs)
-                if not selected <= allowed or not all(applies(owner) for owner in selected) or choice.explicit_user_override_applies != (bool(selected) and not choice.baseline_included):
+                allowed = request.explicit_subject_requirement_refs(
+                    request.source_catalog.choice_value(choice.choice_ref),
+                    branch_id=branch.branch_id,
+                )
+                if not set(choice.selection_requirement_refs) <= set(allowed):
                     failed.append(choice.choice_ref)
-                if selected:
-                    explicit_choices.add(choice.choice_ref)
-            predicate_choices = {application.value_ref for application in plan.invocation_applications
-                if application.branch_id == branch.branch_id and application.source_ref == surface.source_ref
-                and application.owner_ref in {item.requirement_ref for item in request.index.boolean_requirements}
-                and applies(application.owner_ref)
-                and any(target.target_ref == surface.target_ref for target in application.target_applications)}
-            expected_choices = predicate_choices if surface.kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER and predicate_choices else {
-                choice.choice_ref for choice in review.choice_reviews if choice.included}
-            if set(review.included_choice_refs) != expected_choices:
-                failed.append(review.surface_ref)
-            if expected_choices != {choice.choice_ref for choice in review.choice_reviews} and not review.mechanics:
-                failed.append(review.surface_ref)
-            excluded_choice_count = sum(
-                not choice.included
-                for choice in review.choice_reviews
-            )
-            if excluded_choice_count and not review.mechanics:
+            if set(review.included_choice_refs) != {
+                c.choice_ref
+                for c in review.choice_reviews
+                if c.selection_requirement_refs
+            }:
                 failed.append(review.surface_ref)
             proof_refs.append(review.surface_ref)
             proof_refs.extend(
@@ -497,7 +533,10 @@ def _subject_guarantee(
                 for mechanic in review.mechanics
                 for ref in mechanic.contract_evidence_refs
             )
-    from fervis.lookup.source_binding.parameter_coverage import uncovered_parameter_scopes
+    from fervis.lookup.source_binding.parameter_coverage import (
+        uncovered_parameter_scopes,
+    )
+
     failed.extend(uncovered_parameter_scopes(plan, request=request))
     if failed:
         return _failure(

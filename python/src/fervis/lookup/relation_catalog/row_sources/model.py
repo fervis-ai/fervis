@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fervis.host_api.contracts import ParameterSemantics
 
+from fervis.host_api.contracts.population import ParameterPopulation
+
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from fervis.types.enums import StrEnum
@@ -61,8 +63,12 @@ CALENDAR_MAX_ROWS = 366
 _MISSING = object()
 
 
-def _finite_choices(value_type: RowSourceValueType, choices: tuple[str, ...]) -> tuple[str, ...]:
-    return choices or (("false", "true") if value_type is RowSourceValueType.BOOLEAN else ())
+def _finite_choices(
+    value_type: RowSourceValueType, choices: tuple[str, ...]
+) -> tuple[str, ...]:
+    return choices or (
+        ("false", "true") if value_type is RowSourceValueType.BOOLEAN else ()
+    )
 
 
 @dataclass(frozen=True)
@@ -79,6 +85,9 @@ class RowSourceField:
     response_path: str = ""
     description: str = ""
     declared_entity_kind: str = ""
+    nullable: bool = False
+    declared_value_domain: bool = True
+    request_parameter_ref: str = ""
 
     @property
     def finite_choices(self) -> tuple[str, ...]:
@@ -106,9 +115,11 @@ class RowSourceParam:
     choice_labels: dict[str, str] | None = None
     description: str = ""
     default: CatalogParameterValue = None
+    default_is_known: bool = True
     default_source: str = ""
     entity_target: EntityKeyComponentTarget | None = None
     semantics: ParameterSemantics = ParameterSemantics.OPAQUE_QUERY_PARAM
+    population: ParameterPopulation | None = None
 
     @property
     def finite_choices(self) -> tuple[str, ...]:
@@ -265,6 +276,18 @@ class RowSource:
     params: tuple[RowSourceParam, ...] = ()
     blocked_facts: tuple[RowSourceBlockedFact, ...] = ()
 
+    @property
+    def stable_grain_field_refs(self) -> tuple[str, ...]:
+        keys = tuple(key for key in self.candidate_keys if key.stable)
+        key = next((key for key in keys if key.primary), keys[0] if keys else None)
+        return (
+            tuple(
+                self.field(component.field_id).field_ref for component in key.components
+            )
+            if key is not None
+            else ()
+        )
+
     def fields_supporting_type(
         self, value_type: ValueType
     ) -> tuple[RowSourceField, ...]:
@@ -277,8 +300,19 @@ class RowSource:
             if row_source_type_supports_semantic_type(field.type, value_type)
         )
 
+    @property
+    def request_argument_fields(self) -> tuple[RowSourceField, ...]:
+        return tuple(RowSourceField(
+            id=f"request_argument:{self.id}:{param.param_ref}",
+            field_ref=f"request_argument:{self.id}:{param.param_ref}",
+            label=f"request path argument {param.name}", type=param.type,
+            allowed_roles=(FieldBindingRole.REQUEST_ARGUMENT,), choices=param.choices,
+            description="The path argument used for this row's request, not a returned row property.",
+            nullable=not param.required, request_parameter_ref=param.param_ref,
+        ) for param in self.params if param.source == "path")
+
     def field(self, field_id: str) -> RowSourceField:
-        for item in self.fields:
+        for item in (*self.fields, *self.request_argument_fields):
             if item.id == field_id:
                 return item
         raise KeyError(field_id)

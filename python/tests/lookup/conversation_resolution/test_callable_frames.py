@@ -221,7 +221,7 @@ def _base_program() -> tuple[AnswerProgram, BindingSet]:
         associations=(),
         facts=(),
         expressions=(),
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(),
@@ -371,3 +371,46 @@ def test_question_contract_input_text_uses_resolved_literal_value_once() -> None
     assert resolution.question_contract_input_text_by_ref() == {
         "conversation.place_2": "Pivot Mall"
     }
+
+
+def test_obsolete_program_does_not_hide_prior_fact_memory():
+    from fervis.lookup.contract_codec import canonical_answer_program_payload, decode_answer_program
+    from fervis.lookup.memory.projection import project_conversation_memory_cards
+
+    payload = canonical_answer_program_payload(_base_program()[0])
+    payload['schema_revision'] = 13
+
+    class Reader:
+        def load_prior_answered_invocation(self, **kwargs):
+            return decode_answer_program(payload)
+
+    question = 'How many records were there?'
+    context = {'factArtifacts': [{'artifactId': 'old_fact', 'outcome': 'answered',
+        'sourceQuestion': question, 'sourceAnswer': '126',
+        'provenance': {'runId': 'old_run', 'requestedFactKey': 'fact_1'},
+        'addresses': [{'address': 'value.count', 'kind': 'value', 'value': {'type': 'decimal', 'value': '126'}}]}]}
+    projection = project_conversation_memory_cards(context, prior_program_invocations=Reader(),
+                                                  conversation_id='conversation_1', tenant_id='tenant_1')
+    assert any(source.text == question for source in projection.context_sources)
+    assert all(frame.callable is None for frame in projection.context_frames)
+
+
+def test_current_malformed_program_is_not_hidden_as_an_obsolete_frame():
+    from fervis.lookup.answer_program.errors import AnswerProgramContractError
+    from fervis.lookup.contract_codec import canonical_answer_program_payload, decode_answer_program
+    from fervis.lookup.memory.projection import project_conversation_memory_cards
+
+    payload = canonical_answer_program_payload(_base_program()[0])
+    payload['program']['fields']['parameters'] = {'$list': []}
+
+    class Reader:
+        def load_prior_answered_invocation(self, **kwargs):
+            return decode_answer_program(payload)
+
+    context = {'factArtifacts': [{'artifactId': 'bad', 'outcome': 'answered',
+        'sourceQuestion': 'How many?', 'sourceAnswer': '126',
+        'provenance': {'runId': 'run', 'requestedFactKey': 'fact_1'}}]}
+    with pytest.raises(AnswerProgramContractError) as caught:
+        project_conversation_memory_cards(context, prior_program_invocations=Reader(),
+                                          conversation_id='conversation_1', tenant_id='tenant_1')
+    assert caught.value.code == 'invalid_answer_program'

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fervis.host_api.contracts import ParameterSemantics
+from fervis.lookup.source_reads.access_model import ReadAccessCatalog
 
 from dataclasses import dataclass
 from typing import cast
@@ -37,6 +38,7 @@ class ResolverOptionSurface:
     source: RowSource
     request_parameters: tuple[RowSourceParam, ...]
     response_match_fields: tuple[RowSourceField, ...]
+    read_access: ReadAccessCatalog = ReadAccessCatalog()
 
     def prompt_payload(self) -> dict[str, object]:
         candidate = self.option.candidate
@@ -68,6 +70,7 @@ class ResolverOptionSurface:
             "binding_option_id": self.option.id,
             "purpose": self.option.purpose.value,
             "resource_type": candidate.entity_kind,
+            "complete_source_access": self.read_access.can_enumerate(self.source),
             "api_read": read_payload,
             "canonical_result": {
                 "entity_kind": candidate.entity_kind,
@@ -221,6 +224,7 @@ class ResolverOptionSurface:
 def resolver_option_surface_from_catalog(
     catalog: RelationCatalog,
     option: InputBindingOption,
+    *, read_access: ReadAccessCatalog = ReadAccessCatalog(),
 ) -> ResolverOptionSurface:
     read = catalog.read(option.candidate.resolver_read_id)
     source = option.candidate.resolver_source
@@ -245,6 +249,7 @@ def resolver_option_surface_from_catalog(
         source=source,
         request_parameters=request_parameters,
         response_match_fields=response_match_fields,
+        read_access=read_access,
     )
 
 

@@ -231,6 +231,22 @@ def provider_unavailable_error(
             error_class=error_class,
             context=context,
         )
+    # SDK rate-limit classes and overload status codes outrank generic body types.
+    if (
+        normalized == "RateLimitError"
+        or status_code in {429, 529}
+        or error_type
+        in {
+            "rate_limit_error",
+            "overloaded_error",
+        }
+    ):
+        return api_errors.RateLimit.llm_api_rate_limited(
+            provider=config.provider_name,
+            reason=reason,
+            error_class=error_class,
+            context=context,
+        )
     if (
         normalized in {"BadRequestError", "UnprocessableEntityError"}
         or status_code
@@ -286,21 +302,6 @@ def provider_unavailable_error(
         )
     if normalized == "ConflictError" or status_code == 409:
         return api_errors.Unavailable.llm_api_conflict(
-            provider=config.provider_name,
-            reason=reason,
-            error_class=error_class,
-            context=context,
-        )
-    if (
-        normalized == "RateLimitError"
-        or status_code in {429, 529}
-        or error_type
-        in {
-            "rate_limit_error",
-            "overloaded_error",
-        }
-    ):
-        return api_errors.RateLimit.llm_api_rate_limited(
             provider=config.provider_name,
             reason=reason,
             error_class=error_class,

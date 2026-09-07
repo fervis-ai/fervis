@@ -109,7 +109,7 @@ def _run_semantic_catalog_selection(payload: dict[str, Any]) -> list[str]:
             FactTerm("f2", "s1", TextType(), _origin("gamma")),
         ),
         expressions=(),
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=(),
         outputs=(

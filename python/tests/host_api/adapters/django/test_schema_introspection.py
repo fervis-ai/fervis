@@ -613,3 +613,130 @@ def test_scalar_query_parameter_without_proven_filter_has_no_entity_target() -> 
     )
 
     assert params[0].entity_target is None
+
+
+def test_callable_query_default_remains_unknown_without_execution():
+    def must_not_run():
+        raise AssertionError('Discovery must not evaluate request defaults')
+
+    class Query(serializers.Serializer):
+        active = serializers.BooleanField(default=must_not_run)
+
+    [param] = query_params_from_serializer(Query)
+    assert param.default is None
+    assert param.default_is_known is False
+
+
+def test_optional_response_boolean_is_not_a_closed_two_value_domain():
+    class Response(serializers.Serializer):
+        active = serializers.BooleanField(required=False)
+
+    assert Response({}).data == {}
+    [field] = response_fields_from_serializer(Response, model_context=None)
+    assert field.nullable is True
+
+
+@pytest.mark.parametrize('nested', [False, True])
+def test_omittable_boolean_cannot_certify_finite_population_coverage(nested):
+    from dataclasses import replace
+    from fervis.host_api.contracts import EndpointContract, ParameterContract
+    from fervis.host_api.contracts.population import ParameterPopulation, ParameterRowValues
+    from fervis.lookup.relation_catalog.from_host_api import relation_catalog_from_endpoint_contracts
+    from fervis.lookup.relation_catalog.row_sources.builder import build_api_row_source_catalog
+    from fervis.lookup.source_binding.population_values import population_values
+
+    class Inner(serializers.Serializer):
+        active = serializers.BooleanField(required=True)
+
+    class Flat(serializers.Serializer):
+        active = serializers.BooleanField(required=False)
+
+    class Nested(serializers.Serializer):
+        details = Inner(required=False)
+
+    response = Nested if nested else Flat
+    assert response({}).data == {}
+    endpoint = EndpointContract('entries', 'entries', 'GET', '/entries', '', '',
+        resource_names=('entries',), response_cardinality='many',
+        query_params=(ParameterContract('active', 'boolean', default=True),),
+        response_fields=response_fields_from_serializer(response, model_context=None))
+    catalog = relation_catalog_from_endpoint_contracts((endpoint,))
+    sources = build_api_row_source_catalog(catalog).sources
+    source = next(s for s in sources if any(f.id.endswith('active') for f in s.fields))
+    field = next(f for f in source.fields if f.id.endswith('active'))
+    effect = ParameterPopulation(field_path=field.field_ref, value_mapping=(
+        ParameterRowValues('false', ('false',)), ParameterRowValues('true', ('true',))))
+    assert population_values(source, replace(source.params[0], population=effect)) == ()
+
+
+def test_declared_query_defaults_preserve_catalog_types():
+    from datetime import date
+    from fervis.host_api.contracts import EndpointContract
+    from fervis.lookup.relation_catalog.from_host_api import relation_catalog_from_endpoint_contracts
+
+    class Query(serializers.Serializer):
+        states = serializers.ListField(child=serializers.CharField(), default=['active'])
+        since = serializers.DateField(default=date(2026, 1, 1))
+        mode = serializers.ChoiceField(choices=[(1, 'First'), (2, 'Second')], default=1)
+
+    params = query_params_from_serializer(Query)
+    assert {p.name: p.default for p in params} == {
+        'states': ['active'], 'since': '2026-01-01', 'mode': '1'}
+    endpoint = EndpointContract('entries', 'entries', 'GET', '/entries', '', '', resource_names=('entries',), query_params=params)
+    [read] = relation_catalog_from_endpoint_contracts((endpoint,)).reads
+    assert {p.name: p.default for p in read.params} == {
+        'states': ('active',), 'since': '2026-01-01', 'mode': '1'}
+
+
+def test_readonly_model_property_uses_declared_type_without_executing_getter():
+    class Observation(models.Model):
+        @property
+        def eligible(self) -> bool:
+            raise AssertionError("Catalog discovery must not evaluate model properties")
+
+        @property
+        def undocumented(self):
+            raise AssertionError("Catalog discovery must not sample model properties")
+
+        class Meta:
+            app_label = "test_declared_property_type"
+
+    class ObservationSerializer(serializers.ModelSerializer):
+        renamed = serializers.ReadOnlyField(source="eligible")
+
+        class Meta:
+            model = Observation
+            fields = ("eligible", "renamed", "undocumented")
+
+    inspection = inspect_response_serializer(ObservationSerializer)
+    fields = {field.name: field for field in inspection.response_fields}
+    assert fields["eligible"].type == "boolean"
+    assert fields["renamed"].type == "boolean"
+    assert fields["undocumented"].type == "any"
+
+
+def test_readonly_property_typing_follows_declared_related_source_path():
+    class Detail(models.Model):
+        @property
+        def quantity(self) -> int | None:
+            raise AssertionError("Do not evaluate a related object's getter")
+
+        class Meta:
+            app_label = "test_related_property_type"
+
+    class Record(models.Model):
+        detail = models.ForeignKey(Detail, on_delete=models.CASCADE, null=True)
+
+        class Meta:
+            app_label = "test_related_property_type"
+
+    class RecordSerializer(serializers.ModelSerializer):
+        quantity = serializers.ReadOnlyField(source="detail.quantity")
+
+        class Meta:
+            model = Record
+            fields = ("quantity",)
+
+    [field] = inspect_response_serializer(RecordSerializer).response_fields
+    assert field.type == "integer"
+    assert field.nullable

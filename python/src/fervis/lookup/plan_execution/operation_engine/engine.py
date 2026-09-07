@@ -33,6 +33,7 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
     operation_scalar_output_ids,
+    operation_input_relation_ids,
 )
 
 from .aggregate_operations import _aggregate, _order
@@ -66,6 +67,26 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
             raise RelationEngineError(f"duplicate relation {relation.id}")
         relation = _with_role_set_kind(relation, role_set_kind_refs.get(relation.id))
         relations[relation.id] = relation
+    loading: set[str] = set()
+
+    def require_relation(relation_id: str) -> RelationRows:
+        if relation_id in relations:
+            return relations[relation_id]
+        if relation_id in loading:
+            raise RelationEngineError("cyclic source relation dependency")
+        if engine_input.relation_loader is None or relation_id not in engine_input.source_relation_ids:
+            raise RelationEngineError(f"unknown relation {relation_id}")
+        loading.add(relation_id)
+        try:
+            relation = engine_input.relation_loader(relation_id, require_relation)
+            if relation.id != relation_id:
+                raise RelationEngineError("source loader returned a different relation")
+            relation = _with_role_set_kind(relation, role_set_kind_refs.get(relation_id))
+            relations[relation_id] = relation
+            return relation
+        finally:
+            loading.remove(relation_id)
+
     scalars: dict[str, RuntimeValue] = {}
     scalar_proofs: dict[str, tuple[str, ...]] = {}
     scalar_types: dict[str, str] = {}
@@ -83,6 +104,8 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
         if not isinstance(operation, ExecutableOperation):
             raise RelationEngineError("operation must be ExecutableOperation")
         try:
+            for relation_id in operation_input_relation_ids(operation.spec):
+                require_relation(relation_id)
             result = _execute_operation(
                 operation,
                 relations,
@@ -156,6 +179,12 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
             node_output_types[operation.id] = {output_scalar:scalar_types[output_scalar]}
         else:
             raise RelationEngineError(f"{operation.id} produced invalid result")
+    try:
+        for relation_id in engine_input.source_relation_ids:
+            require_relation(relation_id)
+    except IncompleteEvidenceError as exc:
+        return RelationEngineOutput(relations=tuple(relations.values()),scalars=scalars,
+            scalar_proofs=scalar_proofs,scalar_types=scalar_types,issue=exc.issue())
     return RelationEngineOutput(
         relations=tuple(relations.values()),
         scalars=scalars,

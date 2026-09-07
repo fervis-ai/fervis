@@ -109,7 +109,7 @@ def coverage_query(*, return_truth=False):
                 origin,
             ),
         ),
-        Subject("candidate", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        Subject("candidate", InstanceInterpretation.RESOURCE_POPULATION),
         None if return_truth else "covered",
         (),
         (RequestedOutput("candidate", "candidate_id", origin),)

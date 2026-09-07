@@ -53,7 +53,7 @@ def daily_observation_request():
             TemporalBucket("e1", "f1", TemporalGrain.DAY, origin),
             Aggregate("e2", AggregateFunction.SUM, "f2", None, False, origin),
         ),
-        subject=Subject("s1", InstanceInterpretation.NORMAL_BUSINESS_INSTANCE),
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
         qualification_ref=None,
         grouping_refs=("e1",),
         outputs=(

@@ -35,7 +35,7 @@ from fervis.lookup.answer_program.values import (
     project_fact_value,
 )
 from fervis.lookup.answer_program.expressions import Expression, expression_references
-from fervis.lookup.answer_program.model import AnswerProgram
+from fervis.lookup.answer_program.model import RelationProgram
 from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AntiJoinSpec,
@@ -96,8 +96,8 @@ def compile_program_inputs(inputs: ProgramInputs) -> CompiledProgramInputs:
     )
 
 
-def compile_answer_program_inputs(
-    program: AnswerProgram,
+def compile_relation_program_inputs(
+    program: RelationProgram,
     *,
     bindings: BindingSet,
 ) -> CompiledProgramInputs:
@@ -120,7 +120,7 @@ def compile_answer_program_inputs(
 
 
 def _validate_compute_parameters(
-    program: AnswerProgram,
+    program: RelationProgram,
     parameters: tuple[ParameterDeclaration, ...],
 ) -> None:
     by_id = {parameter.id: parameter for parameter in parameters}
@@ -147,7 +147,7 @@ def _validate_compute_parameters(
 
 
 def program_value_expressions(
-    program: AnswerProgram,
+    program: RelationProgram,
 ) -> tuple[NamedValueExpression, ...]:
     """Return every answer-affecting value expression with its program sink."""
 
@@ -243,7 +243,7 @@ def _condition_value_expressions(
 
 def apply_binding_patch(
     *,
-    program: AnswerProgram,
+    program: RelationProgram,
     bindings: BindingSet,
     patch: BindingPatch,
 ) -> BindingSet:

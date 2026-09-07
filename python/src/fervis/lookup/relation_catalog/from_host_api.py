@@ -56,7 +56,7 @@ def relation_catalog_from_endpoint_contracts(
 def _validate_endpoint_contracts(contracts: tuple[EndpointContract, ...]) -> None:
     for contract in contracts:
         for param in (*contract.path_params, *contract.query_params):
-            _catalog_param(contract.endpoint_name, param)
+            _catalog_param(contract, param)
 
 
 def _endpoint_read(contract: EndpointContract) -> EndpointRead:
@@ -80,8 +80,8 @@ def _endpoint_read(contract: EndpointContract) -> EndpointRead:
         path=contract.path_template,
         resource_names=tuple(str(item) for item in contract.resource_names),
         params=tuple(
-            _catalog_param(contract.endpoint_name, item)
-            for item in (*contract.path_params, *contract.query_params)
+            _catalog_param(contract, item)
+            for item in _logical_read_parameters(contract)
         ),
         row_paths=row_paths,
         fields=fields,
@@ -93,6 +93,14 @@ def _endpoint_read(contract: EndpointContract) -> EndpointRead:
         catalog_endpoint=_catalog_endpoint_metadata(contract),
         source_metadata=_source_metadata(contract),
     )
+
+
+def _logical_read_parameters(contract: EndpointContract) -> tuple[ParameterContract, ...]:
+    """Complete-read traversal owns paging arguments, not semantic binding."""
+    paging = contract.pagination
+    transport_names = {paging.position_query_param, paging.page_size_query_param} if paging is not None else set()
+    return (*contract.path_params, *(param for param in contract.query_params
+                                    if param.name not in transport_names))
 
 
 def _candidate_keys(
@@ -247,7 +255,10 @@ def _catalog_endpoint_metadata(
     )
 
 
-def _catalog_param(endpoint_name: str, param: ParameterContract) -> CatalogParam:
+def _catalog_param(
+    contract: EndpointContract, param: ParameterContract
+) -> CatalogParam:
+    endpoint_name = contract.endpoint_name
     raw_source = param.source
     if not raw_source:
         raise CatalogValidationError(
@@ -266,8 +277,15 @@ def _catalog_param(endpoint_name: str, param: ParameterContract) -> CatalogParam
             str(key): str(value) for key, value in param.choice_labels.items()
         },
         default=param.default,
+        default_is_known=param.default_is_known,
         entity_target=_param_entity_target(param),
         semantics=param.semantics,
+        population=replace(
+            param.population,
+            field_path=_catalog_path(contract, param.population.field_path),
+        )
+        if param.population is not None
+        else None,
     )
 
 
@@ -371,7 +389,11 @@ def _catalog_field(
         path=path,
         row_path_id=_row_path_id(row_path),
         type=str(field.type),
-        nullable=False,
+        nullable=field.nullable is not False
+        or any(
+            raw_path.startswith(parent.path + ".") and parent.nullable is not False
+            for parent in contract.response_fields
+        ),
         choices=tuple(str(item) for item in getattr(field, "choices", ()) or ()),
         requirements=_field_requirements(contract, field),
         metadata={

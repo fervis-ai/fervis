@@ -81,6 +81,7 @@ class SemanticReadEligibilityTurnPrompt(TurnPromptBase):
                     "Declared canonical identity uses show the exact answer-read request targets and returned identity fields for each option. A canonical option fits when its declared uses belong to retained reads that contribute the semantic requirements without an undeclared identity conversion.",
                     "After choosing a canonical option, assess every shown resolver route with assessment then FITS or DOES_NOT_FIT before writing resolver_route_basis and resolver_route_id. Routes owned by another canonical meaning are DOES_NOT_FIT for the selected meaning.",
                     "A resolver route with purpose=identity_validation fits when it validates the chosen canonical identity and its result can be used by the retained answer reads. A route with purpose=reference_grounding fits when it obtains the chosen canonical identity from a descriptive input and its result can be used by the retained answer reads.",
+                    "Resolver mechanics have already been reviewed. ENUMERATE_COMPLETE_SOURCE with complete_source_access available=true reads the source through an established complete traversal and matches the returned verification fields. Required path inputs are supplied by that traversal; they need not occur in the question. Assess whether the resulting identity has the selected canonical meaning and supports the answer reads.",
                     "NO_CANONICAL_INTERPRETATION uses null option and route IDs after every canonical option and resolver route is DOES_NOT_FIT. NO_RESOLVER_ROUTE selects one FITS canonical option, uses a null route ID, and assesses every resolver route as DOES_NOT_FIT.",
                 ),
             ),
@@ -288,6 +289,7 @@ class SemanticReadEligibilityTurnPrompt(TurnPromptBase):
         surface = resolver_option_surface_from_catalog(
             self.request.resolver_catalog,
             route.option,
+            read_access=self.request.read_access,
         )
         payload = surface.prompt_payload()
         parameters_by_ref = {
@@ -298,6 +300,8 @@ class SemanticReadEligibilityTurnPrompt(TurnPromptBase):
         return {
             "binding_option_id": route.route_ref,
             "purpose": route.option.purpose.value,
+            "resolution_method": binding.resolution_method.value,
+            "complete_source_access": payload["complete_source_access"],
             "api_read": payload["api_read"],
             "canonical_result": payload["canonical_result"],
             "lookup_request_parameters": [

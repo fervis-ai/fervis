@@ -20,6 +20,7 @@ from fervis.lookup.plan_execution.relations import (
     RelationRows,
     RelationSetKind,
 )
+from fervis.lookup.answer_program.errors import UnsupportedAnswerProgramSchema
 from fervis.lookup.answer_program.persistence import (
     PriorProgramInvocationReader,
     StoredProgramInvocation,
@@ -318,11 +319,15 @@ def _prior_invocations(
         run_id = str(artifact.provenance.get("runId") or "").strip()
         if not run_id or run_id in output:
             continue
-        stored = reader.load_prior_answered_invocation(
-            run_id=run_id,
-            conversation_id=conversation_id,
-            tenant_id=tenant_id,
-        )
+        try:
+            stored = reader.load_prior_answered_invocation(
+                run_id=run_id,
+                conversation_id=conversation_id,
+                tenant_id=tenant_id,
+            )
+        except UnsupportedAnswerProgramSchema:
+            # Keep the fact artifact, but do not advertise obsolete code as callable.
+            continue
         if stored is not None:
             output[run_id] = stored
     return output

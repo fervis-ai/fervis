@@ -23,9 +23,6 @@ from fervis.lookup.grounding import (
 from fervis.lookup.grounding.surface import resolver_option_surface_from_catalog
 from fervis.lookup.lineage.source_reads import (
     SourceReadLineageScope,
-    record_source_read_error,
-    record_source_read_observation,
-    require_catalog_endpoint_for_lineage,
 )
 from fervis.lookup.question_contract import InputTerm
 from fervis.lookup.read_eligibility.semantic import IdentityRouteSelection
@@ -37,14 +34,12 @@ from fervis.lookup.relation_catalog.parameter_values import (
     parse_catalog_parameter_value,
 )
 from fervis.lookup.source_reads.response import (
-    EndpointResponseError,
-    extract_source_read_rows,
-    observe_source_read_response,
     path_value,
     relative_response_path,
-    source_read_completeness,
 )
 
+
+from fervis.lookup.source_reads.access_model import ReadAccessCatalog
 
 _MISSING = object()
 
@@ -73,6 +68,7 @@ def execute_identity_selection(
     data_access_port: RelationDataAccessPort,
     source_read_key_prefix: str,
     source_read_lineage: SourceReadLineageScope | None = None,
+    read_access: ReadAccessCatalog = ReadAccessCatalog(),
 ) -> ResolvedIdentity | IdentityExecutionClarification:
     if selection.task_ref != task.task_ref or input_term.id != task.input_ref:
         raise ValueError("identity execution subject does not match its selection")
@@ -94,6 +90,7 @@ def execute_identity_selection(
             data_access_port=data_access_port,
             source_read_key=f"{source_read_key_prefix}:item:{position}",
             source_read_lineage=source_read_lineage,
+            read_access=read_access,
         )
         if isinstance(result, _IdentityResolutionFailure):
             return _execution_clarification(
@@ -192,10 +189,11 @@ def _resolve_operand(
     data_access_port: RelationDataAccessPort,
     source_read_key: str,
     source_read_lineage: SourceReadLineageScope | None,
+    read_access: ReadAccessCatalog,
 ) -> FactValue | _IdentityResolutionFailure:
     option = route.option
     candidate = option.candidate
-    surface = resolver_option_surface_from_catalog(full_catalog, option)
+    surface = resolver_option_surface_from_catalog(full_catalog, option, read_access=read_access)
     args: dict[str, CatalogParameterValue] = {
         parameter.param_ref: parameter.default
         for parameter in surface.request_parameters
@@ -210,64 +208,40 @@ def _resolve_operand(
         args[param_ref] = value
         lookup_value = lookup_value if lookup_value is not None else value
     if lookup_value is None:
-        raise ValueError("identity route lacks a lookup request value")
-    read = full_catalog.read(candidate.resolver_read_id)
-    require_catalog_endpoint_for_lineage(
-        source_read_lineage=source_read_lineage,
-        endpoint_name=candidate.resolver_endpoint_name,
-        catalog_endpoint=read.catalog_endpoint,
-    )
+        lookup_value = surface.compiled_match_value(route.compatibility.returned_identity_verification_field_paths[0],lookup_text=operand)
+    from fervis.lookup.answer_program.model import RelationProgram
+    from fervis.lookup.answer_program.relations import Relation, RelationSource, RelationField, EndpointParamBinding, FieldBindingRole, SourceKind
+    from fervis.lookup.answer_program.values import ConstantRef
+    from fervis.lookup.answer_program.api_reads import ApiReadSession
+    from fervis.lookup.available_sources import source_value_literal
+    from fervis.lookup.source_reads.access_compilation import expand_read_access
+    from fervis.lookup.source_reads.access_execution import execute_access_program
+    from fervis.lookup.plan_execution.relations import CompletenessStatus
+    source=candidate.resolver_source
+    selected_paths=set(route.compatibility.returned_identity_verification_field_paths)
+    selected_ids={component.field_id for component in candidate.key_components}
+    fields=tuple(RelationField(field.id,(FieldBindingRole.OUTPUT if FieldBindingRole.OUTPUT in field.allowed_roles else field.allowed_roles[0],))
+                 for field in source.fields if field.id in selected_ids or field.path in selected_paths)
+    bindings=[]
+    for param_ref in route.compatibility.lookup_request_param_refs:
+        param=next(param for param in source.params if param.param_ref==param_ref)
+        fact_value=source_value_literal(value_ref=f'lookup:{input_ref}:{param_ref}',value=args[param_ref],declared_type=param.type,
+            label=param.name,source_ref=source.id,proof_refs=(f'question_input:{input_ref}',))
+        bindings.append(EndpointParamBinding(param.id,ConstantRef(fact_value.id,'identity_lookup',fact_value)))
+    root=Relation('identity_lookup',RelationSource(SourceKind.API_READ,read_id=source.read_id,row_source_id=source.id,
+        param_bindings=tuple(bindings)),fields)
     try:
-        response = data_access_port.read(
-            endpoint_name=candidate.resolver_endpoint_name,
-            args=args,
-        )
-    except Exception as exc:
-        record_source_read_error(
-            source_read_lineage,
-            source_read_key=source_read_key,
-            endpoint_name=candidate.resolver_endpoint_name,
-            catalog_endpoint=read.catalog_endpoint,
-            args=args,
-            error_json={"error": str(exc), "errorType": type(exc).__name__},
-        )
-        return _IdentityResolutionFailure(
-            IdentityExecutionFailureReason.INVALID_RESOLVER_RESULT
-        )
-    observation = observe_source_read_response(
-        response,
-        endpoint_name=candidate.resolver_endpoint_name,
-    )
-    completeness = source_read_completeness(response)
-    source_read_id = record_source_read_observation(
-        source_read_lineage,
-        source_read_key=source_read_key,
-        endpoint_name=candidate.resolver_endpoint_name,
-        catalog_endpoint=read.catalog_endpoint,
-        args=args,
-        observation=observation,
-        response_body=response.get("responseBody"),
-        completeness_json=completeness,
-    )
-    if not observation.succeeded:
-        return _IdentityResolutionFailure(
-            IdentityExecutionFailureReason.INVALID_RESOLVER_RESULT
-        )
-    try:
-        rows = extract_source_read_rows(
-            response,
-            endpoint_name=candidate.resolver_endpoint_name,
-            row_source=candidate.resolver_source,
-        )
-        matches = _identity_matches(
-            rows,
-            route=route,
-            lookup_value=lookup_value,
-        )
-    except (CatalogParameterValueError, EndpointResponseError, ValueError):
-        return _IdentityResolutionFailure(
-            IdentityExecutionFailureReason.INVALID_RESOLVER_RESULT
-        )
+        program=expand_read_access(RelationProgram(relations=(root,)),read_access)
+        execution=execute_access_program(program,catalog=full_catalog,
+            read_session=ApiReadSession(data_access_port,source_read_lineage,source_read_key_prefix=source_read_key))
+        if execution.engine_output.issue is not None:
+            return _IdentityResolutionFailure(IdentityExecutionFailureReason.INVALID_RESOLVER_RESULT)
+        relation=execution.engine_output.relation(root.id)
+        rows=tuple(dict(row) for row in execution.row_context.rows_for_relation(root.id))
+        complete=relation.completeness.status is CompletenessStatus.COMPLETE
+        matches=_identity_matches(rows,route=route,lookup_value=lookup_value)
+    except Exception:
+        return _IdentityResolutionFailure(IdentityExecutionFailureReason.INVALID_RESOLVER_RESULT)
     unique_matches = tuple(
         {
             canonical_runtime_json(match.key.component_values()): match
@@ -275,23 +249,21 @@ def _resolve_operand(
         }.values()
     )
     if not unique_matches:
-        return _IdentityResolutionFailure(IdentityExecutionFailureReason.NOT_FOUND)
+        return _IdentityResolutionFailure(IdentityExecutionFailureReason.NOT_FOUND if complete else IdentityExecutionFailureReason.INVALID_RESOLVER_RESULT)
     if len(unique_matches) > 1:
         return _IdentityResolutionFailure(
             IdentityExecutionFailureReason.AMBIGUOUS_RESULT,
             unique_matches,
         )
     [match] = unique_matches
-    if bool(completeness["truncated"]) and not _matched_field_is_stable_unique(
+    if not complete and not _matched_field_is_stable_unique(
         match,
         route=route,
     ):
         return _IdentityResolutionFailure(
             IdentityExecutionFailureReason.INVALID_RESOLVER_RESULT
         )
-    proof_refs = [f"question_input:{input_ref}"]
-    if source_read_id:
-        proof_refs.append(f"source_read:{source_read_id}")
+    proof_refs = [f"question_input:{input_ref}", *relation.evidence.proof_refs, *relation.completeness.proof_refs]
     return FactValue.identity(
         id=value_id,
         known_input_id=input_ref,

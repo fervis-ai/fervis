@@ -650,6 +650,7 @@ def _with_conditional_requirements(
                 path=field.path,
                 description=field.description,
                 choices=field.choices,
+                nullable=field.nullable,
                 requires={"queryParam": query_param, "value": True},
             )
         )

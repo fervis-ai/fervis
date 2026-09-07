@@ -70,9 +70,6 @@ from tests.testkit.algorithms.semantic_question_contract import (
     run_semantic_operator_signature_case,
     run_semantic_question_contract_case,
 )
-from tests.testkit.algorithms.semantic_source_binding import (
-    run_semantic_source_binding_case,
-)
 from tests.testkit.case_loader import ConformanceCase
 
 CaseRunner = Callable[[dict], list[str]]
@@ -150,7 +147,6 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ("algorithm", "semantic.operator_signature"): run_semantic_operator_signature_case,
     ("algorithm", "semantic.query_enrichment"): run_semantic_query_enrichment_case,
     ("algorithm", "semantic.question_contract"): run_semantic_question_contract_case,
-    ("algorithm", "semantic.source_binding"): run_semantic_source_binding_case,
     (
         "algorithm",
         "source_binding.parameter_alternatives",

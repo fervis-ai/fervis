@@ -8,7 +8,17 @@ def test_realization_rejects_co_resident_independent_rows_before_membership():
     request = verified.request
     source = request.source_catalog.sources[0]
     payload = {
-        "set_bindings": {},
+        "set_bindings": {
+            ref: [
+                {
+                    "branch_id": value.branch_id,
+                    "mapping_basis": f"Explicit role {ref}",
+                    "rows_ref": value.identity_ref or value.source_ref,
+                }
+                for value in values
+            ]
+            for ref, values in verified.binding_plan.set_bindings.items()
+        },
         "fact_bindings": {
             ref: [
                 {
@@ -24,8 +34,6 @@ def test_realization_rejects_co_resident_independent_rows_before_membership():
                 {
                     "branch_id": "branch",
                     "mapping_basis": "Shared producer.",
-                    "from_rows_ref": source.identity_evidence[0].identity_ref,
-                    "to_rows_ref": source.identity_evidence[0].identity_ref,
                     "realization_ref": source.id,
                 }
             ]
@@ -33,7 +41,8 @@ def test_realization_rejects_co_resident_independent_rows_before_membership():
         },
     }
     with pytest.raises(
-        ValueError, match="association realization has incompatible endpoint rows"
+        ValueError,
+        match="association realization has incompatible assigned endpoint rows",
     ):
         compile_source_realization(payload, request=request)
 
@@ -83,7 +92,17 @@ def _self_relationship_payload():
     identity = request.source_catalog.identity_evidence[0].identity_ref
     edge = request.source_catalog.relation_evidence[0].evidence_ref
     payload = {
-        "set_bindings": {},
+        "set_bindings": {
+            ref: [
+                {
+                    "branch_id": value.branch_id,
+                    "mapping_basis": f"Explicit role {ref}",
+                    "rows_ref": value.identity_ref or value.source_ref,
+                }
+                for value in values
+            ]
+            for ref, values in plan.set_bindings.items()
+        },
         "fact_bindings": {
             ref: [
                 {
@@ -99,8 +118,6 @@ def _self_relationship_payload():
                 {
                     "branch_id": "branch",
                     "mapping_basis": "Employee manager reference.",
-                    "from_rows_ref": identity,
-                    "to_rows_ref": identity,
                     "realization_ref": edge,
                     "reference_from_set_ref": "fact_1:set:employee",
                 }
@@ -110,7 +127,7 @@ def _self_relationship_payload():
     return request, payload
 
 
-def test_declared_self_relationship_derives_both_independent_roles():
+def test_declared_self_relationship_preserves_explicit_independent_roles():
     from jsonschema import validate, ValidationError
     from fervis.lookup.source_binding.schema import (
         build_semantic_source_realization_schema,
@@ -132,11 +149,11 @@ def test_declared_self_relationship_derives_both_independent_roles():
     ] = "employees"
     with pytest.raises(ValidationError):
         validate(payload, schema)
-    with pytest.raises(ValueError, match="incompatible endpoint rows"):
+    with pytest.raises(ValueError, match="incompatible assigned endpoint rows"):
         compile_source_realization(payload, request=request)
 
 
-def test_shared_set_cannot_change_rows_between_associations():
+def test_association_cannot_change_its_shared_set_assignment():
     from dataclasses import replace
     from copy import deepcopy
     from fervis.lookup.question_contract import FactLocalRef
@@ -165,5 +182,5 @@ def test_shared_set_cannot_change_rows_between_associations():
     )
     conflicting[0]["from_rows_ref"] = reference
     payload["association_bindings"][new_ref.token] = conflicting
-    with pytest.raises(ValueError, match="disagree on their shared set rows"):
+    with pytest.raises(ValueError, match="unexpected field"):
         compile_source_realization(payload, request=request)

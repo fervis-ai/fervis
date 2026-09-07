@@ -277,6 +277,9 @@ class ExecutionProofView:
     applied_inputs: tuple[ProofAppliedInputView, ...]
     source_reads: tuple[SourceReadView, ...] = ()
 
+    required_source_read_ids: tuple[str, ...] = ()
+    execute_step_id: str | None = None
+
 
 @dataclass(frozen=True)
 class AnswerOutputView:
