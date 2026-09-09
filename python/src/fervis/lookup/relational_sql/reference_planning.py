@@ -34,7 +34,7 @@ class ReferenceMeaning:
 
 class ReferenceQueryPrompt(QueryAnswerPrompt):
     turn_name = "reference query"
-    turn_task = "identify the entity denoted by the assigned reference"
+    turn_task = "author a runtime query that resolves the assigned reference"
 
     def __init__(self, *, question, meaning, tables, parameters, consumer_context=None, expected_key=None):
         self.expected_key = expected_key
@@ -93,7 +93,7 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
 
     def data_sections(self, builder):
         return (*super().data_sections(builder), *((builder.json_section('Consuming answer and API identity contracts:',
-            self.consumer_context, indent=2),) if self.consumer_context is not None else ()))
+            self.consumer_context, indent=None),) if self.consumer_context is not None else ()))
 
     def _interpretation_schema(self):
         return {'type':'array','maxItems':0,'items':{'type':'object','properties':{},'required':[],'additionalProperties':False}}

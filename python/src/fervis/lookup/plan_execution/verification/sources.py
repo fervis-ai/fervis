@@ -332,10 +332,12 @@ def _requirement_value(value: object) -> str:
 
 
 def verify_dependent_argument_contracts(answer, *, relation_contracts, row_sources):
-    from fervis.lookup.answer_program.expressions import expression_references
+    from fervis.lookup.answer_program.expressions import expression_references, FieldRef
+    from fervis.lookup.api_arguments import compatible_argument, relation_argument_description
+    from dataclasses import asdict
     from fervis.lookup.plan_execution.expression_schema import expression_value_type
     from fervis.lookup.plan_execution.declared_values import (
-        declared_comparison_types_compatible, declared_kind, DeclaredValueKind,
+        declared_kind, DeclaredValueKind,
     )
     from fervis.lookup.plan_execution.errors import RelationEngineError
     for relation in answer.relations:
@@ -352,9 +354,11 @@ def verify_dependent_argument_contracts(answer, *, relation_contracts, row_sourc
             param = source.param(binding.param_id)
             try:
                 value_type = expression_value_type(binding.value_expr,field_types=parent.field_types)
+                description = (relation_argument_description(parent, binding.value_expr.field_id, param.entity_target)
+                    if isinstance(binding.value_expr, FieldRef) else {'value_type':value_type})
                 compatible = (declared_kind(value_type) is not DeclaredValueKind.RUNTIME
-                              and declared_comparison_types_compatible(value_type,param.type.value))
+                              and compatible_argument(asdict(param), description))
             except RelationEngineError as exc:
                 raise VerificationError('dependent argument type cannot be established') from exc
             if not compatible:
-                raise VerificationError('dependent argument has an incompatible parameter type')
+                raise VerificationError('dependent argument has an incompatible parameter type or identity authority')

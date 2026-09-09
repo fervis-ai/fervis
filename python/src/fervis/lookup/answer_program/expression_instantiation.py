@@ -155,17 +155,23 @@ def _append_relation_source_endpoint_args(
                         f"relation {relation.id} requires source param {param.id}"
                     )
                 continue
-            values = (
-                resolved.value
-                if isinstance(resolved.value, tuple)
-                else (resolved.value,)
+            from fervis.lookup.relation_catalog.parameter_values import (
+                catalog_parameter_wire_value, parse_catalog_parameter_value,
             )
-            from fervis.lookup.relation_catalog.parameter_values import require_catalog_parameter_choice
+            from fervis.lookup.plan_execution.declared_values import parse_declared_value
+            collection = param.type in {RowSourceValueType.ARRAY, RowSourceValueType.LIST}
+            values = (resolved.value,) if collection or not isinstance(resolved.value, tuple) else resolved.value
+            parsed_values = []
             try:
                 for value in values:
-                    require_catalog_parameter_choice(value,type_name=param.type.value,choices=param.choices)
-            except ValueError as exc:
-                raise VerificationError(f"relation {relation.id} param binding has unknown choice") from exc
+                    if isinstance(value, str) and param.type in {RowSourceValueType.INTEGER, RowSourceValueType.NUMBER, RowSourceValueType.FLOAT, RowSourceValueType.DOUBLE}:
+                        value = parse_declared_value(value, param.type.value)
+                    wire = (tuple(catalog_parameter_wire_value(item) for item in value)
+                            if collection and isinstance(value, tuple) else catalog_parameter_wire_value(value, type_name=param.type.value))
+                    parsed_values.append(parse_catalog_parameter_value(wire, type_name=param.type.value, choices=param.choices))
+            except (ValueError, TypeError) as exc:
+                raise VerificationError(f"relation {relation.id} param binding has incompatible value type or unknown choice") from exc
+            argument_value = (parsed_values[0] if collection or not isinstance(resolved.value, tuple) else tuple(parsed_values))
             _append_endpoint_arg(
                 endpoint_args,
                 endpoint_arg_targets=endpoint_arg_targets,
@@ -173,7 +179,7 @@ def _append_relation_source_endpoint_args(
                     relation_id=relation.id,
                     read_id=row_source.read_id,
                     param_ref=param.param_ref,
-                    value=resolved.value,
+                    value=argument_value,
                     proof_refs=(
                         *binding.proof_refs,
                         *resolved.proof_refs,

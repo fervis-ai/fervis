@@ -95,7 +95,7 @@ def prepare_relation_program(
             proof_context=ExecutionProofContext.empty())
         _verify_operation_field_references(answer,relation_contracts=contracts)
         verify_dependent_argument_contracts(answer,relation_contracts=contracts,row_sources=row_sources)
-        from fervis.lookup.relational_sql.parameter_usage import validate_bound_program_parameters
+        from .arguments import validate_bound_program_parameters
         validate_bound_program_parameters(answer,bindings,row_sources,contracts)
     return PreparedRelationProgram(answer, bindings, row_sources, contracts)
 

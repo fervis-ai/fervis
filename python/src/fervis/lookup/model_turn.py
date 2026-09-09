@@ -83,6 +83,7 @@ def run_one_of_tool_model_turn(
     except ModelTurnPromptBudgetError as exc:
         raise ModelTurnGenerationFailure(
             message=prompt_budget_error_message,
+            error_context={'exception_class': type(exc).__name__, 'message': str(exc)},
             usage={},
             duration_ms=0,
             artifact=ModelTurnArtifact(

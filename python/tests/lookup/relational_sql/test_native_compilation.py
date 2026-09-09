@@ -230,7 +230,8 @@ def test_native_multi_answer_preserves_per_request_operand_ownership(monkeypatch
 
 @pytest.mark.parametrize('key_type', ['integer', 'uuid'])
 @pytest.mark.parametrize('two_facts', [False, True])
-def test_normal_reference_compilation_replays_guard_before_required_rest_read(monkeypatch, key_type, two_facts):
+@pytest.mark.parametrize('opaque_consumer', [False, True])
+def test_normal_reference_compilation_replays_guard_before_required_rest_read(monkeypatch, key_type, two_facts, opaque_consumer):
     from uuid import UUID
     def key_value(number):
         return str(UUID(int=number)) if key_type == 'uuid' else number
@@ -241,7 +242,7 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
     areas=replace(_read('areas'),resource_names=('areas',),fields=(replace(_read('areas').fields[0], type=key_type),
         CatalogField('primary','boolean',path='is_primary',row_path_id='root')))
     stores=replace(_read('stores',params=(CatalogParam('area_id','area_id',ParamSource.PATH,key_type,
-        required=True,entity_target=EntityKeyComponentTarget('areas','primary','id')),)),resource_names=('stores',))
+        required=True,entity_target=None if opaque_consumer else EntityKeyComponentTarget('areas','primary','id')),)),resource_names=('stores',))
     foreign=replace(_read('foreign_areas', value_type=key_type), resource_names=('areas',))
     catalog=RelationCatalog(reads=(areas,stores,foreign))
     sources=build_api_row_source_catalog(catalog)
@@ -277,7 +278,7 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
             consumer = prompt.consumer_context
             assert consumer['requested_answer']['requested_fact_id'] in {'fact_1', 'fact_2'}
             assert any(parameter.get('entity_target', {}).get('entity_kind') == 'areas'
-                       for table in consumer['views'].values() for parameter in table['request_parameters'])
+                       for table in consumer['views'].values() for parameter in table['request_parameters'] if parameter.get('entity_target')) is (not opaque_consumer)
             assert any(table.get('read_id') == 'stores' for table in prompt.tables.values())
             view=next(name for name, table in prompt.tables.items() if table.get('read_id') == 'areas')
             choice=next(name for name,desc in prompt.parameters.items() if desc.get('kind')=='catalog_choice' and desc['value']=='true')
@@ -289,8 +290,15 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
                 'interpretations':[],'reference_binding':{'kind':'description','basis':'The primary flag defines the configured primary area.'}})
         elif purpose.value=='source_realization':
             view=next(name for name,table in prompt.tables.items() if table.get('read_id')=='stores')
-            result=parse(payload(query='SELECT COUNT(*) AS total FROM selected_items',
-                request_arguments=[{'view':view,'instance':'selected_items','parameter_ref':prompt.tables[view]['request_parameters'][0]['param_ref'],'binding':next(name for name, desc in prompt.parameters.items() if desc.get('kind') == 'reference_argument' and desc['identity']['entity_kind'] == 'areas')}]))
+            assert set(prompt.reference_inputs) == {'i1'}
+            assert not any(table.get('kind') == 'reference_slot' for table in prompt.tables.values())
+            assert not any(description.get('kind') == 'reference_argument' for description in prompt.parameters.values())
+            submitted=payload(query='SELECT COUNT(*) AS total FROM selected_items',
+                reference_demands=[{'input_ref':'i1','authority':'areas/primary(id)'}],
+                request_arguments=[{'view':view,'instance':'selected_items','parameter_ref':prompt.tables[view]['request_parameters'][0]['param_ref'],'binding':{'reference_input':'i1', **({'component_id':None} if opaque_consumer else {})}}])
+            from jsonschema import validate
+            validate(submitted, prompt._schema())
+            result=parse(submitted)
         else:raise AssertionError(purpose)
         return SimpleNamespace(result=result)
     monkeypatch.setattr(compilation,'_turn',turn)
@@ -487,6 +495,7 @@ def test_literal_resource_address_does_not_require_an_invented_identity_namespac
         view = next(name for name, table in prompt.tables.items() if table.get('read_id') == 'entries')
         symbol = next(name for name, description in prompt.parameters.items() if description.get('kind') == 'reference_literal')
         return SimpleNamespace(result=parse(payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
+            reference_demands=[{'input_ref':'i1','authority':None}],
             request_arguments=[{'view':view,'parameter_ref':'channel_id','binding':symbol}])))
     monkeypatch.setattr(compilation, '_turn', turn)
     monkeypatch.setattr(compilation, '_read_eligibility_turn', lambda eligibility_request, **kwargs: SemanticReadEligibilityResult(

@@ -1,11 +1,9 @@
 """Catalog-backed ways to acquire required request values from other reads."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from fervis.lookup.relation_catalog.row_sources import RowSource
 from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
-from fervis.lookup.plan_execution.declared_values import (
-    declared_comparison_types_compatible,
-)
+from fervis.lookup.api_arguments import compatible_argument, row_source_argument_description
 
 
 @dataclass(frozen=True)
@@ -107,10 +105,10 @@ class ReadAccessCatalog:
             if not refs or len(refs) != len(set(refs)):
                 raise ValueError("read dependency repeats or omits argument mappings")
             for binding in dependency.arguments:
-                if not declared_comparison_types_compatible(
-                    fields[binding.parent_field_ref].type.value,
-                    params[binding.parameter_ref].type.value,
-                ):
+                parameter = params[binding.parameter_ref]
+                if not compatible_argument(asdict(parameter), row_source_argument_description(
+                    parent, fields[binding.parent_field_ref].field_ref, parameter.entity_target)):
+
                     raise ValueError(
-                        "read dependency field cannot supply its argument type"
+                        "read dependency field cannot supply its argument type or identity authority"
                     )

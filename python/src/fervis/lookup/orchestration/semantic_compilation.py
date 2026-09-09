@@ -97,9 +97,9 @@ from fervis.lookup.relation_catalog.selection.selector.semantic_selection import
     FactRecallBuckets,
 )
 from fervis.lookup.source_reads.representation import inspect_selected_representations
-from fervis.lookup.relational_sql.authoring import QueryAnswerPrompt, parse_query_answer, QueryUnavailable
+from fervis.lookup.relational_sql.authoring import QueryUnavailable
 from fervis.lookup.relational_sql.catalog import build_query_view_catalog
-from fervis.lookup.relational_sql.parameters import query_parameter_menu, with_catalog_choices, with_reference_arguments, without_input_parameters
+from fervis.lookup.relational_sql.parameters import query_parameter_menu, with_catalog_choices, without_input_parameters
 from fervis.lookup.relational_sql.compiler import compile_query_answer, combine_query_answers
 from fervis.lookup.answer_program.values import ValueComponent
 from .reference_queries import reference_input_values, plan_fact_references, reference_prerequisites
@@ -683,15 +683,13 @@ def compile_semantic_question(request, *, on_turn=None):
             if ref.startswith(fact.requested_fact_id+':'))) for value in canonical if value.input_ref in fact.input_refs)
         menu=with_catalog_choices(query_parameter_menu(local_values),source_catalog=source_catalog,
             source_refs={view.row_source_id for view in views})
-        from .reference_slots import reference_slots, selected_reference_slots, bind_reference_slots, reference_input_menu
+        from .reference_slots import bind_reference_slots, reference_input_menu
+        from .reference_authoring import FactualQueryPrompt, parse_factual_query, reference_contracts
         consumer_catalog=RelationCatalog(reads=tuple(read for read in request.full_catalog.reads
             if read.id in {view_catalog.tables[view.name]['read_id'] for view in eligible_views}))
         reference_catalog=RelationCatalog(reads=tuple({read.id:read for read in (*resolver_catalog.reads,*consumer_catalog.reads)}.values()))
-        slots=reference_slots(fact=fact,inputs=inputs,denotations={item.input_ref:item for item in meaning.input_denotations},
-            tables=build_query_view_catalog(reference_catalog,access=access).tables)
-        tables.update({slot.view.name:slot.table for slot in slots})
+        reference_tables=build_query_view_catalog(reference_catalog,access=access).tables
         menu=reference_input_menu(menu,{item.input_ref:item for item in meaning.input_denotations})
-        menu=with_reference_arguments(menu,slots)
         selection_boundary = None
         selection_limit = None
         if fact.selection_limit_input_ref is not None:
@@ -701,16 +699,17 @@ def compile_semantic_question(request, *, on_turn=None):
             selection_boundary = next(menu.expressions[name] for name, description in menu.descriptions.items()
                 if description['input_ref'] == fact.selection_limit_input_ref and description['projection'] == 'value')
             menu=without_input_parameters(menu,{fact.selection_limit_input_ref})
-        authored=turn(ModelTurnPurpose.SOURCE_REALIZATION,
-            QueryAnswerPrompt(question=request.question,meaning=fact,tables=tables,parameters=menu.descriptions,timezone=timezone),
-            lambda payload:parse_query_answer(payload,table_names=set(tables),parameter_names=set(menu.expressions),
-                meaning=fact,selection_limit=selection_limit,expected_input_refs=fact.input_refs,parameter_descriptions=menu.descriptions,tables=tables,
-                request_parameters={name:{param['param_ref'] for param in table['request_parameters']} for name,table in tables.items()}))
+        prompt=FactualQueryPrompt(question=request.question,meaning=fact,tables=tables,parameters=menu.descriptions,timezone=timezone,
+            inputs=inputs,denotations={item.input_ref:item for item in meaning.input_denotations},reference_tables=reference_tables)
+        declared=turn(ModelTurnPurpose.SOURCE_REALIZATION, prompt,
+            lambda payload:parse_factual_query(payload,prompt=prompt,menu=menu,selection_limit=selection_limit))
+        authored=declared if isinstance(declared,QueryUnavailable) else declared.authored
         if isinstance(authored,QueryUnavailable):
             return SemanticCompilationImpossible(question_contract=intent,canonical_values=canonical,
                 blocked_fact_ids=(fact.requested_fact_id,),source_contract_snapshot=source_catalog.contract_snapshot,
                 reviewed_read_ids=selection.selected_read_ids)
-        selected_slots=selected_reference_slots(authored,slots,menu)
+        slots,tables,menu=reference_contracts(prompt,declared.demands,menu)
+        selected_slots={slot.table['input_ref']:slot for slot in slots}
         planned_references=plan_fact_references(fact=fact,inputs=inputs,
             denotations={item.input_ref:item for item in meaning.input_denotations},values=local_values,
             catalog=request.full_catalog,reference_catalog=reference_catalog,consumer_catalog=consumer_catalog,

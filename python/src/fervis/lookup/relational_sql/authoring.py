@@ -1,7 +1,8 @@
 """Native query authoring declarations before canonical program compilation."""
 
 from fervis.lookup.answer_program.operations import SQL_VALUE_TYPES
-from .parameter_usage import compatible_argument, validate_sql_parameter_uses
+from fervis.lookup.api_arguments import compatible_argument
+from .parameter_usage import validate_sql_parameter_uses
 from dataclasses import dataclass, asdict, replace
 from typing import Any, Mapping
 
@@ -311,8 +312,16 @@ def parse_query_answer(
         if meaning.selection_limit_input_ref is not None:
             used_inputs.add(meaning.selection_limit_input_ref)
         if used_inputs != set(expected_input_refs):
+            missing = set(expected_input_refs) - used_inputs
+            channels = {ref: {
+                'relations': {name: list(table.get('columns', {})) for name, table in (tables or {}).items()
+                              if ref in table.get('input_refs', ())},
+                'parameters': [name for name, description in descriptions.items() if description.get('input_ref') == ref],
+            } for ref in sorted(missing)}
             raise QueryValidationError(
-                "Query input operands differ from this requested fact ownership"
+                "Query input operands differ from this requested fact ownership. "
+                f"Missing input consumption: {channels}. Unowned inputs: {sorted(used_inputs - set(expected_input_refs))}. "
+                "A reference demand declaration alone does not consume its input; use the declared reference relation or compatible REST binding."
             )
     query = statement.sql(dialect="duckdb") if interpretations else payload["query"]
     for argument in arguments:
@@ -419,34 +428,35 @@ class QueryAnswerPrompt(TurnPromptBase):
                 self.compilation_scope(),
             ),
             builder.text_section("Question:", self.question),
-            builder.json_section("Requested answer:", asdict(self.meaning), indent=2),
+            builder.json_section("Requested answer:", asdict(self.meaning), indent=None),
             builder.json_section("View invocation requirements:", {
                 name: {"required_parameters": [parameter["param_ref"] for parameter in table.get("request_parameters", ()) if parameter.get("required")],
                        "has_no_required_parameters": not any(parameter.get("required") for parameter in table.get("request_parameters", ()))}
                 for name, table in self.tables.items()
-            }, indent=2),
+            }, indent=None),
             builder.json_section("Declared API views:", {
                 name: {key: value for key, value in table.items() if key != "read_id"}
                 for name, table in self.tables.items()
-            }, indent=2),
+            }, indent=None),
             builder.json_section(
                 "Declared output identity types:",
                 self.output_identity_authorities(),
-                indent=2,
+                indent=None,
             ),
             builder.json_section(
                 "Grounded parameter menu:", {
-                    name: {**description, **({"sql_expression": "$" + name}
+                    name: {**{key:value for key,value in description.items() if not key.startswith("_")}, **({"sql_expression": "$" + name}
                         if description.get("kind") not in {"reference_argument", "reference_literal", "definition"} else {})}
                     for name, description in self.parameters.items()
-                }, indent=2
+                }, indent=None
             ),
         )
 
     def sql_surface_instructions(self):
         return (
+            "Author an executable query, not evaluated rows or a known identity value. Fervis reads the declared API views and evaluates SQL after compilation. A value read from another view can be joined or queried at execution; its absence from this prompt does not make the query unavailable.",
             "Use DuckDB SQL over only the declared views. Quote identifiers when necessary. No files, network, external tables or database access.",
-            "Copy SQL parameters from the menu sql_expression exactly. Use the menu key for request_arguments bindings. FROM and JOIN use the exact Declared API views keys as SQL tables, never endpoint paths or resource labels. These views are not SQL functions: do not put parentheses or request parameters after a view name. REST arguments belong exclusively in request_arguments. Do not invent values or inline grounded operands. SQL literals may express arithmetic constants and documented catalog enum values.",
+            "Copy SQL parameters from the menu sql_expression exactly. Use the menu key for request_arguments bindings. FROM and JOIN use declared API view keys or declared reference relation names as SQL tables, never endpoint paths or resource labels. These views are not SQL functions: do not put parentheses or request parameters after a view name. REST arguments belong exclusively in request_arguments. Do not invent values or inline grounded operands. SQL literals may express arithmetic constants and documented catalog enum values.",
             "SQL calendar operations and date-to-timestamp conversions use the timezone in Compilation scope.",
             "request_arguments binds declared view request parameter refs to the same grounded menu. Supply only arguments needed for the question; automatic_request_parameters are already supplied by complete traversal; never bind them. To invoke the same API view with different bindings in one query, assign a distinct instance name to each invocation. Use FROM declared_view AS instance, or refer to the named invocation directly as a SQL table. All arguments sharing an instance must name the same declared view. Use instance=null for the default view. Physical prerequisite enumeration and pagination belong to Fervis.",
         )
@@ -458,8 +468,7 @@ class QueryAnswerPrompt(TurnPromptBase):
                 (
                     *self.sql_surface_instructions(),
                     "This invocation compiles only the assigned Requested answer. Other answer requests in the question are compiled separately and combined by Fervis. Use the complete question to interpret this assigned request and its scoped operands.",
-                    "A reference_literal is the original supplied name/code, not a resolved identity. It may address an opaque path or UUID REST parameter that declares no identity target. Use it only in request_arguments; it is not a SQL placeholder. Never transfer a resolved identity to an API parameter with no declared identity authority.",
-                    "A reference_argument menu symbol binds its declared relation field to a REST request parameter for each guarded identity; it is not a SQL placeholder. Use its declared view and column in SQL. A reference_slot declares a possible required identity authority for its input_ref. Select exactly one authority for each reference input according to the API parameter or relationship that this answer consumes; it will be resolved before execution. Other domains require an explicit API relationship. A view with kind resolved_reference supplies established canonical identities for its input_ref. Its prerequisite query resolves the supplied reference and checks missing or ambiguous matches at execution. Consume that input by joining or selecting from this relation using its key components; do not resolve it again from raw text or require a scalar parameter for it. Other declared API views remain available for the requested properties and relationships.",
+                    *self.reference_usage_instructions(),
                     "Preserve the original question, requested row or group grain, relationships and conditions. Do not introduce filters absent from the requested meaning, change the requested measure or assume a single API invocation covers its whole parent population. A stored record and a qualifying business occurrence are not necessarily the same population: use source contracts and observed state or timestamps to preserve the question's population qualifiers, rather than treating a resource label as proof that every returned row qualifies.",
                     "A literal menu value is the canonical scalar, not its original label. Use that value directly; numeric percentages have already been converted to ratios.",
                     "An aggregate can be computed from a complete row view. Missing inputs for a summary endpoint do not make the question unavailable when another declared view can supply the observations. Required parent traversal remains the compiler's responsibility.",
@@ -524,6 +533,12 @@ class QueryAnswerPrompt(TurnPromptBase):
 
     def _identity_display_schema(self):
         return {"type": ["string", "null"]}
+
+    def reference_usage_instructions(self):
+        return (
+            "A reference_literal is an original resource-address value, not a SQL identity. It may be used only in compatible REST arguments.",
+            "A reference_argument menu symbol projects an established reference relation field into a REST argument. Use its declared relation and column in SQL. Resolved reference relations preserve missing and ambiguous outcomes and must be consumed as declared, rather than resolving the input again from raw text.",
+        )
 
     def _identity_display_instruction(self):
         return "Choose one logical identity authority by entity kind, key and component IDs. Its producing API view is established by SQL lineage, not by choosing a physical carrier. For an identity, provide display_column from an observed human-readable name when one is available; this is presentation metadata for that identity, not an additional requested output."
@@ -625,11 +640,15 @@ class QueryAnswerPrompt(TurnPromptBase):
                         getattr(self.meaning, 'reference_kind', None) == 'literal' and
                         description.get('input_ref') == getattr(self.meaning, 'reference_input_ref', None)))
                 )
-                if not names:
+                binding_options = []
+                if names:
+                    group = binding_groups.setdefault(names, "bound_value_" + str(len(binding_groups) + 1))
+                    binding_options.append({"$ref": "#/$defs/" + group})
+                if reference_binding := self.reference_argument_schema(parameter):
+                    binding_options.append(reference_binding)
+                if not binding_options:
                     continue
-                group = binding_groups.setdefault(
-                    names, "bound_value_" + str(len(binding_groups) + 1)
-                )
+                binding_schema = binding_options[0] if len(binding_options) == 1 else {"anyOf": binding_options}
                 variants.append(
                     _object(
                         {
@@ -639,13 +658,16 @@ class QueryAnswerPrompt(TurnPromptBase):
                                 "type": "string",
                                 "enum": [parameter["param_ref"]],
                             },
-                            "binding": {"$ref": "#/$defs/" + group},
+                            "binding": binding_schema,
                         }
                     )
                 )
         if not variants:
             return {"type": "array", "maxItems": 0, "items": _object({})}
         return _array(variants[0] if len(variants) == 1 else {"anyOf": variants})
+
+    def reference_argument_schema(self, parameter):
+        return None
 
     def _unavailable_schema(self):
         return _object(

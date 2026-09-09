@@ -1,13 +1,11 @@
 """Typed reference demands selected by factual SQL before identity resolution."""
 from dataclasses import dataclass, replace
-from hashlib import sha256
-import json
 
 from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.question_contract.model import InputDenotationKind
 from fervis.lookup.relational_sql.acquisition import RelationView
 from fervis.lookup.relational_sql.execution import QueryValidationError
-from fervis.lookup.relational_sql.outputs import identity_carriers
+from fervis.lookup.relational_sql.outputs import identity_carriers, identity_authorities
 
 
 @dataclass(frozen=True)
@@ -21,30 +19,41 @@ class ReferenceSlot:
         return self.table['candidate_keys'][0]
 
 
-def reference_slots(*, fact, inputs, denotations, tables):
-    keys = {}
-    for authority in identity_carriers(tables).values():
-        columns = tables[authority['view']]['columns']
-        components = {component: columns[column]['type'] for component, column in authority['components'].items()}
-        signature = (authority['entity_kind'], authority['key_id'], tuple(sorted(components.items())))
-        keys[signature] = components
+def reference_slots(*, fact, inputs, denotations, tables, selected_authorities):
+    """Lower declared logical demands to one stable relation per resolved input."""
+    authorities = identity_authorities(tables)
+    carriers = tuple(identity_carriers(tables).values())
     slots = []
     for input_ref in fact.input_refs:
         if denotations[input_ref].kind is not InputDenotationKind.IDENTITY_REFERENCE:
             continue
-        for signature, components in sorted(keys.items()):
-            digest = sha256(json.dumps(signature).encode()).hexdigest()[:12]
-            name = f'{fact.requested_fact_id}__input_{input_ref}__key_{digest}'
-            key = {'entity_kind': signature[0], 'key_id': signature[1],
-                   'components': {component: component for component in components}, 'context_columns': []}
-            slots.append(ReferenceSlot(RelationView(name, name+'.rows', key['components']), {
-                'kind': 'reference_slot', 'input_ref': input_ref, 'input_refs': [input_ref],
-                'request_parameters': [], 'entity_references': [], 'automatic_request_parameters': [],
-                'supplied_reference': inputs[input_ref].operand, 'operand_meaning': denotations[input_ref].operand_meaning,
-                'columns': {component: {'type': kind, 'nullable': False, 'description': 'Required identity key component'}
-                            for component, kind in components.items()},
-                'candidate_keys': [key],
-            }, (input_ref,)))
+        authority_ref = selected_authorities.get(input_ref)
+        if authority_ref is None:
+            continue
+        if authority_ref not in authorities:
+            raise QueryValidationError('Reference demand selects an undeclared identity authority')
+        authority = authorities[authority_ref]
+        matching = tuple(carrier for carrier in carriers if
+            (carrier['entity_kind'], carrier['key_id'], set(carrier['components'])) ==
+            (authority['entity_kind'], authority['key_id'], set(authority['components'])))
+        components = {}
+        for component in authority['components']:
+            kinds = {tables[carrier['view']]['columns'][carrier['components'][component]]['type']
+                     for carrier in matching}
+            if len(kinds) != 1:
+                raise QueryValidationError('Reference identity component has inconsistent declared scalar types')
+            components[component] = next(iter(kinds))
+        name = f'{fact.requested_fact_id}__reference_{input_ref}'
+        key = {'entity_kind': authority['entity_kind'], 'key_id': authority['key_id'],
+               'components': {component: component for component in components}, 'context_columns': []}
+        slots.append(ReferenceSlot(RelationView(name, name+'.rows', key['components']), {
+            'kind': 'reference_slot', 'input_ref': input_ref, 'input_refs': [input_ref],
+            'request_parameters': [], 'entity_references': [], 'automatic_request_parameters': [],
+            'supplied_reference': inputs[input_ref].operand, 'operand_meaning': denotations[input_ref].operand_meaning,
+            'columns': {component: {'type': kind, 'nullable': False, 'description': 'Required identity key component'}
+                        for component, kind in components.items()},
+            'candidate_keys': [key],
+        }, (input_ref,)))
     return tuple(slots)
 
 

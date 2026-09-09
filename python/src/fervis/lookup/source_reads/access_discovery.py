@@ -1,6 +1,6 @@
 """Question-independent proposals for complete REST prerequisite traversals."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import re
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.relation_catalog.row_sources import (
@@ -13,7 +13,6 @@ from fervis.lookup.relation_catalog.model import (
     requires_caller_supplied_input,
 )
 from fervis.lookup.plan_execution.declared_values import (
-    declared_comparison_types_compatible,
     declared_kind,
     DeclaredValueKind,
 )
@@ -23,15 +22,13 @@ from fervis.lookup.turn_prompts import (
     ProviderResponseContract,
 )
 from fervis.model_io.structured_output.specs import required_tool_spec
+from fervis.lookup.api_arguments import compatible_argument, row_source_argument_description
 from .access_model import ReadAccessCatalog, ReadDependency, AccessArgument
 
 
-def _compatible(field, param):
-    return declared_kind(
-        field.type.value
-    ) is not DeclaredValueKind.RUNTIME and declared_comparison_types_compatible(
-        field.type.value, param.type.value
-    )
+def _compatible(field, param, parent):
+    return declared_kind(field.type.value) is not DeclaredValueKind.RUNTIME and compatible_argument(
+        asdict(param), row_source_argument_description(parent, field.field_ref, param.entity_target))
 
 
 def access_candidates(
@@ -54,7 +51,7 @@ def access_candidates(
         fields = (*parent.fields, *parent.request_argument_fields)
         if all(
             any(
-                not field.declared_entity_kind and _compatible(field, param)
+                not field.declared_entity_kind and _compatible(field, param, parent)
                 for field in fields
             )
             for param in required
@@ -109,7 +106,7 @@ def access_schema(request: AccessDiscoveryRequest):
                     "enum": [
                         field.field_ref
                         for field in fields
-                        if not field.declared_entity_kind and _compatible(field, param)
+                        if not field.declared_entity_kind and _compatible(field, param, parent)
                     ]
                 }
                 for param in source.params
@@ -179,12 +176,16 @@ class ReadAccessTurnPrompt(TurnPromptBase):
                             "required": p.required,
                             "default": p.default,
                             "description": p.description,
+                            "entity_target": asdict(p.entity_target) if p.entity_target else None,
                         }
                         for p in item.params
                     ],
+                    "candidate_keys": [asdict(key) for key in item.candidate_keys],
+                    "entity_references": [asdict(key) for key in item.entity_references],
                     "fields": [
                         {
                             "ref": f.field_ref,
+                            "id": f.id,
                             "name": f.label,
                             "type": f.type.value,
                             "description": f.description,

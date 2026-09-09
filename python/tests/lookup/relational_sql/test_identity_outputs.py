@@ -174,7 +174,7 @@ def test_canonical_compilation_checks_identity_parameters_without_the_model_pars
             input_denotations=(InputDenotation('d1','i1','named site','The operand identifies one site.',key.entity_kind,InputDenotationKind.IDENTITY_REFERENCE),),
             expected_input_refs=('i1',))
     if use!='key_column':
-        with pytest.raises(QueryValidationError,match='identity|type'):compile()
+        with pytest.raises((QueryValidationError, VerificationError),match='identity|type'):compile()
         return
     compiled=compile()
     program=decode_answer_program(canonical_answer_program_json(compiled.program))

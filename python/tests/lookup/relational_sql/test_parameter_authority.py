@@ -1,5 +1,6 @@
 import pytest
-from fervis.lookup.relational_sql.parameter_usage import compatible_argument, validate_identity_key_uses
+from fervis.lookup.api_arguments import compatible_argument
+from fervis.lookup.relational_sql.parameter_usage import validate_identity_key_uses
 from fervis.lookup.relational_sql.execution import QueryValidationError
 
 TARGET = {'entity_kind': 'shop.customer', 'key_id': 'primary', 'component_id': 'id'}
@@ -51,8 +52,8 @@ def test_nested_predicate_parameter_is_checked_in_its_own_scope():
         tables, {'order': {'identity': {'entity_kind': 'order', 'key_id': 'primary'}, 'projection': 'key_component:id'}})
 
 
-def test_guarded_identity_cannot_be_used_as_an_untyped_uuid_argument():
-    assert not compatible_argument({'source':'query','type':'uuid','entity_target':None},
+def test_guarded_identity_retains_provenance_when_bound_to_an_untyped_uuid_argument():
+    assert compatible_argument({'source':'query','type':'uuid','entity_target':None},
         {'kind':'reference_argument','identity':{'entity_kind':'customer','key_id':'primary'},
          'projection':'key_component:id','value_type':'uuid'})
 
@@ -74,3 +75,14 @@ def test_literal_address_uses_declared_scalar_parser_without_identity_promotion(
     assert compatible_argument(parameter, description)
     assert not compatible_argument(parameter, {**description, 'value': invalid})
     assert not compatible_argument({**parameter, 'entity_target': TARGET}, description)
+
+
+@pytest.mark.parametrize('target,allowed', [(None, True), (TARGET, True), ({**TARGET, 'entity_kind':'other.customer'}, False)])
+def test_reference_guards_do_not_change_argument_authority_acceptance(target, allowed):
+    outcomes = []
+    for provenance in ('reference_argument', 'field_projection'):
+        description = {'kind':provenance, 'identity':{'entity_kind':'shop.customer','key_id':'primary'},
+                       'projection':'key_component:id','value_type':'uuid'}
+        outcomes.append(compatible_argument({'source':'path','type':'uuid','entity_target':target}, description))
+        assert not compatible_argument({'source':'path','type':'integer','entity_target':target}, description)
+    assert outcomes == [allowed, allowed]
