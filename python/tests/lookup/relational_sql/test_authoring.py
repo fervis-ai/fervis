@@ -36,6 +36,8 @@ def payload(**changes):
     result = {**value, **changes}
     if 'api_invocations' not in result:
         result['api_invocations'] = api_invocations(result['query'],bindings,relation_names)
+    for invocation in result['api_invocations']:
+        invocation.setdefault('population_bindings', [])
     return result
 
 

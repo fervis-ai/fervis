@@ -6,6 +6,7 @@ from fervis.lookup.relational_sql.execution import QueryValidationError
 
 
 def body(invocations, query='SELECT COUNT(*) AS total FROM selected'):
+    invocations=[{**item, 'population_bindings':item.get('population_bindings', [])} for item in invocations]
     return {'query':query,'mode':'scalar','columns':[{'name':'total','value_type':'integer'}],
         'outputs':[{'kind':'value','column':'total','label':'count'}],'ordering':[],
         'api_invocations':invocations,'interpretations':[]}

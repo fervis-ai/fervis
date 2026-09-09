@@ -52,7 +52,8 @@ def bind_query_answer(authored, menu, views, *, selection_boundary=None, namespa
     )
     meaning_inputs = tuple(
         menu.expressions[name]
-        for name in dict.fromkeys((*tuple(item.input for item in authored.interpretations), *authored.definition_inputs))
+        for name in dict.fromkeys((*tuple(item.input for item in authored.interpretations), *authored.definition_inputs,
+                                    *(binding.input for invocation in authored.api_invocations for binding in invocation.population_bindings)))
     )
     fixed = {
         ref.parameter_id

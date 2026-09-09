@@ -38,10 +38,17 @@ class InvocationArgument:
 
 
 @dataclass(frozen=True)
+class PopulationBinding:
+    input: str
+    basis: str
+
+
+@dataclass(frozen=True)
 class ApiInvocation:
     view: str
     name: str
     arguments: tuple[InvocationArgument, ...] = ()
+    population_bindings: tuple[PopulationBinding, ...] = ()
 
 
 def invocation_arguments(invocations):
@@ -129,7 +136,8 @@ def parse_query_answer(
     if 'request_arguments' in payload or 'api_invocations' not in payload:
         raise QueryValidationError('Declare API sources and their bindings together in api_invocations')
     api_invocations = tuple(ApiInvocation(item['view'], item['name'],
-        tuple(InvocationArgument(**argument) for argument in item['arguments'])) for item in payload['api_invocations'])
+        tuple(InvocationArgument(**argument) for argument in item['arguments']),
+        tuple(PopulationBinding(**binding) for binding in item.get('population_bindings', ()))) for item in payload['api_invocations'])
     definition_tables = tables
     instances = query_instances(api_invocations, tables if tables is not None else table_names)
     relation_names = {name for name, table in (tables or {}).items()
@@ -254,6 +262,19 @@ def parse_query_answer(
     descriptions = parameter_descriptions or {}
     if any(descriptions.get(name, {}).get('kind') == 'reference_argument' for name in names):
         raise QueryValidationError('Reference argument symbols are for REST bindings; use their declared relation columns in SQL')
+    population_inputs = set()
+    for invocation in api_invocations:
+        owned_population_inputs = set()
+        for binding in invocation.population_bindings:
+            description = descriptions.get(binding.input, {})
+            if (not binding.basis.strip() or not description.get('may_interpret')
+                    or description.get('kind') != 'literal' or description.get('identity')
+                    or not (definition_tables or {}).get(invocation.view, {}).get('description', '').strip()):
+                raise QueryValidationError('Source population binding requires an owned lexical input and a documented API population')
+            if binding.input in owned_population_inputs:
+                raise QueryValidationError('Source population input binding is repeated')
+            owned_population_inputs.add(binding.input)
+            population_inputs.add(binding.input)
     used_names = set(names) | {item.binding for item in arguments}
     if len({(item.input, item.choice) for item in interpretations}) != len(
         interpretations
@@ -309,7 +330,7 @@ def parse_query_answer(
                 "Interpreted catalog value is not used by the query"
             )
     if expected_input_refs is not None:
-        input_names = used_names | {item.input for item in interpretations}
+        input_names = used_names | {item.input for item in interpretations} | population_inputs
         used_inputs = {
             descriptions[name]["input_ref"]
             for name in input_names
@@ -547,7 +568,7 @@ class QueryAnswerPrompt(TurnPromptBase):
         return schema
 
     def _input_usage_instruction(self):
-        return "Consume every supplied input assigned in Requested answer.input_refs. Catalog choices are optional unless needed for this request. For a lexical category whose API representation is a documented catalog choice, add an interpretations entry connecting the original input symbol to that choice, with its contract basis. The interpreted input symbol resolves to that choice in SQL and request arguments; explicit choice symbols are also valid. This fixes that interpretation for this compiled program. Inputs supplied in the parameter menu remain direct parameter references unless explicitly interpreted; inputs supplied as resolved_reference views are consumed through those relations."
+        return "Consume every supplied input assigned in Requested answer.input_refs. Catalog choices are optional unless needed for this request. For a lexical category whose API representation is a documented catalog choice, add an interpretations entry connecting the original input symbol to that choice, with its contract basis. The interpreted input symbol resolves to that choice in SQL and request arguments; explicit choice symbols are also valid. This fixes that interpretation for this compiled program. If a documented API population already implements a lexical category, declare that input and its semantic contract basis in the owning api_invocations.population_bindings. This fixes the category to that source population without inventing a field predicate. Use this only when the API contract itself restricts every returned row to that category; a resource label or an available filtering parameter does not establish that restriction. Other requested conditions still require their own predicates or arguments. Inputs supplied in the parameter menu remain direct parameter references unless explicitly interpreted; inputs supplied as resolved_reference views are consumed through those relations."
 
     def _identity_display_schema(self):
         return {"type": ["string", "null"]}
@@ -673,9 +694,17 @@ class QueryAnswerPrompt(TurnPromptBase):
             arguments = (_array(argument_variants[0] if len(argument_variants) == 1 else {'anyOf':argument_variants})
                          if argument_variants else {'type':'array','maxItems':0,'items':_object({})})
             variants.append(_object({'view':{'type':'string','enum':[view]},
-                'name':{'type':'string','pattern':'^[a-z_][a-z0-9_]*$'}, 'arguments':arguments}))
+                'name':{'type':'string','pattern':'^[a-z_][a-z0-9_]*$'}, 'arguments':arguments,
+                'population_bindings':self._population_binding_schema(table)}))
         return (_array(variants[0] if len(variants) == 1 else {'anyOf':variants}) if variants
                 else {'type':'array','maxItems':0,'items':_object({})})
+
+    def _population_binding_schema(self, table):
+        inputs = [name for name, item in self.parameters.items()
+                  if item.get('may_interpret') and item.get('kind') == 'literal' and not item.get('identity')]
+        if not inputs or not table.get('description', '').strip():
+            return {'type':'array', 'maxItems':0, 'items':_object({})}
+        return _array(_object({'input':{'type':'string','enum':inputs}, 'basis':{'type':'string','minLength':1}}))
 
     def reference_argument_schema(self, parameter):
         return None

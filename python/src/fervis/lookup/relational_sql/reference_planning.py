@@ -82,9 +82,8 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
             {'type':'object','properties':{'kind':{'type':'string','enum':['description']},'basis':{'type':'string'}},
              'required':['kind','basis'],'additionalProperties':False},
         ]}
-        schema['properties'] = {'reference_binding': schema['properties'].pop('reference_binding'), **schema['properties']}
         schema['properties']['reference_binding']['anyOf'] = [branch for branch in schema['properties']['reference_binding']['anyOf'] if branch['properties']['kind']['enum'] == [self.meaning.reference_kind]]
-        schema['required'] = ['reference_binding', *schema['required']]
+        schema['required'] = [*schema['required'], 'reference_binding']
         return schema
 
     def _input_usage_instruction(self):

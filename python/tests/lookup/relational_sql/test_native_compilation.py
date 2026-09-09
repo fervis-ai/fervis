@@ -158,7 +158,7 @@ def test_sql_views_follow_retained_row_grain_instead_of_every_nested_candidate(m
     assert [next(iter(row.values.values())) for row in executed.fact_result.outcome.projected_rows]==[2]
 
 
-@pytest.mark.parametrize('case',['shared','shared_category','shared_mixed','omitted','independent','foreign'])
+@pytest.mark.parametrize('case',['shared','shared_category','shared_mixed','source_population','omitted','independent','foreign'])
 def test_native_multi_answer_preserves_per_request_operand_ownership(monkeypatch,case):
     from copy import deepcopy
     question='Count stores above the first threshold and sum IDs of stores above the applicable threshold.'
@@ -168,7 +168,7 @@ def test_native_multi_answer_preserves_per_request_operand_ownership(monkeypatch
     if independent:
         values.append({'meaning':'second threshold','denotation_basis':'A separate threshold belongs to the second request.',
             'non_entity_value':{'kind':'number','value':{'operands':['1'],'origin':{'kind':'question'}}}})
-    if case in {'shared_category','shared_mixed'}:
+    if case in {'shared_category','shared_mixed','source_population'}:
         values[0]['non_entity_value']={'kind':'categorical_value','value':{'operands':['accepted'],'origin':{'kind':'question'}}}
     frame=_frame_payload(supplied_values=values)
     frame['outcome']['answer_requests'].append(deepcopy(frame['outcome']['answer_requests'][0]))
@@ -190,14 +190,18 @@ def test_native_multi_answer_preserves_per_request_operand_ownership(monkeypatch
             if case=='foreign' and not first:
                 predicate+=' AND id > $foreign'
             interpretations=[]
-            if case in {'shared_category','shared_mixed'}:
+            if case in {'shared_category','shared_mixed','source_population'}:
                 choice=next(name for name,item in prompt.parameters.items() if item.get('kind')=='catalog_choice' and item['value']=='true')
                 predicate=f' WHERE active=${choice}'
                 interpretations=[{'input':symbols['i1'],'choice':choice,'basis':'The declared acceptance flag is true for accepted rows.'}]
                 if case=='shared_mixed' and first:
                     predicate=f' WHERE status=${symbols["i1"]}'
                     interpretations=[]
-            result=parse(payload(query=f'SELECT {measure} AS total FROM "{table}"{predicate}',interpretations=interpretations))
+            body=payload(query=f'SELECT {measure} AS total FROM "{table}"{predicate}',interpretations=interpretations)
+            if case=='source_population':
+                body=payload(query=f'SELECT {measure} AS total FROM "{table}"')
+                body['api_invocations'][0]['population_bindings']=[{'input':symbols['i1'],'basis':'The API contract restricts returned stores to accepted stores.'}]
+            result=parse(body)
         else:raise AssertionError(purpose)
         return SimpleNamespace(result=result)
     def eligibility(eligibility_request,**kwargs):
@@ -205,12 +209,16 @@ def test_native_multi_answer_preserves_per_request_operand_ownership(monkeypatch
             (source.id,),source.read_id,tuple(f.field_ref for f in source.fields),'Store rows.',SemanticReadDecision.RETAIN)
             for ctx in eligibility_request.fact_contexts for source in eligibility_request.source_catalog.sources),())
     class Port:
-        def read(self,**kwargs):return {'responseStatus':200,'responseBody':[{'id':1,'active':True,'status':'accepted'},{'id':2,'active':False,'status':'failed'},{'id':3,'active':True,'status':'accepted'}]}
+        def read(self,**kwargs):
+            rows=[{'id':1,'active':True,'status':'accepted'},{'id':2,'active':False,'status':'failed'},{'id':3,'active':True,'status':'accepted'}]
+            return {'responseStatus':200,'responseBody':[row for row in rows if row['active']] if case=='source_population' else rows}
     monkeypatch.setattr(compilation,'_turn',turn);monkeypatch.setattr(compilation,'_read_eligibility_turn',eligibility)
     from fervis.lookup.relation_catalog.model import CatalogField
     read=replace(_read('stores'),resource_names=('stores',))
-    if case in {'shared_category','shared_mixed'}:
+    if case in {'shared_category','shared_mixed','source_population'}:
         read=replace(read,fields=(*read.fields,CatalogField('active','boolean',path='active',row_path_id='root',metadata={'description':'True means accepted; false means failed.'}),CatalogField('status','string',path='status',row_path_id='root')))
+    if case=='source_population':
+        read=replace(read,source_metadata={'description':'Returns all accepted stores, excluding unaccepted stores.'})
     catalog=RelationCatalog(reads=(read,))
     request=compilation.SemanticCompilationRequest('input-scope',question,
         QuestionContractRequest(current_question=question,conversation_context={}),catalog,(),Port(),None,'openai',1,10,None,{},HostPromptContext())
@@ -221,12 +229,12 @@ def test_native_multi_answer_preserves_per_request_operand_ownership(monkeypatch
     result=compilation.compile_semantic_question(request)
     assert [(f.id,f.input_refs) for f in result.question_contract.requested_facts]==[
         ('fact_1',('i1',)),('fact_2',('i2' if independent else 'i1',))]
-    if case in {'shared_category','shared_mixed'}:
+    if case in {'shared_category','shared_mixed','source_population'}:
         assert all(p.fixed_value_fingerprint for p in result.compilation.answer_program.parameters)
     executed=invoke_answer_program(program=result.compilation.answer_program,bindings=result.compilation.initial_bindings,
         environment=ExecutionEnvironment(catalog=catalog),ports=RuntimePorts(Port(),LookupMemory()))
     assert executed.issue is None
-    assert [next(iter(row.values.values())) for row in executed.fact_result.outcome.projected_rows]==[1 if independent else 2,4 if case in {'shared_category','shared_mixed'} else 5]
+    assert [next(iter(row.values.values())) for row in executed.fact_result.outcome.projected_rows]==[1 if independent else 2,4 if case in {'shared_category','shared_mixed','source_population'} else 5]
 
 
 @pytest.mark.parametrize('key_type', ['integer', 'uuid'])
