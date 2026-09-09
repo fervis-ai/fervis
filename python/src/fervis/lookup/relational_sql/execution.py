@@ -76,8 +76,26 @@ def _validate(query: str, tables: Mapping[str, SqlTable]) -> tuple[exp.Query, tu
             name = table_names[source.name.casefold()]
             source.set('this', exp.to_identifier(name, quoted=True))
             sources.add(name)
+    casts = [node for node in statement.walk() if type(node) is exp.Cast and _literal_operand(node.this)]
+    if casts:
+        with _connection() as connection:
+            try:
+                connection.execute('SELECT '+', '.join('('+node.sql(dialect='duckdb')+') IS NULL' for node in casts)).fetchall()
+            except duckdb.Error as exc:
+                raise QueryValidationError(f'Invalid SQL literal cast: {exc}') from exc
     return statement, tuple(sorted(sources))
 
+
+
+def _literal_operand(node):
+    while isinstance(node, exp.Paren):
+        node = node.this
+    if isinstance(node, exp.Neg):
+        node = node.this
+        while isinstance(node, exp.Paren):
+            node = node.this
+        return isinstance(node, exp.Literal) and node.is_number
+    return isinstance(node, (exp.Literal, exp.Boolean, exp.Null))
 
 
 _NUMERIC_CONTEXT = Context(prec=78, rounding=ROUND_HALF_EVEN)
@@ -197,6 +215,25 @@ def _verify_bound_numeric_types(connection, query: str) -> None:
             pending.extend(node)
 
 
+def _connection():
+    connection = duckdb.connect(':memory:', config={
+        'enable_external_access': False,
+        'autoload_known_extensions': False,
+        'autoinstall_known_extensions': False,
+        'python_enable_replacements': False,
+        'threads': 1,
+        'memory_limit': '256MB',
+        'max_temp_directory_size': '0B',
+    })
+    # ICU is bundled with the pinned wheel; installation and external access stay disabled.
+    try:
+        connection.execute('LOAD icu')
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
 def execute_query(query: str, *, tables: Mapping[str, SqlTable],
                   parameters: Mapping[str, Any] | None = None,
                   timeout_seconds: float = 30, timezone: str = "UTC") -> SqlResult:
@@ -218,21 +255,10 @@ def execute_query(query: str, *, tables: Mapping[str, SqlTable],
             return exp.convert(parameters[node.name])
         return node
     lowered = statement.transform(bind).transform(_lower_numeric_operations)
-    connection = duckdb.connect(':memory:', config={
-        'enable_external_access': False,
-        'autoload_known_extensions': False,
-        'autoinstall_known_extensions': False,
-        'python_enable_replacements': False,
-        'threads': 1,
-        'memory_limit': '256MB',
-        'max_temp_directory_size': '0B',
-    })
+    connection = _connection()
     timer = Timer(timeout_seconds, connection.interrupt)
     timer.daemon = True
     try:
-        # ICU is bundled with the pinned Python wheel. External access and
-        # automatic installation remain disabled during this trusted load.
-        connection.execute('LOAD icu')
         connection.execute("SET TimeZone = ?", [timezone])
         connection.create_function('FERVIS_DECIMAL_DIVIDE', _divide,
             ['VARCHAR', 'VARCHAR'], duckdb.sqltype(_QUOTIENT_TYPE), null_handling=FunctionNullHandling.SPECIAL)
