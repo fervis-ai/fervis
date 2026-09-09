@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from fervis.lookup.question_contract.model import InputDenotationKind
 from fervis.lookup.relational_sql.authoring import QueryAnswerPrompt, QueryUnavailable, AuthoredQueryAnswer, parse_query_answer, _object, _array
-from fervis.lookup.relational_sql.outputs import identity_authorities
+from fervis.lookup.relational_sql.outputs import identity_authorities, identity_carriers
 from fervis.lookup.relational_sql.parameters import with_reference_arguments
 from fervis.lookup.api_arguments import compatible_argument
 from fervis.lookup.relational_sql.execution import QueryValidationError
@@ -72,13 +72,19 @@ class FactualQueryPrompt(QueryAnswerPrompt):
     def reference_argument_schema(self, parameter):
         if not self.reference_inputs:
             return None
+        components = set()
+        for carrier in identity_carriers(self.reference_tables).values():
+            table = self.reference_tables[carrier['view']]
+            for component, column in carrier['components'].items():
+                description = {'kind':'reference_argument', 'identity':{'entity_kind':carrier['entity_kind'], 'key_id':carrier['key_id']},
+                    'projection':'key_component:'+component, 'value_type':table['columns'][column]['type']}
+                if compatible_argument(parameter, description):
+                    components.add(component)
+        if not components:
+            return None
         properties = {'reference_input': {'type':'string', 'enum': list(self.reference_inputs)}}
         if not parameter.get('entity_target'):
-            components = sorted({component for authority in identity_authorities(self.reference_tables).values()
-                                 for component in authority['components']})
-            if not components:
-                return None
-            properties['component_id'] = {'type':['string','null'], 'enum':[*components, None]}
+            properties['component_id'] = {'type':['string','null'], 'enum':[*sorted(components), None]}
         return _object(properties)
 
 
@@ -115,7 +121,15 @@ def parse_factual_query(payload, *, prompt, menu, selection_limit):
                      and (binding.get('component_id') is None or description.get('projection') == 'key_component:'+str(binding['component_id']))
                      and parameter is not None and compatible_argument(parameter, description)]
             if len(names) != 1:
-                raise QueryValidationError('Reference demand does not satisfy the REST parameter identity target')
+                ref = binding['reference_input']
+                demand = next((item for item in demands if item.input_ref == ref), None)
+                available = {description['projection']:description['value_type'] for description in lowered_menu.descriptions.values()
+                             if description.get('kind') == 'reference_argument' and description.get('input_ref') == ref}
+                if demand is not None and demand.authority is None:
+                    raise QueryValidationError(f'Reference input {ref} declares literal-address mode and has no resolved key. A reference_input binding requires a resolved authority; original address values use parameter-menu bindings.')
+                raise QueryValidationError(f'Reference binding for {ref} does not supply exactly one compatible component to {argument["parameter_ref"]}. '
+                    f'Parameter type/authority: {parameter}. Available key components: {available}. '
+                    f'Use a compatible identifier parameter or consume {prompt.reference_inputs.get(ref, {}).get("relation")} directly in SQL.')
             argument = {**argument, 'binding': names[0]}
         arguments.append(argument)
     body = {key:value for key,value in payload.items() if key != 'reference_demands'}

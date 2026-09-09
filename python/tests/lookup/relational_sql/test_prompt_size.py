@@ -23,7 +23,11 @@ def test_large_reference_catalog_keeps_all_fields_inside_the_prompt_budget():
     invocation = prompt.to_model_payload(TurnPromptContext(current_question='Find record Alpha.'))
     enforce_model_turn_prompt_budget(prompt=invocation.prompt_text, tool_specs=prompt.tool_contract().tool_specs)
     encoded = invocation.prompt_text.split('Declared API views:\n',1)[1].split('\n\n',1)[0]
-    assert json.loads(encoded) == {name:{key:value for key,value in table.items() if key != 'read_id'} for name,table in tables.items()}
+    decoded = json.loads(encoded)
+    for table in decoded.values():
+        for column in table['columns'].values():
+            column.pop('identity_roles', None)
+    assert decoded == {name:{key:value for key,value in table.items() if key != 'read_id'} for name,table in tables.items()}
 
 
 def test_prompt_budget_failure_retains_the_actual_preflight_diagnostic():

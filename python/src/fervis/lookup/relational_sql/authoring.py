@@ -15,7 +15,7 @@ from fervis.lookup.turn_prompts import (
 from fervis.model_io.structured_output.specs import required_tool_spec
 from .execution import _validate, SqlTable, QueryValidationError
 from .results import ResultContract, ResultOrder
-from .outputs import QueryOutput, parse_query_outputs, identity_authorities
+from .outputs import QueryOutput, parse_query_outputs, identity_authorities, annotate_identity_columns
 
 
 @dataclass(frozen=True)
@@ -436,7 +436,7 @@ class QueryAnswerPrompt(TurnPromptBase):
             }, indent=None),
             builder.json_section("Declared API views:", {
                 name: {key: value for key, value in table.items() if key != "read_id"}
-                for name, table in self.tables.items()
+                for name, table in annotate_identity_columns(self.tables).items()
             }, indent=None),
             builder.json_section(
                 "Declared output identity types:",
@@ -457,6 +457,7 @@ class QueryAnswerPrompt(TurnPromptBase):
             "Author an executable query, not evaluated rows or a known identity value. Fervis reads the declared API views and evaluates SQL after compilation. A value read from another view can be joined or queried at execution; its absence from this prompt does not make the query unavailable.",
             "Use DuckDB SQL over only the declared views. Quote identifiers when necessary. No files, network, external tables or database access.",
             "Copy SQL parameters from the menu sql_expression exactly. Use the menu key for request_arguments bindings. FROM and JOIN use declared API view keys or declared reference relation names as SQL tables, never endpoint paths or resource labels. These views are not SQL functions: do not put parentheses or request parameters after a view name. REST arguments belong exclusively in request_arguments. Do not invent values or inline grounded operands. SQL literals may express arithmetic constants and documented catalog enum values.",
+            "An API-view column's identity_roles lists the declared identity components it can carry. API columns without identity_roles are ordinary scalar values, even when they contain identifiers. Declared reference relations carry their selected key components by definition. Such a value can match an identity-bearing column in a join or subquery; return the identity-bearing column for an identity output. Keep complete composite components from the same record.",
             "SQL calendar operations and date-to-timestamp conversions use the timezone in Compilation scope.",
             "request_arguments binds declared view request parameter refs to the same grounded menu. Supply only arguments needed for the question; automatic_request_parameters are already supplied by complete traversal; never bind them. To invoke the same API view with different bindings in one query, assign a distinct instance name to each invocation. Use FROM declared_view AS instance, or refer to the named invocation directly as a SQL table. All arguments sharing an instance must name the same declared view. Use instance=null for the default view. Physical prerequisite enumeration and pagination belong to Fervis.",
         )

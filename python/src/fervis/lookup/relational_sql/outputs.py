@@ -91,3 +91,21 @@ def _verify_authored_identity_outputs(query, columns, tables, outputs):
         sql_identity_keys(spec,contracts)
     except VerificationError as exc:
         raise QueryValidationError(str(exc)) from exc
+
+
+def annotate_identity_columns(tables):
+    """Put declared nominal key roles beside their scalar columns for authoring."""
+    authorities = identity_authorities(tables)
+    refs = {(value['entity_kind'], value['key_id'], tuple(value['components'])):ref
+            for ref,value in authorities.items()}
+    roles = {}
+    for carrier in identity_carriers(tables).values():
+        authority = refs[(carrier['entity_kind'], carrier['key_id'], tuple(sorted(carrier['components'])))]
+        for component,column in carrier['components'].items():
+            role = {'authority':authority, 'component':component}
+            values = roles.setdefault((carrier['view'], column), [])
+            if role not in values:
+                values.append(role)
+    return {name:{**table, 'columns':{column:{**definition,
+        **({'identity_roles':roles[(name,column)]} if (name,column) in roles else {})}
+        for column,definition in table.get('columns', {}).items()}} for name,table in tables.items()}

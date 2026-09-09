@@ -91,3 +91,26 @@ def test_mixed_mode_error_is_owned_by_parser_and_corrected_declaration_succeeds(
     corrected = {**body, 'reference_demands':[{'input_ref':'i1','authority':None}]}
     validate(corrected, prompt._schema())
     assert parse_factual_query(corrected, prompt=prompt, menu=menu, selection_limit=None).demands == (ReferenceDemand('i1', None),)
+
+
+def test_schema_does_not_offer_reference_keys_to_incompatible_scalar_parameters():
+    from jsonschema import ValidationError
+    prompt, _, view = context(opaque=True)
+    prompt.tables[view]['request_parameters'].append({'param_ref':'name', 'name':'name', 'type':'string', 'source':'query'})
+    bad = payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
+        reference_demands=[{'input_ref':'i1','authority':'records/primary(id)'}],
+        request_arguments=[{'view':view,'parameter_ref':'name','binding':{'reference_input':'i1','component_id':'id'}}])
+    with pytest.raises(ValidationError):
+        validate(bad, prompt._schema())
+
+
+def test_opaque_parameter_schema_offers_only_type_compatible_key_components():
+    from jsonschema import ValidationError
+    prompt, _, view = context(composite=True, opaque=True)
+    body = payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
+        reference_demands=[{'input_ref':'i1','authority':'records/primary(country,id)'}],
+        request_arguments=[{'view':view,'parameter_ref':'record_id','binding':{'reference_input':'i1','component_id':'id'}}])
+    validate(body, prompt._schema())
+    body['request_arguments'][0]['binding']['component_id'] = 'country'
+    with pytest.raises(ValidationError):
+        validate(body, prompt._schema())
