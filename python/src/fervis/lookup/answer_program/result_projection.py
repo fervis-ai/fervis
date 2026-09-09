@@ -17,6 +17,12 @@ class ResultProjectionError(ValueError):
     """A declared answer projection cannot be applied to its result data."""
 
 
+def verify_entity_display_type(display_field_id: str, field_types: Mapping[str, str]) -> None:
+    """Validate presentation types wherever a result projection is authored or used."""
+    if display_field_id and field_types.get(display_field_id) not in {"string", "text"}:
+        raise ResultProjectionError("entity display field must be textual")
+
+
 @dataclass(frozen=True)
 class ProjectedResultRow:
     relation_id: str

@@ -44,9 +44,8 @@ def plan_fact_references(*, fact, inputs, denotations, values, catalog, access, 
         query_catalog = RelationCatalog(reads=tuple(reads.values()))
     views = build_query_view_catalog(query_catalog, access=access)
     consumer_ids = {read.id for read in consumer_catalog.reads} if consumer_catalog is not None else set()
-    consumer_context = {'requested_answer': asdict(fact), 'views': {
-        name: {key: table[key] for key in ('path', 'description', 'request_parameters', 'candidate_keys', 'entity_references') if key in table}
-        for name, table in views.tables.items() if table.get('read_id') in consumer_ids}}
+    consumer_context = {'requested_answer': asdict(fact), 'view_refs': [
+        name for name, table in views.tables.items() if table.get('read_id') in consumer_ids]}
     sources = snapshot_source_catalog(build_api_row_source_catalog(query_catalog).sources, read_access=access)
     results = []
     for value in values:

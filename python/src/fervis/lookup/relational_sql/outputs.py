@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from typing import Mapping
 
-from fervis.lookup.answer_program.result_projection import EntityKeyProjection, EntityKeyProjectionComponent
+from fervis.lookup.answer_program.result_projection import EntityKeyProjection, EntityKeyProjectionComponent, ResultProjectionError, verify_entity_display_type
 from .execution import QueryValidationError
 
 
@@ -58,6 +58,10 @@ def parse_query_outputs(payload, *, columns: Mapping[str,str], tables, query: st
             raise QueryValidationError('Unknown public query output kind')
         if not set(output.columns)<=set(columns):
             raise QueryValidationError('Public output references an undeclared SQL column')
+        try:
+            verify_entity_display_type(output.display_column, columns)
+        except ResultProjectionError as exc:
+            raise QueryValidationError(str(exc)) from exc
         outputs.append(output)
     if not outputs:
         raise QueryValidationError('Query must declare its requested public outputs')

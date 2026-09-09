@@ -20,6 +20,8 @@ from .scalars import _operation_scalar_inputs
 from fervis.lookup.answer_program.operations import operation_node_output_refs
 from fervis.lookup.plan_execution.operation_runtime import ResolvedOperationInput
 from fervis.lookup.answer_program.result_projection import (
+    ResultProjectionError,
+    verify_entity_display_type,
     RelationResultOutput,
     ScalarResultOutput,
 )
@@ -115,8 +117,10 @@ def _verify_result_references(
             raise VerificationError(
                 f"result output {relation_output.id} references unknown output field"
             )
-        if relation_output.display_field_id and contract.field_types.get(relation_output.display_field_id) not in {"string","text"}:
-            raise VerificationError("entity display field must be textual")
+        try:
+            verify_entity_display_type(relation_output.display_field_id, contract.field_types)
+        except ResultProjectionError as exc:
+            raise VerificationError(str(exc)) from exc
         if relation_output.entity_key is not None:
             _verify_declared_entity_key(relation_output, contract=contract)
         if relation_output.entity_key is None and any(

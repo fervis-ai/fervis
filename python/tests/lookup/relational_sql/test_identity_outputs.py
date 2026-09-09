@@ -319,3 +319,19 @@ def test_identity_text_fallback_is_readable_and_preserves_typed_rows(display):
     assert [row.values['result_1'].components[0].value for row in outcome.projected_rows] == list(map(UUID, ids))
     text = rendered_fact_text(render_fact_result(result.fact_result))
     assert text.splitlines() == ['item: '+(display or value) for value in ids]
+
+
+@pytest.mark.parametrize("display_type", ["datetime", "date", "integer", "number", "uuid", "boolean", "string"])
+def test_identity_display_type_is_checked_inside_authoring_correction(display_type):
+    from fervis.lookup.relational_sql.outputs import parse_query_outputs
+    from fervis.lookup.relational_sql.execution import QueryValidationError
+    tables = {"records": {"columns": {"id": {"type": "integer"}, "label": {"type": display_type}},
+        "candidate_keys": [{"entity_kind": "record", "key_id": "pk", "components": {"id": "id"}}]}}
+    arguments = dict(payload=[{"kind": "identity", "authority": "record/pk(id)",
+        "components": {"id": "id"}, "label": "record", "display_column": "label"}],
+        columns={"id": "integer", "label": display_type}, tables=tables, query="SELECT id, label FROM records")
+    if display_type == "string":
+        assert parse_query_outputs(**arguments)[0].display_column == "label"
+    else:
+        with pytest.raises(QueryValidationError, match="display field must be textual"):
+            parse_query_outputs(**arguments)
