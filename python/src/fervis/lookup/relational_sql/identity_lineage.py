@@ -73,7 +73,10 @@ def sql_identity_keys(spec, contracts):
                 for view, column, _ in origins
             ):
                 raise VerificationError(
-                    "SQL identity component does not preserve a declared key field"
+                    f"SQL identity component {component.field_id} does not preserve a declared key field "
+                    f"for {projection.entity_kind}/{projection.key_id}/{component.component_id}. "
+                    f"Observed source fields: {sorted((view, column) for view, column, _ in origins)}. "
+                    f"Allowed source fields: {sorted(allowed[component.component_id])}"
                 )
             target_type = output_types[component.field_id.lower()]
             if any(
@@ -122,7 +125,9 @@ def _origins(node, path=()):
         return {(expression.name, column, (*path, expression.alias_or_name))}
     if not isinstance(expression, exp.Column):
         raise VerificationError(
-            "SQL identity components must preserve key values without computation"
+            "SQL identity components must preserve key values without computation. "
+            "Project a declared key column from an observed API view or typed reference slot; "
+            "input placeholders and casts cannot establish an output identity."
         )
     next_path = (*path, expression.table) if expression.table else path
     # A projected column can have alternative producers without an explicit

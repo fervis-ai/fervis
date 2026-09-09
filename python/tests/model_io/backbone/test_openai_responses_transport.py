@@ -214,6 +214,7 @@ def test_malformed_response_retains_usage_through_structured_output_failure(
     response = SimpleNamespace(
         usage=SimpleNamespace(
             input_tokens=100,
+            input_tokens_details=SimpleNamespace(cached_tokens=80),
             output_tokens=40,
             output_tokens_details=SimpleNamespace(reasoning_tokens=10),
         ),
@@ -252,6 +253,7 @@ def test_malformed_response_retains_usage_through_structured_output_failure(
         )
     usage = caught.value.output.get("usage", {})
     assert usage.get("inputTokens") == 100
+    assert usage.get("cachedInputTokens") == 80
     assert usage.get("outputTokens") == 30
     assert usage.get("thinkingTokens") == 10
     assert usage.get("costUsd", 0) > 0
@@ -361,3 +363,24 @@ def test_configured_effective_prices_are_not_discounted_again():
         usage_details={"serviceTier": "flex"},
     )
     assert result.usage["costUsd"] == 0.002
+
+
+def test_cached_input_is_a_discounted_subset_of_total_input(monkeypatch):
+    from fervis.model_io.providers import chat_runtime
+    from fervis.model_io.providers.chat_runtime import ChatProviderConfig, build_provider_run_result
+    from fervis.model_io.pricing import ModelPricing
+    from fervis.observability.usage_types import CostSource
+    import pytest
+    monkeypatch.setattr(chat_runtime, 'resolve_model_pricing', lambda **kwargs: ModelPricing(
+        1, 2, 2, 'test', CostSource.MODELS_DEV, cached_input_cost_per_million_tokens=0.1))
+    config = ChatProviderConfig('openai', 'gpt-5.4-mini', 'UNUSED', 'openai')
+    for tier, multiplier in [('default',1), ('flex',0.5)]:
+        result = build_provider_run_result(config, answer='ok', input_tokens=1000, output_tokens=100,
+            usage_details={'serviceTier':tier, 'cachedInputTokens':800})
+        assert result.usage['inputTokens'] == 1000
+        assert result.usage['cachedInputTokens'] == 800
+        assert result.usage['inputCostUsd'] == pytest.approx(0.00028*multiplier)
+        assert result.usage['costUsd'] == pytest.approx(0.00048*multiplier)
+    with pytest.raises(Exception, match='cached input'):
+        build_provider_run_result(config, answer='ok', input_tokens=1000, output_tokens=100,
+            usage_details={'cachedInputTokens':1001})

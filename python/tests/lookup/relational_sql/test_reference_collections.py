@@ -42,7 +42,7 @@ def test_reference_collection_resolves_every_member_before_union(data_case):
             query_parameters=(SqlNamedInput('name',replace(menu.expressions['p1_1'],item_index=index)),),
             parameters=menu.program_inputs.parameters,bindings=menu.program_inputs.bindings,inputs=(term,),input_denotations=(denotation,),
             public_outputs=(QueryOutput('site',identity=EntityKeyProjection('sites','primary',(EntityKeyProjectionComponent('id','key_id'),))),),
-            namespace=reference_id+'.')
+            namespace=reference_id+'.', lookup_input_ref='i1')
         from fervis.lookup.canonical_data import EntityKeyValue,EntityKeyComponentValue
         selected=EntityKeyValue('sites','primary',(EntityKeyComponentValue('id',3),)) if data_case=='selected_member' and name=='Beta' else None
         members.append(compile_reference_result(compiled,input_ref='i1',output_types={'key_id':'integer'},reference_id=reference_id,operand=name,selected_key=selected,selection_proof_ref='clarification_response:choose_beta' if selected else ''))

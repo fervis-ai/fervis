@@ -3,7 +3,7 @@
 from dataclasses import dataclass, replace
 
 from fervis.lookup.semantic_types import SourceOrigin
-from .authoring import QueryAnswerPrompt, QueryUnavailable, parse_query_answer
+from .authoring import QueryAnswerPrompt, QueryUnavailable, parse_query_answer, invocation_tables
 from .binding import bind_query_answer
 from .compiler import compile_query_answer
 from .reference_compilation import compile_reference_result
@@ -36,7 +36,8 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
     turn_name = "reference query"
     turn_task = "identify the entity denoted by the assigned reference"
 
-    def __init__(self, *, question, meaning, tables, parameters, consumer_context=None):
+    def __init__(self, *, question, meaning, tables, parameters, consumer_context=None, expected_key=None):
+        self.expected_key = expected_key
         self.consumer_context = consumer_context
         super().__init__(question=question, meaning=meaning, tables=tables, timezone=meaning.timezone,
             parameters={name:{**{key:value for key,value in description.items() if key != 'may_interpret'},
@@ -45,6 +46,7 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
 
     def compilation_scope(self):
         return {
+            "required_identity": self.expected_key,
             "unit": "reference_resolution",
             "timezone": self.meaning.timezone,
             "input_ref": self.meaning.reference_input_ref,
@@ -52,6 +54,14 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
             "reference_text": self.meaning.reference_text,
             "reference_is_collection_member": self.meaning.reference_is_collection_member,
         }
+
+    def output_identity_authorities(self):
+        authorities = super().output_identity_authorities()
+        if self.expected_key is None:
+            return authorities
+        return {ref: authority for ref, authority in authorities.items()
+                if (authority['entity_kind'], authority['key_id'], set(authority['components'])) ==
+                (self.expected_key['entity_kind'], self.expected_key['key_id'], set(self.expected_key['components']))}
 
     def _result_modes(self):
         return ["rows"]
@@ -97,11 +107,11 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
     def instruction_sections(self, builder):
         return (builder.instruction_block("Reference query contract", (
             *self.sql_surface_instructions(),
-            "Resolve only reference_text from Compilation scope. Other collection members and the surrounding factual answer belong to separate queries.",
+            "Satisfy Compilation scope.required_identity exactly. It is the identity authority already selected by the consuming factual query. Do not substitute a different namespace or key. Resolve only reference_text from Compilation scope. Other collection members and the surrounding factual answer belong to separate queries.",
             "Copy Requested answer.reference_kind into reference_binding. The frame has already fixed whether this is a literal name/code or a descriptive role; do not reinterpret that choice.",
             "Use the consuming answer and API identity contracts to disambiguate the API domain of the reference. The question's instance-kind wording is not an API namespace. Do not transfer the factual answer's filters or measures into reference resolution.",
             self._input_usage_instruction(),
-            "Use one declared key or entity-reference authority. Project all its components unchanged from that authority's view and map their SQL aliases in outputs. Matching column names or UUID types do not make different identity domains interchangeable; use declared relationships when necessary.",
+            "Use the required logical identity authority. Project all its components unchanged from declared key or entity-reference fields in the selected views and map their SQL aliases in outputs. Matching column names or UUID types do not make different identity domains interchangeable; use declared relationships when necessary.",
             "Declare every selected SQL alias and its scalar type in columns. For a literal, match_column must name a selected alias, not an unselected source field. Return exactly one identity output, mode rows, ordering empty, interpretations empty.",
             self._identity_display_instruction(),
             "Preserve all candidate keys and ties. Do not choose an arbitrary candidate or use LIMIT/OFFSET. Fervis checks missing and ambiguous identities at execution.",
@@ -137,6 +147,12 @@ def parse_reference_query(payload, *, prompt, menu):
     )
     if isinstance(authored, QueryUnavailable):
         return authored
+    expected = getattr(prompt, 'expected_key', None)
+    if expected is not None and (len(authored.outputs) != 1 or authored.outputs[0].identity is None or
+        (authored.outputs[0].identity.entity_kind, authored.outputs[0].identity.key_id,
+         {component.component_id for component in authored.outputs[0].identity.components}) !=
+        (expected['entity_kind'], expected['key_id'], set(expected['components']))):
+        raise QueryValidationError('Reference resolution must satisfy its consuming identity demand')
     if authored.interpretations:
         raise QueryValidationError('Reference text is matched literally or defines the query; it is not replaced by a catalog value')
     if any(output.display_column for output in authored.outputs):
@@ -150,7 +166,7 @@ def parse_reference_query(payload, *, prompt, menu):
         if binding['match_column'] not in authored.output_types:
             raise QueryValidationError('Literal matching requires a declared observed column')
         body['query'] = literal_match_query(authored.query, column=binding['match_column'],
-            parameter=names[0], tables=prompt.tables)
+            parameter=names[0], tables=invocation_tables(authored.request_arguments, prompt.tables))
         authored = parse_query_answer(body, table_names=set(prompt.tables),
             parameter_names=set(menu.expressions), meaning=prompt.meaning,
             expected_input_refs=prompt.meaning.input_refs, tables=prompt.tables,
@@ -190,7 +206,7 @@ def compile_reference_plan(
     ):
         from .execution import QueryValidationError
         raise QueryValidationError('Reference query syntax differs from its original input')
-    bound = bind_query_answer(authored, menu, views)
+    bound = bind_query_answer(authored, menu, views, namespace=(reference_id or f"lookup_{meaning.reference_input_ref}") + ".")
     compiled = compile_query_answer(
         question=meaning.return_request_basis,
         timezone=meaning.timezone,

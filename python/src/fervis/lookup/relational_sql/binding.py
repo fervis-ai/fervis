@@ -17,19 +17,20 @@ class BoundQuery:
     argument_operations: tuple = ()
 
 
-def bind_query_answer(authored, menu, views, *, selection_boundary=None):
+def bind_query_answer(authored, menu, views, *, selection_boundary=None, namespace=""):
+    views = invocation_views(authored, views)
     arguments = {}
     parents = {}
     operations = []
     for view in views:
-        owned = tuple(item for item in authored.request_arguments if item.view == view.name)
+        owned = tuple(item for item in authored.request_arguments if item.sql_view == view.name)
         relation_inputs = {}
         for item in owned:
             description = menu.descriptions[item.binding]
             if description.get('kind') == 'reference_argument':
                 relation_inputs.setdefault(description['relation_id'], {})[item.binding] = menu.expressions[item.binding]
         for index, (relation_id, fields) in enumerate(relation_inputs.items()):
-            operation_id = f'{view.name}.arguments_{index}'
+            operation_id = f'{namespace}{view.name}.arguments_{index}'
             operation = Operation(operation_id, ProjectSpec(relation_id,
                 tuple(NamedExpression(name, expression) for name, expression in fields.items())),
                 output_relation=operation_id+'.rows')
@@ -101,11 +102,18 @@ def reads_requiring_access_discovery(authored, views, *, catalog):
 
     sources = {source.id:source for source in build_api_row_source_catalog(catalog).sources}
     result = []
-    for view in views:
+    for view in invocation_views(authored, views):
         if view.name not in authored.referenced_views:
             continue
         source = sources[view.row_source_id]
-        supplied = {item.parameter_ref for item in authored.request_arguments if item.view == view.name}
+        supplied = {item.parameter_ref for item in authored.request_arguments if item.sql_view == view.name}
         if any(requires_caller_supplied_input(param) and param.param_ref not in supplied for param in source.params):
             result.append(source.read_id)
     return tuple(dict.fromkeys(result))
+
+
+def invocation_views(authored, views):
+    from .authoring import query_instances
+    by_name = {view.name: view for view in views}
+    instances = query_instances(authored.request_arguments, by_name)
+    return (*views, *(replace(by_name[source], name=name) for name, source in instances.items()))

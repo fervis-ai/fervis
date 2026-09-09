@@ -353,6 +353,9 @@ def build_provider_run_result(
             error_class="APIResponseValidationError",
             reason="provider response included invalid token usage",
         )
+    cached_input_tokens = _int_or_none(_dict_or_empty(usage_details).get(UsageKey.CACHED_INPUT_TOKENS, 0))
+    if cached_input_tokens is None or not 0 <= cached_input_tokens <= input_tokens:
+        raise ProviderExecutionError(error_class='APIResponseValidationError', reason='provider response included invalid cached input token usage')
     actual_model_name = model_name or config.model_name
     pricing = _pricing_for_model(config, actual_model_name)
     service_tier = str(_dict_or_empty(usage_details).get("serviceTier") or "")
@@ -364,6 +367,8 @@ def build_provider_run_result(
             input_cost_per_million_tokens=pricing.input_cost_per_million_tokens / 2,
             output_cost_per_million_tokens=pricing.output_cost_per_million_tokens / 2,
             thinking_cost_per_million_tokens=pricing.thinking_cost_per_million_tokens / 2,
+            cached_input_cost_per_million_tokens=(pricing.cached_input_cost_per_million_tokens / 2
+                if pricing.cached_input_cost_per_million_tokens is not None else None),
             pricing_version=f"{pricing.pricing_version}:flex",
         )
     if not pricing.priced:
@@ -385,7 +390,7 @@ def build_provider_run_result(
                 "model": actual_model_name,
             },
         )
-    input_cost = _token_cost(input_tokens, pricing.input_cost_per_million_tokens)
+    input_cost = _input_token_cost(input_tokens, cached_input_tokens, pricing)
     output_cost = _token_cost(output_tokens, pricing.output_cost_per_million_tokens)
     thinking_cost = _token_cost(
         thinking_tokens,
@@ -403,6 +408,8 @@ def build_provider_run_result(
         UsageKey.COST_SOURCE: pricing.cost_source,
         UsageKey.PRICING_VERSION: pricing.pricing_version,
     }
+    if cached_input_tokens:
+        usage[UsageKey.CACHED_INPUT_TOKENS] = cached_input_tokens
     if service_tier:
         usage["serviceTier"] = service_tier
     model_subcalls = _priced_model_subcalls(
@@ -444,6 +451,15 @@ def _token_cost(tokens: int, rate_per_million_tokens: float) -> Decimal:
     ).quantize(Decimal("0.000001"))
 
 
+def _input_token_cost(input_tokens: int, cached_tokens: int, pricing: ModelPricing) -> Decimal:
+    if not 0 <= cached_tokens <= input_tokens:
+        raise ProviderExecutionError(error_class='APIResponseValidationError', reason='provider response included invalid cached input token usage')
+    cached_rate = (pricing.cached_input_cost_per_million_tokens if pricing.cached_input_cost_per_million_tokens is not None
+                   else pricing.input_cost_per_million_tokens)
+    return ((Decimal(input_tokens - cached_tokens) * Decimal(str(pricing.input_cost_per_million_tokens))
+             + Decimal(cached_tokens) * Decimal(str(cached_rate))) / Decimal(1_000_000)).quantize(Decimal('0.000001'))
+
+
 def _priced_model_subcalls(
     pricing: ModelPricing,
     raw_subcalls: Any,
@@ -457,7 +473,7 @@ def _priced_model_subcalls(
         input_tokens = _nonnegative_int(raw.get(UsageKey.INPUT_TOKENS))
         output_tokens = _nonnegative_int(raw.get(UsageKey.OUTPUT_TOKENS))
         thinking_tokens = _nonnegative_int(raw.get(UsageKey.THINKING_TOKENS))
-        input_cost = _token_cost(input_tokens, pricing.input_cost_per_million_tokens)
+        input_cost = _input_token_cost(input_tokens, _nonnegative_int(raw.get(UsageKey.CACHED_INPUT_TOKENS)), pricing)
         output_cost = _token_cost(output_tokens, pricing.output_cost_per_million_tokens)
         thinking_cost = _token_cost(
             thinking_tokens,

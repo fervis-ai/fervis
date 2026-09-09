@@ -6,7 +6,6 @@ from fervis.lookup.answer_program.values import BindingSet, FactValue
 from fervis.lookup.available_sources import snapshot_source_catalog
 from fervis.lookup.clarification.model import GroundingIdentityResponse
 from fervis.lookup.clarification.context import clarification_response_ref
-from fervis.lookup.question_contract.model import InputDenotationKind
 from fervis.lookup.grounding.semantic import CanonicalInputValue
 from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
 from fervis.lookup.relational_sql.authoring import QueryUnavailable
@@ -36,7 +35,7 @@ def reference_input_values(partitions, *, inputs):
     return tuple(result)
 
 
-def plan_fact_references(*, fact, inputs, denotations, values, catalog, access,
+def plan_fact_references(*, fact, inputs, denotations, values, catalog, access, selected_slots,
                          question, responses, turn, reference_catalog=None, consumer_catalog=None, discover_access=None, timezone="UTC"):
     query_catalog = catalog if reference_catalog is None else reference_catalog
     if consumer_catalog is not None:
@@ -51,7 +50,7 @@ def plan_fact_references(*, fact, inputs, denotations, values, catalog, access,
     sources = snapshot_source_catalog(build_api_row_source_catalog(query_catalog).sources, read_access=access)
     results = []
     for value in values:
-        if denotations[value.input_ref].kind is not InputDenotationKind.IDENTITY_REFERENCE:
+        if value.input_ref not in selected_slots:
             continue
         term = inputs[value.input_ref]
         denotation = denotations[value.input_ref]
@@ -71,7 +70,8 @@ def plan_fact_references(*, fact, inputs, denotations, values, catalog, access,
                         descriptions[name] = {**description, 'value_type':'string',
                                               'label':operand, 'may_interpret':True}
                 member_menu = replace(menu, expressions=expressions, descriptions=descriptions)
-            reference_id = f'{fact.requested_fact_id}__reference_{term.id}'
+            slot = selected_slots[term.id]
+            reference_id = slot.view.name
             meaning = ReferenceMeaning(fact.requested_fact_id, term.id,
                 denotation.denoted_instance_kind or '',
                 f'{denotation.operand_meaning}: {operand or term.operand}',
@@ -79,7 +79,7 @@ def plan_fact_references(*, fact, inputs, denotations, values, catalog, access,
                 reference_is_collection_member=collection, timezone=timezone,
                 reference_kind="description" if (operand or term.operand) in denotation.reference_descriptions else "literal")
             prompt = ReferenceQueryPrompt(question=question, meaning=meaning,
-                                          tables=views.tables, parameters=member_menu.descriptions, consumer_context=consumer_context)
+                                          tables=views.tables, parameters=member_menu.descriptions, consumer_context=consumer_context, expected_key=slot.key)
             authored = turn(ModelTurnPurpose.GROUNDING, prompt,
                             lambda payload:parse_reference_query(payload, prompt=prompt, menu=member_menu))
             if isinstance(authored, QueryUnavailable):

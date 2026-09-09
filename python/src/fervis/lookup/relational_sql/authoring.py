@@ -1,7 +1,7 @@
 """Native query authoring declarations before canonical program compilation."""
 
 from fervis.lookup.answer_program.operations import SQL_VALUE_TYPES
-from .parameter_usage import compatible_argument, validate_identity_key_uses
+from .parameter_usage import compatible_argument, validate_sql_parameter_uses
 from dataclasses import dataclass, asdict, replace
 from typing import Any, Mapping
 
@@ -27,6 +27,11 @@ class QueryArgument:
     view: str
     parameter_ref: str
     binding: str
+    instance: str | None = None
+
+    @property
+    def sql_view(self) -> str:
+        return self.instance if self.instance is not None else self.view
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,35 @@ class AuthoredQueryAnswer:
     interpretations: tuple[QueryInterpretation, ...] = ()
     outputs: tuple[QueryOutput, ...] = ()
     definition_inputs: tuple[str, ...] = ()
+
+
+def query_instances(arguments, table_names):
+    """Validate named invocations once before expanding their declared contracts."""
+    registered = {name.casefold() for name in table_names}
+    instances = {}
+    folded = {}
+    for argument in arguments:
+        if argument.view not in table_names:
+            raise QueryValidationError('Request argument references an undeclared API view')
+        if argument.instance is None:
+            continue
+        name = argument.instance
+        if not isinstance(name, str) or not name or not name.isidentifier():
+            raise QueryValidationError('API invocation instance must be a nonempty SQL identifier')
+        if name.casefold() in registered:
+            raise QueryValidationError('API invocation instance shadows a registered view')
+        if name.casefold() in folded and folded[name.casefold()] != name:
+            raise QueryValidationError('API invocation instance names must be unique ignoring case')
+        if name in instances and instances[name] != argument.view:
+            raise QueryValidationError('API invocation instance mixes API definitions')
+        folded[name.casefold()] = name
+        instances[name] = argument.view
+    return instances
+
+
+def invocation_tables(arguments, tables):
+    instances = query_instances(arguments, tables)
+    return {**tables, **{name: tables[source] for name, source in instances.items()}}
 
 
 def query_output_roles(meaning):
@@ -78,9 +112,17 @@ def parse_query_answer(
                 "Unavailable query outcome requires one explicit reason"
             )
         return QueryUnavailable(str(payload["reason"]).strip())
+    arguments = tuple(QueryArgument(**item) for item in payload["request_arguments"])
+    instances = query_instances(arguments, table_names)
+    table_names = set(table_names) | set(instances)
+    if tables is not None:
+        tables = invocation_tables(arguments, tables)
     statement, referenced_views = _validate(
         payload["query"], {name: SqlTable({}, ()) for name in table_names}
     )
+    if tables:
+        from .column_usage import project_query
+        project_query(payload['query'], {name: table['columns'] for name, table in tables.items()})
     names = tuple(sorted({node.name for node in statement.find_all(exp.Placeholder)}))
     if not set(names) <= parameter_names:
         raise QueryValidationError("Query references an undeclared grounded parameter")
@@ -168,8 +210,7 @@ def parse_query_answer(
             raise QueryValidationError(
                 "Query output identity/value roles differ from the request"
             )
-    arguments = tuple(QueryArgument(**item) for item in payload["request_arguments"])
-    if len({(item.view, item.parameter_ref) for item in arguments}) != len(arguments):
+    if len({(item.sql_view, item.parameter_ref) for item in arguments}) != len(arguments):
         raise QueryValidationError("Request parameter binding is repeated")
     if any(
         item.view not in table_names or item.binding not in parameter_names
@@ -178,7 +219,7 @@ def parse_query_answer(
         raise QueryValidationError(
             "Request argument references an undeclared view or grounded binding"
         )
-    if any(item.view not in referenced_views for item in arguments):
+    if any(item.sql_view not in referenced_views for item in arguments):
         raise QueryValidationError("Request argument belongs to an unused query view")
     if request_parameters is not None and any(
         item.parameter_ref not in request_parameters.get(item.view, ())
@@ -254,7 +295,7 @@ def parse_query_answer(
         }
         for view_name in referenced_views:
             view = (tables or {}).get(view_name, {})
-            if view.get("kind") == "resolved_reference":
+            if view.get("kind") in {"resolved_reference", "reference_slot"}:
                 used_inputs.update(view["input_refs"])
         if meaning.selection_limit_input_ref is not None:
             used_inputs.add(meaning.selection_limit_input_ref)
@@ -282,7 +323,7 @@ def parse_query_answer(
             raise QueryValidationError(
                 "Request argument type or identity authority does not match the bound parameter"
             )
-    validate_identity_key_uses(query, tables or {}, descriptions)
+    validate_sql_parameter_uses(query, tables or {}, descriptions)
     return AuthoredQueryAnswer(
         query,
         output_types,
@@ -378,14 +419,14 @@ class QueryAnswerPrompt(TurnPromptBase):
                 for name, table in self.tables.items()
             }, indent=2),
             builder.json_section(
-                "Declared identity authorities:",
-                identity_authorities(self.tables),
+                "Declared output identity types:",
+                self.output_identity_authorities(),
                 indent=2,
             ),
             builder.json_section(
                 "Grounded parameter menu:", {
                     name: {**description, **({"sql_expression": "$" + name}
-                        if description.get("kind") not in {"reference_argument", "definition"} else {})}
+                        if description.get("kind") not in {"reference_argument", "reference_literal", "definition"} else {})}
                     for name, description in self.parameters.items()
                 }, indent=2
             ),
@@ -396,7 +437,7 @@ class QueryAnswerPrompt(TurnPromptBase):
             "Use DuckDB SQL over only the declared views. Quote identifiers when necessary. No files, network, external tables or database access.",
             "Copy SQL parameters from the menu sql_expression exactly. Use the menu key for request_arguments bindings. FROM and JOIN use the exact Declared API views keys as SQL tables, never endpoint paths or resource labels. These views are not SQL functions: do not put parentheses or request parameters after a view name. REST arguments belong exclusively in request_arguments. Do not invent values or inline grounded operands. SQL literals may express arithmetic constants and documented catalog enum values.",
             "SQL calendar operations and date-to-timestamp conversions use the timezone in Compilation scope.",
-            "request_arguments binds declared view request parameter refs to the same grounded menu. Supply only arguments needed for the question; automatic_request_parameters are already supplied by complete traversal; never bind them. Physical prerequisite enumeration and pagination belong to Fervis.",
+            "request_arguments binds declared view request parameter refs to the same grounded menu. Supply only arguments needed for the question; automatic_request_parameters are already supplied by complete traversal; never bind them. To invoke the same API view with different bindings in one query, assign a distinct instance name to each invocation and use those names as SQL tables. All arguments sharing an instance must name the same declared view. Use instance=null for the default view. Physical prerequisite enumeration and pagination belong to Fervis.",
         )
 
     def instruction_sections(self, builder):
@@ -406,7 +447,8 @@ class QueryAnswerPrompt(TurnPromptBase):
                 (
                     *self.sql_surface_instructions(),
                     "This invocation compiles only the assigned Requested answer. Other answer requests in the question are compiled separately and combined by Fervis. Use the complete question to interpret this assigned request and its scoped operands.",
-                    "A reference_argument menu symbol binds its declared relation field to a REST request parameter for each guarded identity; it is not a SQL placeholder. Use its declared view and column in SQL. A view with kind resolved_reference supplies the canonical identities for its input_ref. Its prerequisite query resolves the supplied reference and checks missing or ambiguous matches at execution. Consume that input by joining or selecting from this relation using its key components; do not resolve it again from raw text or require a scalar parameter for it. Other declared API views remain available for the requested properties and relationships.",
+                    "A reference_literal is the original supplied name/code, not a resolved identity. It may address an opaque path or UUID REST parameter that declares no identity target. Use it only in request_arguments; it is not a SQL placeholder. Never transfer a resolved identity to an API parameter with no declared identity authority.",
+                    "A reference_argument menu symbol binds its declared relation field to a REST request parameter for each guarded identity; it is not a SQL placeholder. Use its declared view and column in SQL. A reference_slot declares a possible required identity authority for its input_ref. Select exactly one authority for each reference input according to the API parameter or relationship that this answer consumes; it will be resolved before execution. Other domains require an explicit API relationship. A view with kind resolved_reference supplies established canonical identities for its input_ref. Its prerequisite query resolves the supplied reference and checks missing or ambiguous matches at execution. Consume that input by joining or selecting from this relation using its key components; do not resolve it again from raw text or require a scalar parameter for it. Other declared API views remain available for the requested properties and relationships.",
                     "Preserve the original question, requested row or group grain, relationships and conditions. Do not introduce filters absent from the requested meaning, change the requested measure or assume a single API invocation covers its whole parent population. A stored record and a qualifying business occurrence are not necessarily the same population: use source contracts and observed state or timestamps to preserve the question's population qualifiers, rather than treating a resource label as proof that every returned row qualifies.",
                     "A literal menu value is the canonical scalar, not its original label. Use that value directly; numeric percentages have already been converted to ratios.",
                     "An aggregate can be computed from a complete row view. Missing inputs for a summary endpoint do not make the question unavailable when another declared view can supply the observations. Required parent traversal remains the compiler's responsibility.",
@@ -473,7 +515,10 @@ class QueryAnswerPrompt(TurnPromptBase):
         return {"type": ["string", "null"]}
 
     def _identity_display_instruction(self):
-        return "For an identity, provide display_column from an observed human-readable name when one is available; this is presentation metadata for that identity, not an additional requested output."
+        return "Choose one logical identity authority by entity kind, key and component IDs. Its producing API view is established by SQL lineage, not by choosing a physical carrier. For an identity, provide display_column from an observed human-readable name when one is available; this is presentation metadata for that identity, not an additional requested output."
+
+    def output_identity_authorities(self):
+        return identity_authorities(self.tables)
 
     def _output_schema(self):
         roles = (
@@ -495,7 +540,7 @@ class QueryAnswerPrompt(TurnPromptBase):
             else []
         )
         for ref, authority in (
-            identity_authorities(self.tables).items() if "identity" in roles else ()
+            self.output_identity_authorities().items() if "identity" in roles else ()
         ):
             variants.append(
                 _object(
@@ -578,6 +623,7 @@ class QueryAnswerPrompt(TurnPromptBase):
                     _object(
                         {
                             "view": {"type": "string", "enum": [view]},
+                            "instance": {"type": ["string", "null"], "minLength": 1},
                             "parameter_ref": {
                                 "type": "string",
                                 "enum": [parameter["param_ref"]],

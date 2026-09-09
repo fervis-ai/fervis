@@ -8,6 +8,8 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from fervis.observability.usage_types import UsageKey
+
 from fervis.model_io.backbone.dto import (
     ProviderOutputMode,
     ProviderRunRequest,
@@ -115,9 +117,15 @@ def _openai_responses_request_worker(
             "outputTokens": int(getattr(usage, "output_tokens", 0) or 0) - thinking_tokens,
             "thinkingTokens": thinking_tokens,
         }
+        usage_details: dict[str, Any] = {}
+        cached_input_tokens = int(getattr(getattr(usage, 'input_tokens_details', None), 'cached_tokens', 0) or 0)
+        if cached_input_tokens:
+            usage_details[UsageKey.CACHED_INPUT_TOKENS] = cached_input_tokens
         service_tier = getattr(response, "service_tier", None)
         if service_tier:
-            token_usage["usageDetails"] = {"serviceTier": str(service_tier)}
+            usage_details["serviceTier"] = str(service_tier)
+        if usage_details:
+            token_usage["usageDetails"] = usage_details
         answer = _answer_from_response(
             response, output_mode=payload.output_mode,
             json_object_arguments=payload.json_object_arguments_by_tool,

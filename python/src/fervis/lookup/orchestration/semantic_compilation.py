@@ -683,23 +683,15 @@ def compile_semantic_question(request, *, on_turn=None):
             if ref.startswith(fact.requested_fact_id+':'))) for value in canonical if value.input_ref in fact.input_refs)
         menu=with_catalog_choices(query_parameter_menu(local_values),source_catalog=source_catalog,
             source_refs={view.row_source_id for view in views})
-        planned_references=plan_fact_references(fact=fact,inputs=inputs,
-            denotations={item.input_ref:item for item in meaning.input_denotations},values=local_values,
-            catalog=request.full_catalog,reference_catalog=resolver_catalog,
-            consumer_catalog=RelationCatalog(reads=tuple(read for read in request.full_catalog.reads
-                if read.id in {view_catalog.tables[view.name]['read_id'] for view in eligible_views})),
-            access=access,question=request.question,
-            responses=request.clarification_responses,turn=turn,discover_access=discover_access,timezone=timezone)
-        if isinstance(planned_references,QueryUnavailable):
-            return SemanticCompilationImpossible(question_contract=intent,canonical_values=canonical,
-                blocked_fact_ids=(fact.requested_fact_id,),source_contract_snapshot=source_catalog.contract_snapshot,
-                reviewed_read_ids=tuple(resolver_reads))
-        tables.update({reference.view.name:reference.table for reference in planned_references})
-        reference_refs={reference.table['input_ref'] for reference in planned_references}
-        # The final answer consumes established identities through relations. Raw
-        # reference text is owned exclusively by those prerequisite queries.
-        menu=without_input_parameters(menu,reference_refs)
-        menu=with_reference_arguments(menu,planned_references)
+        from .reference_slots import reference_slots, selected_reference_slots, bind_reference_slots, reference_input_menu
+        consumer_catalog=RelationCatalog(reads=tuple(read for read in request.full_catalog.reads
+            if read.id in {view_catalog.tables[view.name]['read_id'] for view in eligible_views}))
+        reference_catalog=RelationCatalog(reads=tuple({read.id:read for read in (*resolver_catalog.reads,*consumer_catalog.reads)}.values()))
+        slots=reference_slots(fact=fact,inputs=inputs,denotations={item.input_ref:item for item in meaning.input_denotations},
+            tables=build_query_view_catalog(reference_catalog,access=access).tables)
+        tables.update({slot.view.name:slot.table for slot in slots})
+        menu=reference_input_menu(menu,{item.input_ref:item for item in meaning.input_denotations})
+        menu=with_reference_arguments(menu,slots)
         selection_boundary = None
         selection_limit = None
         if fact.selection_limit_input_ref is not None:
@@ -718,6 +710,17 @@ def compile_semantic_question(request, *, on_turn=None):
             return SemanticCompilationImpossible(question_contract=intent,canonical_values=canonical,
                 blocked_fact_ids=(fact.requested_fact_id,),source_contract_snapshot=source_catalog.contract_snapshot,
                 reviewed_read_ids=selection.selected_read_ids)
+        selected_slots=selected_reference_slots(authored,slots,menu)
+        planned_references=plan_fact_references(fact=fact,inputs=inputs,
+            denotations={item.input_ref:item for item in meaning.input_denotations},values=local_values,
+            catalog=request.full_catalog,reference_catalog=reference_catalog,consumer_catalog=consumer_catalog,
+            access=access,question=request.question,selected_slots=selected_slots,
+            responses=request.clarification_responses,turn=turn,discover_access=discover_access,timezone=timezone)
+        if isinstance(planned_references,QueryUnavailable):
+            return SemanticCompilationImpossible(question_contract=intent,canonical_values=canonical,
+                blocked_fact_ids=(fact.requested_fact_id,),source_contract_snapshot=source_catalog.contract_snapshot,
+                reviewed_read_ids=tuple(read.id for read in reference_catalog.reads))
+        menu=bind_reference_slots(menu,planned_references)
         prepared.append((fact,authored,views,tables,menu,selection_boundary,planned_references))
     from fervis.lookup.relational_sql.binding import reads_requiring_access_discovery
     selected_reads=tuple(dict.fromkeys(read_id for _,authored,views,_,_,_,_ in prepared
@@ -728,7 +731,7 @@ def compile_semantic_question(request, *, on_turn=None):
     answers=[]
     for fact,authored,views,tables,menu,selection_boundary,planned_references in prepared:
         from fervis.lookup.relational_sql.binding import bind_query_answer
-        bound=bind_query_answer(authored,menu,views,selection_boundary=selection_boundary)
+        bound=bind_query_answer(authored,menu,views,selection_boundary=selection_boundary,namespace=fact.requested_fact_id+'.')
         prerequisites,bindings=reference_prerequisites(planned_references,bound.bindings,argument_operations=bound.argument_operations)
         answers.append(compile_query_answer(question=request.question,query=authored.query,views=bound.views,timezone=timezone,
             output_types=authored.output_types,result_contract=authored.result,catalog=request.full_catalog,

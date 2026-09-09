@@ -104,7 +104,7 @@ def run_identity_set_binding_case(payload: dict[str, Any]) -> list[str]:
         "rows": list(result.relations[0].rows),
     }
     return subset_mismatches(
-        actual=actual,
+        actual=portable_value(actual),
         expected_subset=payload["expect"]["result_contains"],
     )
 

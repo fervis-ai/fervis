@@ -16,7 +16,7 @@ input:
             entity_kind: store
             key_id: primary_key
             key_component_id: store_id
-            values: [store_1]
+            values: [00000000-0000-0000-0001-000000000001]
             known_input_id: store_ids
             applies_to_requested_fact_ids: [fact_1]
           provenance: {kind: question_input}
@@ -26,24 +26,24 @@ input:
       evidence: &first_evidence
         - request:
             endpoint_name: list_sale_list
-            args: {sales.query.store_id: store_1}
+            args: {sales.query.store_id: 00000000-0000-0000-0001-000000000001}
           response:
             status: 200
             body:
               results:
-                - {sale_id: sale_1, store_id: store_1}
+                - {sale_id: 00000000-0000-0000-0002-000000000001, store_id: 00000000-0000-0000-0001-000000000001}
     - id: rerun
       bindings: *bindings
       evidence:
         - request:
             endpoint_name: list_sale_list
-            args: {sales.query.store_id: store_1}
+            args: {sales.query.store_id: 00000000-0000-0000-0001-000000000001}
           response:
             status: 200
             body:
               results:
-                - {sale_id: sale_1, store_id: store_1}
-                - {sale_id: sale_2, store_id: store_1}
+                - {sale_id: 00000000-0000-0000-0002-000000000001, store_id: 00000000-0000-0000-0001-000000000001}
+                - {sale_id: 00000000-0000-0000-0002-000000000002, store_id: 00000000-0000-0000-0001-000000000001}
     - id: repeated_first_snapshot
       bindings: *bindings
       evidence: *first_evidence
@@ -56,28 +56,28 @@ expect:
           - {id: sales_rows}
           - id: answer_rows
             rows:
-              - {answer_sale_id: sale_1, store_id: store_1}
+              - {answer_sale_id: 00000000-0000-0000-0002-000000000001, store_id: 00000000-0000-0000-0001-000000000001}
         requests:
           - endpoint_name: list_sale_list
-            args: {sales.query.store_id: store_1}
+            args: {sales.query.store_id: 00000000-0000-0000-0001-000000000001}
       - id: rerun
         status: completed
         relations:
           - {id: sales_rows}
           - id: answer_rows
             rows:
-              - {answer_sale_id: sale_1, store_id: store_1}
-              - {answer_sale_id: sale_2, store_id: store_1}
+              - {answer_sale_id: 00000000-0000-0000-0002-000000000001, store_id: 00000000-0000-0000-0001-000000000001}
+              - {answer_sale_id: 00000000-0000-0000-0002-000000000002, store_id: 00000000-0000-0000-0001-000000000001}
         requests:
           - endpoint_name: list_sale_list
-            args: {sales.query.store_id: store_1}
+            args: {sales.query.store_id: 00000000-0000-0000-0001-000000000001}
       - id: repeated_first_snapshot
         status: completed
         relations:
           - {id: sales_rows}
           - id: answer_rows
             rows:
-              - {answer_sale_id: sale_1, store_id: store_1}
+              - {answer_sale_id: 00000000-0000-0000-0002-000000000001, store_id: 00000000-0000-0000-0001-000000000001}
         requests:
           - endpoint_name: list_sale_list
-            args: {sales.query.store_id: store_1}
+            args: {sales.query.store_id: 00000000-0000-0000-0001-000000000001}

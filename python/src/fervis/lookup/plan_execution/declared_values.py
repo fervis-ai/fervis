@@ -179,12 +179,10 @@ def parse_declared_value(value: object, type_name: str | None) -> RuntimeValue:
         if isinstance(value, UUID):
             return value
         if isinstance(value, str):
-            # Host catalogs use UUID as an identity domain even when test or legacy
-            # adapters expose opaque identifiers that are not RFC-4122 spellings.
             try:
                 return UUID(value)
-            except ValueError:
-                return value
+            except ValueError as error:
+                raise RelationEngineError("declared UUID value must be valid UUID text") from error
         raise RelationEngineError("declared UUID value must be UUID text")
     if kind is DeclaredValueKind.COLLECTION:
         parsed = parse_runtime_value(value)

@@ -14,7 +14,9 @@ def payload(**changes):
         'request_arguments': [],
         'interpretations': [],
     }
-    return {**value, **changes}
+    result = {**value, **changes}
+    result['request_arguments'] = [{'instance': None, **item} for item in result['request_arguments']]
+    return result
 
 
 def test_scalar_answer_declares_a_single_public_value():
@@ -168,7 +170,7 @@ def test_provider_schema_preserves_requested_output_count_and_roles():
     tables={'items':{'candidate_keys':[{'entity_kind':'item','key_id':'pk','components':{'id':'id'}}]}}
     schema=QueryAnswerPrompt(question='Which item scored highest?',meaning=meaning,tables=tables,parameters={})._schema()
     answer=payload(mode='rows',columns=[{'name':'id','value_type':'integer'},{'name':'score','value_type':'number'}],
-        outputs=[{'kind':'identity','authority':'items:key:0','components':{'id':'id'},'label':'item','display_column':None}],
+        outputs=[{'kind':'identity','authority':'item/pk(id)','components':{'id':'id'},'label':'item','display_column':None}],
         ordering=[{'column':'score','descending':True}])
     validate(answer,schema)
     with pytest.raises(ValidationError):
@@ -241,6 +243,7 @@ def test_request_binding_cannot_reinterpret_a_key_as_a_name():
         parse_query_answer(bad,table_names=set(tables),parameter_names=set(menu),tables=tables,parameter_descriptions=menu)
     with pytest.raises(ValidationError):
         validate(bad,QueryAnswerPrompt(question='Count observations for this site.',meaning=None,tables=tables,parameters=menu)._schema())
+    tables['observations']['request_parameters'][0]['entity_target'] = {'entity_kind':'site','key_id':'pk','component_id':'id'}
     good=payload(query='SELECT COUNT(*) AS total FROM observations WHERE site_id=$key',
         request_arguments=[{'view':'observations','parameter_ref':'site_id','binding':'key'}])
     validate(good,QueryAnswerPrompt(question='Count observations for this site.',meaning=None,tables=tables,parameters=menu)._schema())
@@ -259,3 +262,16 @@ def test_input_consumption_follows_guarded_reference_relations(use_reference):
     if use_reference:parse()
     else:
         with pytest.raises(QueryValidationError,match='input operands'):parse()
+
+
+def test_unknown_key_column_is_diagnosed_before_identity_lineage():
+    tables = {'records': {'columns': {'id': {'type':'integer'}, 'name': {'type':'string'}},
+        'candidate_keys':[{'entity_kind':'record','key_id':'primary','components':{'id':'id'}}]}}
+    query = payload(query='SELECT data_id AS id FROM records', mode='rows',
+        columns=[{'name':'id','value_type':'integer'}],
+        outputs=[{'kind':'identity','authority':'record/primary(id)','components':{'id':'id'},'label':'record','display_column':None}])
+    with pytest.raises(QueryValidationError) as caught:
+        parse_query_answer(query, table_names=set(tables), parameter_names=set(), tables=tables)
+    assert 'undeclared column' in str(caught.value)
+    assert 'data_id' in str(caught.value)
+    assert 'records' in str(caught.value) and 'id' in str(caught.value)

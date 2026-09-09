@@ -156,11 +156,10 @@ def _public_scalar_outputs(outcome: AnswerResult) -> tuple[ScalarResultOutput, .
 def _render_value(value: ResultValue) -> RuntimeValue:
     if not isinstance(value, EntityKeyValue):
         return value
-    return {
-        "entityKind": value.entity_kind,
-        "keyId": value.key_id,
-        "components": value.component_values(),
-    }
+    components = value.component_values()
+    if len(components) == 1:
+        return str(next(iter(components.values())))
+    return ", ".join(f"{name}={component}" for name, component in components.items())
 
 
 def _render_output_role(

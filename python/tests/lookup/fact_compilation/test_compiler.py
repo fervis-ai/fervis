@@ -1577,10 +1577,7 @@ def test_candidate_grain_is_preserved_by_related_set_aggregate() -> None:
     assert execution.issue is None
     assert execution.fact_result is not None
     assert rendered_fact_text(render_fact_result(execution.fact_result)) == (
-        "{'entityKind': 'staff', 'keyId': 'primary_key', "
-        "'components': {'staff_id': 'staff-1'}}: 2\n"
-        "{'entityKind': 'staff', 'keyId': 'primary_key', "
-        "'components': {'staff_id': 'staff-2'}}: 1"
+        "staff-1: 2\nstaff-2: 1"
     )
 
 

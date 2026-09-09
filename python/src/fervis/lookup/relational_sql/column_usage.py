@@ -1,4 +1,5 @@
 """Resolve SQL field dependencies without inferring API or business meaning."""
+import json
 from sqlglot import parse_one, exp
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import traverse_scope
@@ -18,9 +19,15 @@ def project_query(query, columns_by_view):
     schema={name:{column:'TEXT' for column in values} or {ROW_PRESENCE_COLUMN:'BOOLEAN'}
             for name,values in columns_by_view.items()}
     try:
-        statement=qualify(parse_one(query,read='duckdb'),dialect='duckdb',schema=schema)
+        parsed = parse_one(query, read='duckdb')
     except SqlglotError as exc:
-        raise QueryValidationError('SQL query references an undeclared column') from exc
+        raise QueryValidationError('Invalid SQL query: ' + str(exc)) from exc
+    if parsed is None:
+        raise QueryValidationError('SQL query is empty')
+    try:
+        statement=qualify(parsed.copy(),dialect='duckdb',schema=schema)
+    except SqlglotError as exc:
+        raise QueryValidationError(_column_diagnostic(parsed, columns_by_view, str(exc))) from exc
     used={name:set() for name in columns_by_view}
     for scope in traverse_scope(statement):
         for column in scope.columns:
@@ -36,6 +43,18 @@ def project_query(query, columns_by_view):
             view=names[source.name.lower()]
             name=columns[view].get(column.name.lower())
             if name is None:
-                raise QueryValidationError('SQL query references an undeclared column')
+                raise QueryValidationError(_column_diagnostic(parsed, columns_by_view, f'{view}.{column.name} is not declared'))
             used[view].add(name)
     return statement.sql(dialect="duckdb"), {name:frozenset(fields) for name,fields in used.items()}
+
+
+def _column_diagnostic(statement, columns_by_view, detail):
+    referenced = {table.name.casefold() for table in statement.find_all(exp.Table)}
+    query_columns = {column.name.casefold() for column in statement.find_all(exp.Column)}
+    selected = {view: sorted(columns) for view, columns in columns_by_view.items() if view.casefold() in referenced}
+    alternatives = {view: sorted(column for column in columns if column.casefold() in query_columns)
+                    for view, columns in columns_by_view.items() if view.casefold() not in referenced
+                    and any(column.casefold() in query_columns for column in columns)}
+    return ('SQL query references an undeclared column: ' + detail + '. Declared columns in selected views: '
+            + json.dumps(selected, sort_keys=True) + '. Other views containing referenced column names: '
+            + json.dumps(alternatives, sort_keys=True))

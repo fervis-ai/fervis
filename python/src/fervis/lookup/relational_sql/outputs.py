@@ -19,7 +19,7 @@ class QueryOutput:
             *((self.display_column,) if self.display_column else ()))
 
 
-def identity_authorities(tables):
+def identity_carriers(tables):
     authorities={}
     for view,table in tables.items():
         for index,key in enumerate(table.get('candidate_keys',())):
@@ -29,6 +29,16 @@ def identity_authorities(tables):
             authorities[f'{view}:reference:{index}']={'view':view,'entity_kind':key['target_entity_kind'],
                 'key_id':key['target_key_id'],'components':key['components']}
     return authorities
+
+
+def identity_authorities(tables):
+    """Declare logical output types; SQL lineage owns their physical evidence."""
+    from urllib.parse import quote
+    signatures = sorted({(item['entity_kind'], item['key_id'], tuple(sorted(item['components'])))
+                         for item in identity_carriers(tables).values()})
+    return {quote(kind, safe='')+'/'+quote(key, safe='')+'('+','.join(quote(c, safe='') for c in components)+')':
+            {'entity_kind': kind, 'key_id': key, 'components': components}
+            for kind, key, components in signatures}
 
 
 def parse_query_outputs(payload, *, columns: Mapping[str,str], tables, query: str) -> tuple[QueryOutput,...]:
@@ -66,7 +76,7 @@ def _verify_authored_identity_outputs(query, columns, tables, outputs):
     keys=tuple(output.identity for output in outputs if output.identity is not None)
     if not keys:
         return
-    authorities=identity_authorities(tables)
+    authorities=identity_carriers(tables)
     contracts={name:RelationContract(
         {column:frozenset() for column in table['columns']},(),{},
         field_types={column:definition['type'] for column,definition in table['columns'].items()},

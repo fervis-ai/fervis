@@ -56,7 +56,7 @@ def test_reference_authoring_supports_observed_expressions_without_backend_name_
     extra = f', {matching} AS matched_name' if case != 'role' else ''
     payload={'query':f'SELECT id AS record_id{extra} FROM "{view.name}" WHERE {predicate}',
         'mode':'rows','columns':[{'name':'record_id','value_type':'integer'}, *([{'name':'matched_name','value_type':'string'}] if case != 'role' else [])],
-        'outputs':[{'kind':'identity','authority':view.name+':key:0','components':{'id':'record_id'},'label':'record','display_column':None}],
+        'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'record_id'},'label':'record','display_column':None}],
         'ordering':[],'request_arguments':[],'interpretations':[],
         'reference_binding':{'kind':'description','basis':'The primary property defines the role.'} if case=='role' else {'kind':'literal','match_column':'matched_name'}}
     if case != "role": payload["query"] = payload["query"].split(" WHERE ")[0]
@@ -112,7 +112,7 @@ def test_reference_output_contract_does_not_request_unused_presentation_fields(m
     prompt=ReferenceQueryPrompt(question='Identify the record.',meaning=meaning,tables=views.tables,parameters=menu.descriptions)
     payload={'query':f'SELECT id, {match_expression} AS display_name FROM "{view.name}"','mode':'rows',
         'columns':[{'name':'id','value_type':'integer'},{'name':'display_name','value_type':'string'}],
-        'outputs':[{'kind':'identity','authority':view.name+':key:0','components':{'id':'id'},'label':'record','display_column':'display_name'}],
+        'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':'display_name'}],
         'ordering':[],'request_arguments':[],'interpretations':[],'reference_binding':{'kind':'literal','match_column':'display_name'}}
     with pytest.raises(ValidationError):validate(payload,prompt._schema())
     with pytest.raises(QueryValidationError,match='display projection'):
@@ -162,9 +162,10 @@ def test_only_equivalent_literal_predicates_are_canonicalized(predicate):
             column='matched_name', parameter='p1', tables=tables)
 
 
+@pytest.mark.parametrize('named_invocation', [False, True])
 @pytest.mark.parametrize('key_type', ['string', 'uuid'])
 @pytest.mark.parametrize('returned', ['ABC123', 'OTHER', None])
-def test_required_key_lookup_establishes_identity_from_observed_return_and_replays(returned, key_type):
+def test_required_key_lookup_establishes_identity_from_observed_return_and_replays(returned, key_type, named_invocation):
     from fervis.lookup.relation_catalog import CatalogParam, ParamSource, EntityKeyComponentTarget
     from fervis.lookup.contract_codec import canonical_answer_program_json, decode_answer_program
     from fervis.lookup.identity_types import IdentityExecutionFailureReason
@@ -182,9 +183,12 @@ def test_required_key_lookup_establishes_identity_from_observed_return_and_repla
     prompt = ReferenceQueryPrompt(question='Return record ABC123.', meaning=meaning, tables=views.tables, parameters=menu.descriptions)
     payload = {'query': f'SELECT id FROM "{view.name}"', 'mode': 'rows',
         'columns': [{'name': 'id', 'value_type': key_type}],
-        'outputs': [{'kind': 'identity', 'authority': view.name+':key:0', 'components': {'id': 'id'}, 'label': 'record', 'display_column': None}],
+        'outputs': [{'kind': 'identity', 'authority': 'records/primary(id)', 'components': {'id': 'id'}, 'label': 'record', 'display_column': None}],
         'ordering': [], 'interpretations': [], 'reference_binding': {'kind': 'literal', 'match_column': 'id'},
-        'request_arguments': [{'view': view.name, 'parameter_ref': 'id', 'binding': 'p1_1'}]}
+        'request_arguments': [{'instance': None, 'view': view.name, 'parameter_ref': 'id', 'binding': 'p1_1'}]}
+    if named_invocation:
+        payload['query'] = payload['query'].replace(view.name, 'selected_record')
+        payload['request_arguments'][0]['instance'] = 'selected_record'
     validate(payload, prompt._schema())
     authored = parse_reference_query(payload, prompt=prompt, menu=menu)
     inputs = (InputTerm('i1', origin, literal, TextType()),)

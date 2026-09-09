@@ -82,7 +82,7 @@ def test_sql_catalog_exposes_actual_uuid_and_decimal_representations():
     assert views.tables[view.name]['columns']['amount']['type']=='number'
     payload={'query':f'SELECT id FROM "{view.name}"','mode':'rows',
         'columns':[{'name':'id','value_type':'uuid'}],
-        'outputs':[{'kind':'identity','authority':view.name+':key:0','components':{'id':'id'},'label':'record','display_column':None}],
+        'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':None}],
         'ordering':[],'request_arguments':[],'interpretations':[]}
     parse_query_answer(payload,table_names=set(views.tables),parameter_names=set(),tables=views.tables)
     erased = {**payload, 'columns': [{'name': 'id', 'value_type': 'string'}]}

@@ -16,7 +16,7 @@ input:
             entity_kind: store
             key_id: primary_key
             key_component_id: store_id
-            values: [store_1]
+            values: [00000000-0000-0000-0001-000000000001]
             known_input_id: store_ids
             applies_to_requested_fact_ids: [fact_1]
           provenance: {kind: question_input}
@@ -26,13 +26,13 @@ input:
       evidence:
         - request:
             endpoint_name: list_sale_list
-            args: {sales.query.store_id: store_1}
+            args: {sales.query.store_id: 00000000-0000-0000-0001-000000000001}
           response:
             status: 200
             body:
               results:
-                - {sale_id: sale_1, store_id: store_1}
-                - {sale_id: sale_2, store_id: store_1}
+                - {sale_id: 00000000-0000-0000-0002-000000000001, store_id: 00000000-0000-0000-0001-000000000001}
+                - {sale_id: 00000000-0000-0000-0002-000000000002, store_id: 00000000-0000-0000-0001-000000000001}
 expect:
   result_contains:
     invocations:
@@ -41,5 +41,5 @@ expect:
         relations:
           - id: sales_rows
             rows:
-              - {sale_id: sale_1, store_id: store_1}
-              - {sale_id: sale_2, store_id: store_1}
+              - {sale_id: 00000000-0000-0000-0002-000000000001, store_id: 00000000-0000-0000-0001-000000000001}
+              - {sale_id: 00000000-0000-0000-0002-000000000002, store_id: 00000000-0000-0000-0001-000000000001}

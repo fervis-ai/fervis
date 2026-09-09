@@ -49,3 +49,28 @@ def test_nested_predicate_parameter_is_checked_in_its_own_scope():
     }
     validate_identity_key_uses('SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders WHERE id=$order)',
         tables, {'order': {'identity': {'entity_kind': 'order', 'key_id': 'primary'}, 'projection': 'key_component:id'}})
+
+
+def test_guarded_identity_cannot_be_used_as_an_untyped_uuid_argument():
+    assert not compatible_argument({'source':'query','type':'uuid','entity_target':None},
+        {'kind':'reference_argument','identity':{'entity_kind':'customer','key_id':'primary'},
+         'projection':'key_component:id','value_type':'uuid'})
+
+
+@pytest.mark.parametrize('source,kind,allowed', [('path','uuid',True), ('query','uuid',True), ('query','string',False)])
+def test_original_reference_literal_can_address_an_opaque_resource(source, kind, allowed):
+    description = {'kind':'reference_literal','value_type':'string','value':'00000000-0000-0000-0000-000000000001'}
+    assert compatible_argument({'source':source,'type':kind,'entity_target':None},description) is allowed
+    assert not compatible_argument({'source':source,'type':kind,'entity_target':TARGET},description)
+
+
+@pytest.mark.parametrize(('kind', 'valid', 'invalid'), [
+    ('integer', '42', '42.5'), ('number', '12.5', 'twelve'),
+    ('uuid', '00000000-0000-0000-0000-000000000001', '42'),
+    ('boolean', 'true', 'sometimes'), ('date', '2026-03-01', '2026-02-30')])
+def test_literal_address_uses_declared_scalar_parser_without_identity_promotion(kind, valid, invalid):
+    parameter = {'source': 'path', 'type': kind, 'entity_target': None}
+    description = {'kind': 'reference_literal', 'value_type': 'string', 'value': valid}
+    assert compatible_argument(parameter, description)
+    assert not compatible_argument(parameter, {**description, 'value': invalid})
+    assert not compatible_argument({**parameter, 'entity_target': TARGET}, description)

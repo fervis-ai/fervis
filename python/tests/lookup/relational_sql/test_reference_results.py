@@ -128,7 +128,7 @@ def test_compiled_reference_retains_original_input_provenance_in_the_final_query
         query_parameters=(SqlNamedInput('name',menu.expressions['p1_1']),),parameters=menu.program_inputs.parameters,
         bindings=menu.program_inputs.bindings,inputs=inputs,input_denotations=denotations,
         public_outputs=(QueryOutput('site',identity=EntityKeyProjection('sites','primary',(EntityKeyProjectionComponent('id','site_key'),))),),
-        namespace='lookup.')
+        namespace='lookup.', lookup_input_ref='i1')
     reference=compile_reference_result(selected,input_ref='i1',output_types={'site_key':'integer'})
     assert reference.input_refs==('i1',)
     final=compile_query_answer(question='Return the identified site ID.',query='SELECT id AS value FROM reference_i1',

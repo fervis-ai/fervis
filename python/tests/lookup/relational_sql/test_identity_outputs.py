@@ -231,7 +231,7 @@ def test_question_identity_roles_produce_a_required_sql_identity_output(role):
     prompt=QueryAnswerPrompt(question='Where were the shifts worked?',meaning=meaning,tables=views.tables,parameters={})
     payload={'query':f'SELECT id FROM "{view.name}"','mode':'rows',
         'columns':[{'name':'id','value_type':'integer'}],
-        'outputs':[{'kind':'identity','authority':view.name+':key:0','components':{'id':'id'},'label':'work location','display_column':None}],
+        'outputs':[{'kind':'identity','authority':'locations/primary(id)','components':{'id':'id'},'label':'work location','display_column':None}],
         'ordering':[],'request_arguments':[],'interpretations':[]}
     validate(payload,prompt._schema())
     authored=parse_query_answer(payload,table_names=set(views.tables),parameter_names=set(),meaning=meaning,tables=views.tables)
@@ -258,7 +258,7 @@ def test_each_union_branch_preserves_a_complete_observed_identity(operator,wrapp
     if wrapped:query=f'WITH districts AS ({query}) SELECT country,id FROM districts'
     projection=EntityKeyProjection('district','pk',(EntityKeyProjectionComponent('country','country'),EntityKeyProjectionComponent('id','id')))
     payload={'query':query,'mode':'rows','columns':[{'name':'country','value_type':'string'},{'name':'id','value_type':'integer'}],
-        'outputs':[{'kind':'identity','authority':view.name+':reference:0','components':{'country':'country','id':'id'},'label':'district','display_column':None}],
+        'outputs':[{'kind':'identity','authority':'district/pk(country,id)','components':{'country':'country','id':'id'},'label':'district','display_column':None}],
         'ordering':[],'request_arguments':[],'interpretations':[]}
     def author():return parse_query_answer(payload,table_names=set(views.tables),parameter_names=set(),tables=views.tables)
     def compile():return compile_query_answer(question='Which districts?',query=query,views=views.views,catalog=catalog,
@@ -291,3 +291,31 @@ def test_unused_empty_response_view_does_not_invalidate_identity_lineage():
         (EntityKeyProjectionComponent('id', 'key_id'),)))
     _verify_authored_identity_outputs('SELECT "id" AS key_id FROM items',
         {'key_id': 'integer'}, tables, (output,))
+
+
+@pytest.mark.parametrize('display', [None, '', 'Current label'])
+def test_identity_text_fallback_is_readable_and_preserves_typed_rows(display):
+    from uuid import UUID
+    from fervis.lookup.answer_rendering import render_fact_result, rendered_fact_text
+    read = _read('items', value_type='uuid')
+    read = replace(read, fields=(*read.fields, CatalogField('name', 'string', path='name', row_path_id='root')))
+    catalog = RelationCatalog(reads=(read,))
+    source = build_api_row_source_catalog(catalog).sources[0]
+    key = source.candidate_keys[0]
+    view = ApiView('items', source.id, {field.path: field.id for field in source.fields if field.path}, {})
+    output = QueryOutput('item', identity=EntityKeyProjection(key.entity_kind, key.id,
+        (EntityKeyProjectionComponent(key.components[0].id, 'id'),)), display_column='name')
+    compiled = compile_query_answer(question='Which items?', query='SELECT id,name FROM items', views=(view,),
+        output_types={'id': 'uuid', 'name': 'string'}, result_contract=ResultContract('rows', ('id', 'name')),
+        catalog=catalog, public_outputs=(output,))
+    ids = ['00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002']
+    class Port:
+        def read(self, **kwargs):
+            return {'responseStatus': 200, 'responseBody': [{'id': value, 'name': display} for value in ids]}
+    result = invoke_answer_program(program=compiled.program, bindings=compiled.bindings,
+        environment=ExecutionEnvironment(catalog=catalog), ports=RuntimePorts(Port(), LookupMemory()))
+    assert result.issue is None
+    outcome = result.fact_result.outcome
+    assert [row.values['result_1'].components[0].value for row in outcome.projected_rows] == list(map(UUID, ids))
+    text = rendered_fact_text(render_fact_result(result.fact_result))
+    assert text.splitlines() == ['item: '+(display or value) for value in ids]

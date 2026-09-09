@@ -11,6 +11,12 @@ def compatible_argument(parameter, description, *, literal_lookup=False):
         return False
     identity = description.get("identity")
     target = parameter.get("entity_target")
+    if identity and not target and description.get('kind') != 'field_projection':
+        return False
+    if description.get('kind') == 'reference_literal' and not literal_lookup and not (
+        parameter.get('source') == 'path' or parameter.get('type') == 'uuid'
+    ):
+        return False
     if target and not identity and not literal_lookup:
         return False
     if identity and target:
@@ -36,13 +42,17 @@ def compatible_argument(parameter, description, *, literal_lookup=False):
         "double": "number",
         "bool": "boolean",
     }
-    if (literal_lookup or not target) and target_type == 'uuid' and source_type == 'string':
+    source_type = aliases.get(source_type, source_type)
+    target_type = aliases.get(target_type, target_type)
+    if source_type == 'string' and target_type in {'integer', 'number', 'boolean', 'date', 'datetime', 'time', 'uuid'} and (
+        literal_lookup or (not target and description.get('kind') == 'reference_literal')
+    ):
         from fervis.lookup.plan_execution.declared_values import parse_declared_value
         try:
-            parse_declared_value(description.get('value', description.get('label')), 'uuid')
+            parse_declared_value(description.get('value', description.get('label')), target_type)
         except (ValueError, TypeError):
             return False
-        source_type = 'uuid'
+        source_type = target_type
     source_type = aliases.get(source_type, source_type)
     target_type = aliases.get(target_type, target_type)
     if source_type in {None, "unknown", "any"} or target_type in {
@@ -54,6 +64,16 @@ def compatible_argument(parameter, description, *, literal_lookup=False):
     return source_type == target_type or (source_type == "uuid" and target_type == "string") or (
         source_type == "integer" and target_type == "number"
     )
+
+
+def validate_sql_parameter_uses(query, tables, descriptions, *, lookup_input_ref=''):
+    names = {node.name for node in parse_one(query, read='duckdb').find_all(exp.Placeholder)}
+    if any(descriptions.get(name, {}).get('kind') == 'definition' or
+           descriptions.get(name, {}).get('kind') == 'reference_literal' and
+           (not lookup_input_ref or descriptions[name].get('input_ref') != lookup_input_ref)
+           for name in names):
+        raise QueryValidationError('Reference literals are REST resource-address values; SQL must use a typed reference slot')
+    validate_identity_key_uses(query, tables, descriptions)
 
 
 def validate_identity_key_uses(query, tables, parameters):
@@ -170,7 +190,17 @@ def validate_bound_program_parameters(program, bindings, row_sources, contracts)
     if not queries:
         return
 
-    def describe(expression, target=None, relation_id=None):
+    producers = {operation.output_relation:operation for operation in program.operations if operation.output_relation}
+    def guarded(relation_id):
+        operation = producers.get(relation_id)
+        if operation is None:
+            return False
+        return (isinstance(operation.spec, SqlQuerySpec) and bool(operation.spec.reference_input_ref)
+                or any(guarded(ref) for ref in operation.input_relation_ids))
+    from fervis.lookup.question_contract.model import InputDenotationKind
+    denotations = {item.input_ref:item for item in getattr(program, 'input_denotations', ())}
+    parameter_inputs = {parameter.id:parameter.input_ref for parameter in program.parameters}
+    def describe(expression, target=None, relation_id=None, literal_lookup=False):
         from fervis.lookup.answer_program.expressions import FieldRef
         if isinstance(expression, FieldRef):
             contract = contracts[relation_id]
@@ -182,7 +212,8 @@ def validate_bound_program_parameters(program, bindings, row_sources, contracts)
                            (target.entity_kind, target.key_id, target.component_id)]
             if matches:
                 key, component = matches[0]
-                return {'identity': {'entity_kind': key.entity_kind, 'key_id': key.key_id},
+                return {'kind':'reference_argument' if guarded(relation_id) else 'field_projection',
+                        'identity': {'entity_kind': key.entity_kind, 'key_id': key.key_id},
                         'projection': 'key_component:' + component.component_id,
                         'value_type': contract.field_types[expression.field_id]}
             return {'value_type': contract.field_types[expression.field_id]}
@@ -193,11 +224,12 @@ def validate_bound_program_parameters(program, bindings, row_sources, contracts)
             value = expression.value
         else:
             return {}
-        return (
-            projection_description(value, expression.component, expression.item_index)
-            if value is not None
-            else {}
-        )
+        description = projection_description(value, expression.component, expression.item_index) if value is not None else {}
+        input_ref = parameter_inputs.get(expression.parameter_id) if isinstance(expression, ParameterRef) else None
+        denotation = denotations.get(input_ref)
+        if denotation is not None and denotation.kind is InputDenotationKind.IDENTITY_REFERENCE and not description.get('identity'):
+            description = {**description, 'input_ref':input_ref, 'kind':'reference_literal' if literal_lookup or not denotation.reference_descriptions else 'definition'}
+        return description
 
     parameter_inputs = {parameter.id: parameter.input_ref for parameter in program.parameters}
     lookup_relations = {}
@@ -208,6 +240,13 @@ def validate_bound_program_parameters(program, bindings, row_sources, contracts)
                    parameter_inputs.get(item.expression.parameter_id) == spec.lookup_input_ref
                    for item in spec.parameters):
             raise QueryValidationError('Literal lookup must consume its original declared input')
+        denotation = denotations.get(spec.lookup_input_ref)
+        if denotation is not None and any(
+            describe(item.expression, literal_lookup=True).get('value') in denotation.reference_descriptions
+            for item in spec.parameters if isinstance(item.expression, ParameterRef)
+            and parameter_inputs.get(item.expression.parameter_id) == spec.lookup_input_ref
+        ):
+            raise QueryValidationError('A descriptive reference cannot be rebound as a literal lookup')
         for item in spec.inputs:
             lookup_relations.setdefault(item.relation_id, set()).add(spec.lookup_input_ref)
 
@@ -221,7 +260,7 @@ def validate_bound_program_parameters(program, bindings, row_sources, contracts)
             )
             literal_lookup = (isinstance(binding.value_expr, ParameterRef) and
                 parameter_inputs.get(binding.value_expr.parameter_id) in lookup_relations.get(relation.id, set()))
-            if not compatible_argument(asdict(parameter), describe(binding.value_expr, parameter.entity_target, relation.source.argument_relation_id), literal_lookup=literal_lookup):
+            if not compatible_argument(asdict(parameter), describe(binding.value_expr, parameter.entity_target, relation.source.argument_relation_id, literal_lookup=literal_lookup), literal_lookup=literal_lookup):
                 raise QueryValidationError(
                     "Request argument type or identity authority does not match the bound parameter"
                 )
@@ -249,8 +288,8 @@ def validate_bound_program_parameters(program, bindings, row_sources, contracts)
                 },
                 "candidate_keys": keys,
             }
-        validate_identity_key_uses(
-            spec.query,
-            tables,
-            {item.name: describe(item.expression) for item in spec.parameters},
-        )
+        validate_sql_parameter_uses(spec.query, tables,
+            {item.name: describe(item.expression, literal_lookup=(isinstance(item.expression, ParameterRef) and
+                parameter_inputs.get(item.expression.parameter_id) == spec.lookup_input_ref)) for item in spec.parameters},
+            lookup_input_ref=spec.lookup_input_ref)
+

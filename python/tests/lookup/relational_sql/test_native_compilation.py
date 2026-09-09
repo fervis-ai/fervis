@@ -229,7 +229,8 @@ def test_native_multi_answer_preserves_per_request_operand_ownership(monkeypatch
 
 
 @pytest.mark.parametrize('key_type', ['integer', 'uuid'])
-def test_normal_reference_compilation_replays_guard_before_required_rest_read(monkeypatch, key_type):
+@pytest.mark.parametrize('two_facts', [False, True])
+def test_normal_reference_compilation_replays_guard_before_required_rest_read(monkeypatch, key_type, two_facts):
     from uuid import UUID
     def key_value(number):
         return str(UUID(int=number)) if key_type == 'uuid' else number
@@ -241,21 +242,40 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
         CatalogField('primary','boolean',path='is_primary',row_path_id='root')))
     stores=replace(_read('stores',params=(CatalogParam('area_id','area_id',ParamSource.PATH,key_type,
         required=True,entity_target=EntityKeyComponentTarget('areas','primary','id')),)),resource_names=('stores',))
-    catalog=RelationCatalog(reads=(areas,stores))
+    foreign=replace(_read('foreign_areas', value_type=key_type), resource_names=('areas',))
+    catalog=RelationCatalog(reads=(areas,stores,foreign))
     sources=build_api_row_source_catalog(catalog)
     monkeypatch.setattr(compilation,'_discover_read_access',lambda *args,**kwargs:ReadAccessCatalog(sources.sources))
+    seen = []
     def turn(purpose,*,prompt,parse,**kwargs):
+        seen.append(purpose.value)
         if purpose.value=='question_contract':
-            result=parse(_frame_payload(supplied_values=[{'meaning':'the primary area',
+            frame=_frame_payload(supplied_values=[{'meaning':'the primary area',
                 'denotation_basis':'The configured primary area identifies which stores to count.',
-                'entity_reference':{'instance_kind':'area','value':{'operands':['the primary area'],'reference_kind':'description','origin':{'kind':'question'}}}}]))
+                'entity_reference':{'instance_kind':'area','value':{'operands':['the primary area'],'reference_kind':'description','origin':{'kind':'question'}}}}])
+            if two_facts:
+                from copy import deepcopy
+                frame['outcome']['answer_requests'].append(deepcopy(frame['outcome']['answer_requests'][0]))
+                frame['outcome']['supplied_values']['operands'][0]['answer_request_numbers'] = [1, 2]
+            result=parse(frame)
         elif purpose.value=='query_enrichment':
             result=SemanticQueryEnrichmentResult(tuple(RecallBucketMatch(bucket.bucket_ref,('stores',),('stores',))
                 for bucket in prompt.request.recall_buckets),
                 tuple(InputResourceSearchTerms(task.input_use_ref,('areas',)) for task in prompt.request.reference_tasks))
         elif purpose.value=='grounding':
+            assert 'source_realization' in seen
+            assert prompt.expected_key['entity_kind'] == 'areas'
+            assert {authority['entity_kind'] for authority in prompt.output_identity_authorities().values()} == {'areas'}
+            foreign_view = next(name for name, table in prompt.tables.items() if table.get('read_id') == 'foreign_areas')
+            from fervis.lookup.relational_sql.execution import QueryValidationError
+            with pytest.raises(QueryValidationError, match='consuming identity demand'):
+                parse({'query':f'SELECT id FROM "{foreign_view}"', 'mode':'rows',
+                    'columns':[{'name':'id','value_type':key_type}],
+                    'outputs':[{'kind':'identity','authority':'foreign_areas/primary(id)','components':{'id':'id'},'label':'area','display_column':None}],
+                    'ordering':[], 'request_arguments':[], 'interpretations':[],
+                    'reference_binding':{'kind':'description','basis':'The fixture tries the other namespace.'}})
             consumer = prompt.consumer_context
-            assert consumer['requested_answer']['requested_fact_id'] == 'fact_1'
+            assert consumer['requested_answer']['requested_fact_id'] in {'fact_1', 'fact_2'}
             assert any(parameter.get('entity_target', {}).get('entity_kind') == 'areas'
                        for table in consumer['views'].values() for parameter in table['request_parameters'])
             assert any(table.get('read_id') == 'stores' for table in prompt.tables.values())
@@ -264,23 +284,25 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
             assert {desc['value'] for desc in prompt.parameters.values() if desc.get('kind')=='catalog_choice'}=={'false','true'}
             result=parse({'query':f'SELECT id FROM "{view}" WHERE is_primary=${choice}','mode':'rows',
                 'columns':[{'name':'id','value_type':key_type}],
-                'outputs':[{'kind':'identity','authority':view+':key:0','components':{'id':'id'},'label':'area','display_column':None}],
+                'outputs':[{'kind':'identity','authority':'areas/primary(id)','components':{'id':'id'},'label':'area','display_column':None}],
                 'ordering':[],'request_arguments':[],
                 'interpretations':[],'reference_binding':{'kind':'description','basis':'The primary flag defines the configured primary area.'}})
         elif purpose.value=='source_realization':
             view=next(name for name,table in prompt.tables.items() if table.get('read_id')=='stores')
-            result=parse(payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
-                request_arguments=[{'view':view,'parameter_ref':prompt.tables[view]['request_parameters'][0]['param_ref'],'binding':'r1_1'}]))
+            result=parse(payload(query='SELECT COUNT(*) AS total FROM selected_items',
+                request_arguments=[{'view':view,'instance':'selected_items','parameter_ref':prompt.tables[view]['request_parameters'][0]['param_ref'],'binding':next(name for name, desc in prompt.parameters.items() if desc.get('kind') == 'reference_argument' and desc['identity']['entity_kind'] == 'areas')}]))
         else:raise AssertionError(purpose)
         return SimpleNamespace(result=result)
     monkeypatch.setattr(compilation,'_turn',turn)
     monkeypatch.setattr(compilation,'_read_eligibility_turn',lambda eligibility_request,**kwargs:SemanticReadEligibilityResult(
-        tuple(ReadRequirementAssessment('fact_1',source.read_id,(source.id,),source.read_id,
+        tuple(ReadRequirementAssessment(fact_id,source.read_id,(source.id,),source.read_id,
             tuple(f.field_ref for f in source.fields),'Rows provide the requested store population.',SemanticReadDecision.RETAIN)
+            for fact_id in (('fact_1','fact_2') if two_facts else ('fact_1',))
             for source in eligibility_request.source_catalog.sources),()))
     class Port:
         def __init__(self,primary):self.primary=primary;self.calls=[]
         def read(self,*,endpoint_name,args):
+            assert endpoint_name in {'areas', 'stores'}
             self.calls.append((endpoint_name,args))
             rows=([{'id':key_value(i),'is_primary':i in self.primary} for i in (1,2)] if endpoint_name=='areas'
                   else [{'id':i} for i in range(next(i for i in (1,2) if str(key_value(i)) == str(args['area_id'])))])
@@ -301,7 +323,7 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
         if len(primary)==1:
             expected=next(iter(primary))
             assert result.issue is None
-            assert next(iter(result.fact_result.outcome.projected_rows[0].values.values()))==expected
+            assert [next(iter(row.values.values())) for row in result.fact_result.outcome.projected_rows]==[expected]*(2 if two_facts else 1)
             assert port.calls==[('areas',{}),('stores',{'area_id':key_value(expected)})]
         else:
             assert result.issue.reference.input_ref=='i1'
@@ -326,7 +348,7 @@ def test_selection_controls_do_not_become_sql_predicates_and_can_be_rebound(monk
             assert not any(item.get('input_ref')==prompt.meaning.selection_limit_input_ref for item in prompt.parameters.values())
             view=next(iter(prompt.tables))
             result=parse(payload(query=f'SELECT id FROM "{view}"',mode='rows',columns=[{'name':'id','value_type':'integer'}],
-                outputs=[{'kind':'identity','authority':view+':key:0','components':{'id':'id'},'label':'store','display_column':None}],
+                outputs=[{'kind':'identity','authority':'stores/primary(id)','components':{'id':'id'},'label':'store','display_column':None}],
                 ordering=[{'column':'id','descending':False}]))
         else:raise AssertionError(purpose)
         return SimpleNamespace(result=result)
@@ -438,3 +460,70 @@ def test_normal_compilation_inspects_and_assesses_later_recalled_reads(monkeypat
     assert observed == ['a', 'b']
     assert assessed_reads == ['a', 'b']
     assert set(authored_reads) == ({'a', 'b'} if first_retained else {'b'})
+
+
+@pytest.mark.parametrize('persisted_mutation', [False, True])
+@pytest.mark.parametrize(('identifier', 'address_type'), [
+    ('00000000-0000-0000-0000-000000000001', 'uuid'), ('42', 'integer'), ('12.5', 'number')])
+def test_literal_resource_address_does_not_require_an_invented_identity_namespace(monkeypatch, persisted_mutation, identifier, address_type):
+    from fervis.lookup.relation_catalog import CatalogParam, ParamSource
+    from fervis.lookup.query_enrichment.semantic import InputResourceSearchTerms
+    read = replace(_read('entries', params=(CatalogParam('channel_id', 'channel_id', ParamSource.PATH,
+        address_type, required=True),)), resource_names=('entries',))
+    catalog = RelationCatalog(reads=(read,))
+    question = f'How many entries belong to channel {identifier}?'
+    stages = []
+    def turn(purpose, *, prompt, parse, **kwargs):
+        stages.append(purpose.value)
+        if purpose.value == 'question_contract':
+            return SimpleNamespace(result=parse(_frame_payload(supplied_values=[{
+                'meaning':'the specified channel', 'denotation_basis':'The question supplies its literal identifier.',
+                'entity_reference':{'instance_kind':'channel','value':{'operands':[identifier],'origin':{'kind':'question'}}}}])))
+        if purpose.value == 'query_enrichment':
+            return SimpleNamespace(result=SemanticQueryEnrichmentResult(tuple(
+                RecallBucketMatch(bucket.bucket_ref, ('entries',), ('entries',)) for bucket in prompt.request.recall_buckets),
+                tuple(InputResourceSearchTerms(task.input_use_ref, ('entries',)) for task in prompt.request.reference_tasks)))
+        assert purpose.value == 'source_realization'
+        view = next(name for name, table in prompt.tables.items() if table.get('read_id') == 'entries')
+        symbol = next(name for name, description in prompt.parameters.items() if description.get('kind') == 'reference_literal')
+        return SimpleNamespace(result=parse(payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
+            request_arguments=[{'view':view,'parameter_ref':'channel_id','binding':symbol}])))
+    monkeypatch.setattr(compilation, '_turn', turn)
+    monkeypatch.setattr(compilation, '_read_eligibility_turn', lambda eligibility_request, **kwargs: SemanticReadEligibilityResult(
+        tuple(ReadRequirementAssessment('fact_1',source.read_id,(source.id,),source.read_id,
+            tuple(field.field_ref for field in source.fields),'Each returned row is one entry.',SemanticReadDecision.RETAIN)
+            for source in eligibility_request.source_catalog.sources), ()))
+    calls = []
+    class Port:
+        def read(self, *, endpoint_name, args):
+            calls.append(endpoint_name)
+            assert endpoint_name == 'entries' and str(args['channel_id']) == identifier
+            return {'responseStatus':200,'responseBody':[{'id':1},{'id':2}]}
+    request = compilation.SemanticCompilationRequest('opaque-address', question, QuestionContractRequest(
+        current_question=question, conversation_context={}), catalog, (), Port(), None, 'openai', 1, 10,
+        None, {}, HostPromptContext())
+    result = compilation.compile_semantic_question(request)
+    assert stages == ['question_contract', 'query_enrichment', 'source_realization']
+    program = decode_answer_program(canonical_answer_program_json(result.compilation.answer_program))
+    if persisted_mutation:
+        from fervis.lookup.answer_program.operations import SqlNamedInput
+        from fervis.lookup.answer_program.values import ParameterRef
+        from fervis.lookup.contract_codec import canonical_contract_fingerprint
+        from fervis.lookup.relational_sql.execution import QueryValidationError
+        operation = next(item for item in program.operations if isinstance(item.spec, SqlQuerySpec))
+        modified = replace(operation, spec=replace(operation.spec, query=operation.spec.query+' WHERE $raw IS NULL',
+            parameters=(SqlNamedInput('raw', ParameterRef(program.parameters[0].id)),)))
+        program = replace(program, operations=tuple(modified if item.id == operation.id else item for item in program.operations),
+            fact_template=tuple(replace(fact, operations=tuple(
+                replace(pin, fingerprint=canonical_contract_fingerprint(modified)) if pin.operation_id == modified.id else pin
+                for pin in fact.operations)) for fact in program.fact_template))
+        program = decode_answer_program(canonical_answer_program_json(program))
+        with pytest.raises(QueryValidationError, match='Reference literals'):
+            invoke_answer_program(program=program, bindings=result.compilation.initial_bindings,
+                environment=ExecutionEnvironment(catalog=catalog), ports=RuntimePorts(Port(), LookupMemory()))
+        assert calls == []
+        return
+    executed = invoke_answer_program(program=program, bindings=result.compilation.initial_bindings,
+        environment=ExecutionEnvironment(catalog=catalog), ports=RuntimePorts(Port(), LookupMemory()))
+    assert executed.issue is None
+    assert next(iter(executed.fact_result.outcome.projected_rows[0].values.values())) == 2
