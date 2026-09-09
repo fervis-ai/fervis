@@ -237,10 +237,11 @@ def test_native_multi_answer_preserves_per_request_operand_ownership(monkeypatch
     assert [next(iter(row.values.values())) for row in executed.fact_result.outcome.projected_rows]==[1 if independent else 2,4 if case in {'shared_category','shared_mixed','source_population'} else 5]
 
 
+@pytest.mark.parametrize('dependency_failures', [0, 1, 2])
 @pytest.mark.parametrize('key_type', ['integer', 'uuid'])
 @pytest.mark.parametrize('two_facts', [False, True])
 @pytest.mark.parametrize('opaque_consumer', [False, True])
-def test_normal_reference_compilation_replays_guard_before_required_rest_read(monkeypatch, key_type, two_facts, opaque_consumer):
+def test_normal_reference_compilation_replays_guard_before_required_rest_read(monkeypatch, key_type, two_facts, opaque_consumer, dependency_failures):
     from uuid import UUID
     def key_value(number):
         return str(UUID(int=number)) if key_type == 'uuid' else number
@@ -257,6 +258,8 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
     sources=build_api_row_source_catalog(catalog)
     monkeypatch.setattr(compilation,'_discover_read_access',lambda *args,**kwargs:ReadAccessCatalog(sources.sources))
     seen = []
+    factual_prompts = []
+    reference_attempts = []
     def turn(purpose,*,prompt,parse,**kwargs):
         seen.append(purpose.value)
         if purpose.value=='question_contract':
@@ -273,6 +276,9 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
                 for bucket in prompt.request.recall_buckets),
                 tuple(InputResourceSearchTerms(task.input_use_ref,('areas',)) for task in prompt.request.reference_tasks))
         elif purpose.value=='grounding':
+            reference_attempts.append(prompt)
+            if len(reference_attempts) <= dependency_failures:
+                return SimpleNamespace(result=parse({'unavailable':True,'reason':'The selected reference route is unavailable.'}))
             assert 'source_realization' in seen
             assert prompt.expected_key['entity_kind'] == 'areas'
             assert {authority['entity_kind'] for authority in prompt.output_identity_authorities().values()} == {'areas'}
@@ -297,6 +303,7 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
                 'ordering':[],'api_bindings':[],
                 'interpretations':[],'reference_binding':{'kind':'description','basis':'The primary flag defines the configured primary area.'}}))
         elif purpose.value=='source_realization':
+            factual_prompts.append(prompt)
             view=next(name for name,table in prompt.tables.items() if table.get('read_id')=='stores')
             assert set(prompt.reference_inputs) == {'i1'}
             assert not any(table.get('kind') == 'reference_slot' for table in prompt.tables.values())
@@ -328,6 +335,15 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
     request=compilation.SemanticCompilationRequest('reference-test',question,QuestionContractRequest(
         current_question=question,conversation_context={}),catalog,(),port,None,'openai',1,10,None,{},HostPromptContext())
     compiled=compilation.compile_semantic_question(request)
+    if dependency_failures:
+        assert len(factual_prompts) >= 2
+        assert factual_prompts[1].failed_reference_plans[0]['reason']=='The selected reference route is unavailable.'
+        assert factual_prompts[1].failed_reference_plans[0]['reference_demands']==[{'input_ref':'i1','authority':'areas/primary(id)'}]
+    if dependency_failures == 2:
+        assert isinstance(compiled,compilation.SemanticCompilationImpossible)
+        assert len(reference_attempts)==2
+        assert port.calls==[]
+        return
     assert isinstance(compiled,compilation.SemanticCompilationSuccess)
     assert port.calls==[]
     persisted=decode_answer_program(canonical_answer_program_json(compiled.compilation.answer_program))

@@ -23,9 +23,10 @@ class AuthoredFactualQuery:
 
 
 class FactualQueryPrompt(QueryAnswerPrompt):
-    def __init__(self, *, inputs, denotations, reference_tables, **kwargs):
+    def __init__(self, *, inputs, denotations, reference_tables, failed_reference_plans=(), **kwargs):
         super().__init__(**kwargs)
         self.inputs, self.denotations, self.reference_tables = inputs, denotations, reference_tables
+        self.failed_reference_plans = tuple(failed_reference_plans)
         self.reference_inputs = {
             ref: {'relation': ref,
                   'supplied_reference': inputs[ref].operand,
@@ -43,10 +44,14 @@ class FactualQueryPrompt(QueryAnswerPrompt):
         return {**identity_authorities(self.reference_tables), **super().output_identity_authorities()}
 
     def data_sections(self, builder):
-        return (*super().data_sections(builder), *((builder.json_section('Supplied entity references:', self.reference_inputs, indent=None),) if self.reference_inputs else ()))
+        return (*super().data_sections(builder), *((builder.json_section('Supplied entity references:', self.reference_inputs, indent=None),) if self.reference_inputs else ()),
+                *((builder.json_section('Unavailable reference plans:', self.failed_reference_plans, indent=None),) if self.failed_reference_plans else ()))
 
     def instruction_sections(self, builder):
-        return (*super().instruction_sections(builder), *((builder.instruction_block('Reference demands', (
+        return (*super().instruction_sections(builder),
+                *((builder.instruction_block('Reconsider the source plan', (
+                    'The prior source plan requires a reference query that the available contracts could not support. Reconsider its reference authority and API strategy while preserving the requested meaning. The dependency failure does not establish that the whole question is impossible. Use another supported strategy, or report unavailable if none preserves the question.',
+                )),) if self.failed_reference_plans else ()), *((builder.instruction_block('Reference demands', (
             'Declare one reference_demands entry per supplied entity reference. Choose its logical identity authority explicitly; this is a semantic decision, not a SQL source selection.',
             'For a resolved reference, use its stable relation from Supplied entity references as a SQL table. Its columns are the component IDs of the selected identity authority. The compiler resolves and guards that relation before executing the answer. Keep it as the population when references with no matching observations must be returned.',
             'Bind a resolved reference into REST with {reference_input: input_ref}. A declared identity target fixes its component. For an opaque parameter, also supply component_id (or null when exactly one component is type-compatible); this is your explicit semantic mapping according to the API documentation and does not create a destination identity relationship. Do not invent reference argument symbols.',
