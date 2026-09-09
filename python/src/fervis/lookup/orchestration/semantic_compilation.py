@@ -685,7 +685,10 @@ def compile_semantic_question(request, *, on_turn=None):
             source_refs={view.row_source_id for view in views})
         planned_references=plan_fact_references(fact=fact,inputs=inputs,
             denotations={item.input_ref:item for item in meaning.input_denotations},values=local_values,
-            catalog=request.full_catalog,reference_catalog=resolver_catalog,access=access,question=request.question,
+            catalog=request.full_catalog,reference_catalog=resolver_catalog,
+            consumer_catalog=RelationCatalog(reads=tuple(read for read in request.full_catalog.reads
+                if read.id in {view_catalog.tables[view.name]['read_id'] for view in eligible_views})),
+            access=access,question=request.question,
             responses=request.clarification_responses,turn=turn,discover_access=discover_access,timezone=timezone)
         if isinstance(planned_references,QueryUnavailable):
             return SemanticCompilationImpossible(question_contract=intent,canonical_values=canonical,

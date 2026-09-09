@@ -36,7 +36,8 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
     turn_name = "reference query"
     turn_task = "identify the entity denoted by the assigned reference"
 
-    def __init__(self, *, question, meaning, tables, parameters):
+    def __init__(self, *, question, meaning, tables, parameters, consumer_context=None):
+        self.consumer_context = consumer_context
         super().__init__(question=question, meaning=meaning, tables=tables, timezone=meaning.timezone,
             parameters={name:{**{key:value for key,value in description.items() if key != 'may_interpret'},
                               **({'kind':'definition' if meaning.reference_kind == 'description' else 'input'} if description.get('input_ref') else {})}
@@ -69,7 +70,20 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
         return schema
 
     def _input_usage_instruction(self):
-        return "For a literal reference, project complete candidate keys and match_column from a declared view. Do not author WHERE, joins, grouping, ordering, auxiliary queries, or truncation; Fervis owns selection. UNION of candidate projections is allowed. The match_column is: a returned observed name or code field, or a null-preserving concatenation of observed fields with punctuation or whitespace separators. Never invent missing names with constants or fallback branches. Fervis applies equality between that column and the exact supplied input before checking identity uniqueness. Request arguments can narrow the read but do not replace this observed match. A description is a fixed query definition, not a runtime value. Definition inputs cannot be used as SQL parameters or REST argument bindings. Use catalog value symbols explicitly when required by the query. Leave interpretations empty."
+        if self.meaning.reference_kind == 'description':
+            return ("Implement the complete description with SQL predicates, relationships, or extrema over observed API fields. "
+                    "The query must select the described role or relationship; merely projecting role fields or returning all entities does not resolve it. "
+                    "Fervis checks uniqueness but does not add the description's missing predicates or joins. Preserve extrema ties. "
+                    "Description inputs are fixed definitions, not SQL placeholders or REST argument values. Use catalog value symbols where needed.")
+        return ("Project candidate keys and an observed match_column for the supplied literal. Do not author WHERE, joins, grouping, ordering, "
+                "auxiliary queries, or truncation; UNION of candidate projections is allowed. The match_column must be an observed name/code "
+                "field or null-preserving concatenation of observed fields with punctuation or whitespace separators. Never invent missing values. "
+                "Fervis adds equality to the original input and then checks identity uniqueness. The original literal may bind a declared lookup "
+                "parameter to retrieve candidates; the returned observed match is still required.")
+
+    def data_sections(self, builder):
+        return (*super().data_sections(builder), *((builder.json_section('Consuming answer and API identity contracts:',
+            self.consumer_context, indent=2),) if self.consumer_context is not None else ()))
 
     def _interpretation_schema(self):
         return {'type':'array','maxItems':0,'items':{'type':'object','properties':{},'required':[],'additionalProperties':False}}
@@ -85,6 +99,7 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
             *self.sql_surface_instructions(),
             "Resolve only reference_text from Compilation scope. Other collection members and the surrounding factual answer belong to separate queries.",
             "Copy Requested answer.reference_kind into reference_binding. The frame has already fixed whether this is a literal name/code or a descriptive role; do not reinterpret that choice.",
+            "Use the consuming answer and API identity contracts to disambiguate the API domain of the reference. The question's instance-kind wording is not an API namespace. Do not transfer the factual answer's filters or measures into reference resolution.",
             self._input_usage_instruction(),
             "Use one declared key or entity-reference authority. Project all its components unchanged from that authority's view and map their SQL aliases in outputs. Matching column names or UUID types do not make different identity domains interchangeable; use declared relationships when necessary.",
             "Declare every selected SQL alias and its scalar type in columns. For a literal, match_column must name a selected alias, not an unselected source field. Return exactly one identity output, mode rows, ordering empty, interpretations empty.",

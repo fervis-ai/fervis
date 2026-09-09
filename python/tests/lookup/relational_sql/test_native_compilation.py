@@ -254,7 +254,12 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
                 for bucket in prompt.request.recall_buckets),
                 tuple(InputResourceSearchTerms(task.input_use_ref,('areas',)) for task in prompt.request.reference_tasks))
         elif purpose.value=='grounding':
-            view=next(iter(prompt.tables))
+            consumer = prompt.consumer_context
+            assert consumer['requested_answer']['requested_fact_id'] == 'fact_1'
+            assert any(parameter.get('entity_target', {}).get('entity_kind') == 'areas'
+                       for table in consumer['views'].values() for parameter in table['request_parameters'])
+            assert any(table.get('read_id') == 'stores' for table in prompt.tables.values())
+            view=next(name for name, table in prompt.tables.items() if table.get('read_id') == 'areas')
             choice=next(name for name,desc in prompt.parameters.items() if desc.get('kind')=='catalog_choice' and desc['value']=='true')
             assert {desc['value'] for desc in prompt.parameters.values() if desc.get('kind')=='catalog_choice'}=={'false','true'}
             result=parse({'query':f'SELECT id FROM "{view}" WHERE is_primary=${choice}','mode':'rows',

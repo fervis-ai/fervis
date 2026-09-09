@@ -104,4 +104,3 @@ def test_selected_dependent_read_discovers_complete_parent_traversal(monkeypatch
     child = next(source for source in build_api_row_source_catalog(catalog).sources if source.read_id == "instruments")
     assert len(calls) == 1
     assert access.can_enumerate(child)
-

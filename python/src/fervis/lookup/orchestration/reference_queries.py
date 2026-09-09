@@ -1,5 +1,5 @@
 """Compile fact-owned reference inputs into live, guarded query relations."""
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 from fervis.lookup.answer_program.model import RelationProgram
 from fervis.lookup.answer_program.values import BindingSet, FactValue
@@ -37,9 +37,17 @@ def reference_input_values(partitions, *, inputs):
 
 
 def plan_fact_references(*, fact, inputs, denotations, values, catalog, access,
-                         question, responses, turn, reference_catalog=None, discover_access=None, timezone="UTC"):
+                         question, responses, turn, reference_catalog=None, consumer_catalog=None, discover_access=None, timezone="UTC"):
     query_catalog = catalog if reference_catalog is None else reference_catalog
+    if consumer_catalog is not None:
+        from fervis.lookup.relation_catalog import RelationCatalog
+        reads = {read.id: read for read in (*query_catalog.reads, *consumer_catalog.reads)}
+        query_catalog = RelationCatalog(reads=tuple(reads.values()))
     views = build_query_view_catalog(query_catalog, access=access)
+    consumer_ids = {read.id for read in consumer_catalog.reads} if consumer_catalog is not None else set()
+    consumer_context = {'requested_answer': asdict(fact), 'views': {
+        name: {key: table[key] for key in ('path', 'description', 'request_parameters', 'candidate_keys', 'entity_references') if key in table}
+        for name, table in views.tables.items() if table.get('read_id') in consumer_ids}}
     sources = snapshot_source_catalog(build_api_row_source_catalog(query_catalog).sources, read_access=access)
     results = []
     for value in values:
@@ -71,7 +79,7 @@ def plan_fact_references(*, fact, inputs, denotations, values, catalog, access,
                 reference_is_collection_member=collection, timezone=timezone,
                 reference_kind="description" if (operand or term.operand) in denotation.reference_descriptions else "literal")
             prompt = ReferenceQueryPrompt(question=question, meaning=meaning,
-                                          tables=views.tables, parameters=member_menu.descriptions)
+                                          tables=views.tables, parameters=member_menu.descriptions, consumer_context=consumer_context)
             authored = turn(ModelTurnPurpose.GROUNDING, prompt,
                             lambda payload:parse_reference_query(payload, prompt=prompt, menu=member_menu))
             if isinstance(authored, QueryUnavailable):
