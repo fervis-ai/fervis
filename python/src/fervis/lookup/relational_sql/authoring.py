@@ -224,7 +224,7 @@ def parse_query_answer(
             ("value",)
             if mode == "existence"
             else tuple(
-                "identity" if output.identity is not None else "value"
+                "identity" if output.identity is not None or output.record_fields else "value"
                 for output in outputs
             )
         )
@@ -513,12 +513,12 @@ class QueryAnswerPrompt(TurnPromptBase):
                     "An aggregate can be computed from a complete row view. Missing inputs for a summary endpoint do not make the question unavailable when another declared view can supply the observations. Required parent traversal remains the compiler's responsibility.",
                     "Temporal parameter metadata declares the boundary convention and scalar type. Inclusive calendar end dates include that whole date; do not treat an inclusive end as the first excluded date.",
                     self._input_usage_instruction(),
-                    "Declare every returned SQL alias and its scalar type in columns. Separately declare exactly the requested public outputs. A value output selects one column. An identity output selects a declared candidate-key or entity-reference authority and maps all its key components to unchanged SQL key-column aliases. Keep grouping and ties based on identity and the requested ranking keys, not display labels. Unrequested ordering columns stay out of outputs.",
+                    "Declare every returned SQL alias and its scalar type in columns. Separately declare exactly the requested public outputs. A value output selects one column. An identity output selects a declared candidate-key or entity-reference authority and maps all its key components to unchanged SQL key-column aliases. When an entity answer has no appropriate declared key authority, use a record output mapping descriptive and identifier fields to observed SQL columns. Do not include unrequested aggregate values or ordering scores inside a record. Those remain hidden SQL columns. This returns ordinary record data without certifying a nominal identity. Prefer a canonical identity when its authority is declared. Keep distinct records and ties; a display name is not a uniqueness key. Keep grouping and ties based on identity and the requested ranking keys, not display labels. Unrequested ordering columns stay out of outputs.",
                     self._identity_display_instruction(),
                     "For a yes/no existence question use mode existence and return witness rows. Fervis determines true or false even when no witness exists. Do not count the whole population or return a Boolean in this mode.",
                     "For a scalar question use mode scalar and return exactly one public value and one row, including a directly observed property. An aggregate is required only when the question requests one.",
                     "For row or grouped answers use mode rows. Return all candidates, including ordering columns. Declare only the ordering keys requested in the question; do not add name or identifier tie breakers. Fervis owns ordering, first rank, top-N with boundary ties and ordinal selection. Do not LIMIT or OFFSET the SQL query.",
-                    "Use EXISTS and NOT EXISTS for presence and absence; preserve shared-row correlation. Aggregate independent child measures before joining them to avoid fanout. DISTINCT on a measure is not a substitute for preserving observation identity.",
+                    "Use EXISTS and NOT EXISTS for presence and absence; preserve shared-row correlation. Aggregate independent child measures before joining them to avoid fanout. When ranking candidate entities by related-row counts, retain candidates with zero observations. Start from the candidate population and left join child counts unless the question restricts candidates to those with observations. DISTINCT on a measure is not a substitute for preserving observation identity.",
                     "No observations may imply a zero count, but a missing measured value is NULL unless the question or documented measure defines zero. Do not invent observations.",
                     "Return one submit_query_answer tool call, or report_query_unavailable when the available source contracts cannot support the requested fact. Do not substitute another measure, source population or question.",
                 ),
@@ -568,7 +568,7 @@ class QueryAnswerPrompt(TurnPromptBase):
         return schema
 
     def _input_usage_instruction(self):
-        return "Consume every supplied input assigned in Requested answer.input_refs. Catalog choices are optional unless needed for this request. For a lexical category whose API representation is a documented catalog choice, add an interpretations entry connecting the original input symbol to that choice, with its contract basis. The interpreted input symbol resolves to that choice in SQL and request arguments; explicit choice symbols are also valid. This fixes that interpretation for this compiled program. If a documented API population already implements a lexical category, declare that input and its semantic contract basis in the owning api_invocations.population_bindings. This fixes the category to that source population without inventing a field predicate. Use this only when the API contract itself restricts every returned row to that category; a resource label or an available filtering parameter does not establish that restriction. Other requested conditions still require their own predicates or arguments. Inputs supplied in the parameter menu remain direct parameter references unless explicitly interpreted; inputs supplied as resolved_reference views are consumed through those relations."
+        return "Consume every supplied input assigned in Requested answer.input_refs. When the documented API population already satisfies a supplied category, population_bindings must still record its input symbol and contract basis, even though SQL needs no category predicate. Merely reading that API does not account for the supplied input in the compiled program. Catalog choices are optional unless needed for this request. For a lexical category whose API representation is a documented catalog choice, add an interpretations entry connecting the original input symbol to that choice, with its contract basis. The interpreted input symbol resolves to that choice in SQL and request arguments; explicit choice symbols are also valid. This fixes that interpretation for this compiled program. If a documented API population already implements a lexical category, declare that input and its semantic contract basis in the owning api_invocations.population_bindings. This fixes the category to that source population without inventing a field predicate. Use this only when the API contract itself restricts every returned row to that category; a resource label or an available filtering parameter does not establish that restriction. Other requested conditions still require their own predicates or arguments. Inputs supplied in the parameter menu remain direct parameter references unless explicitly interpreted; inputs supplied as resolved_reference views are consumed through those relations."
 
     def _identity_display_schema(self):
         return {"type": ["string", "null"]}
@@ -604,6 +604,10 @@ class QueryAnswerPrompt(TurnPromptBase):
             if "value" in roles
             else []
         )
+        if 'identity' in roles and self.allow_record_outputs():
+            variants.append(_object({'kind':{'type':'string','enum':['record']},
+                'label':{'type':'string'}, 'fields':{**_array(_object({'name':{'type':'string','minLength':1},
+                    'column':{'type':'string','minLength':1}})), 'minItems':1}}))
         for ref, authority in (
             self.output_identity_authorities().items() if "identity" in roles else ()
         ):
@@ -634,6 +638,9 @@ class QueryAnswerPrompt(TurnPromptBase):
                 maxItems=len(self.meaning.output_origins),
             )
         return schema
+
+    def allow_record_outputs(self):
+        return True
 
     def _result_modes(self):
         if self.meaning is None:

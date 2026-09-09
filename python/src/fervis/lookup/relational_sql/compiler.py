@@ -119,16 +119,16 @@ def compile_query_answer(*, question: str, query: str, views: tuple[ApiView, ...
     if public_outputs is not None and result_contract.mode!='existence':
         projections=tuple(RelationResultOutput(identifier(f'result_{index}'),result_relation,
             field_id=output.column,entity_key=output.identity,label=output.label,role='answer_value',
-            display_field_id=output.display_column)
+            display_field_id=output.display_column, record_fields=output.record_fields)
             for index,output in enumerate(public_outputs,start=1))
     origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,question)
     if output_origins is not None and len(output_origins)!=len(projections):
         raise QueryValidationError('Compiled output inventory differs from the requested meanings')
-    if any(projection.entity_key is None and projection.field_id not in final_types for projection in projections):
+    if any(field not in final_types for projection in projections for field in projection.field_ids):
         raise QueryValidationError('Result projection references an undeclared query column')
     outputs=tuple(QueryRequestedOutput.from_projection(f'r{index}',
         output_origins[index-1] if output_origins is not None else SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,projection.label or projection.field_id or 'identity'),
-        projection,'identity' if projection.entity_key is not None else final_types[projection.field_id])
+        projection,'identity' if projection.entity_key is not None else 'object' if projection.record_fields else final_types[projection.field_id])
         for index,projection in enumerate(projections,start=1))
     program=AnswerProgram(parameters=parameters,relations=physical.relations,operations=tuple(operations),
         result_projection=ResultProjection(relation_outputs=projections),

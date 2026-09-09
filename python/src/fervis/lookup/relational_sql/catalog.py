@@ -24,8 +24,11 @@ def build_query_view_catalog(catalog: RelationCatalog, *, access: ReadAccessCata
                        and field.type.value not in {'array', 'list', 'json', 'object', 'any', 'unknown'})
         columns: dict[str, str] = {}
         definitions = {}
+        prefix = source.row_path + '.' if source.row_path else ''
+        fields = tuple(sorted(fields, key=lambda field: bool(prefix) and not field.path.startswith(prefix)))
         for field in fields:
-            stem = re.sub(r'[^a-zA-Z0-9_]', '_', field.path or field.label or field.id).strip('_') or 'value'
+            local_path = field.path.removeprefix(prefix) if prefix else field.path
+            stem = re.sub(r'[^a-zA-Z0-9_]', '_', local_path or field.label or field.id).strip('_').lower() or 'value'
             if stem[0].isdigit():
                 stem = 'column_' + stem
             name = stem
@@ -35,7 +38,7 @@ def build_query_view_catalog(catalog: RelationCatalog, *, access: ReadAccessCata
                 suffix += 1
             columns[name] = field.id
             definitions[name] = {'type': sql_value_type(field.type.value), 'description': field.description,
-                                 'label': field.label, 'nullable': field.nullable,
+                                 'label': field.label, 'source_path': field.path, 'nullable': field.nullable,
                                  'choices': list(field.choices),
                                  'request_parameter_ref': field.request_parameter_ref}
         aliases = {field_id: name for name,field_id in columns.items()}

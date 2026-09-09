@@ -23,6 +23,12 @@ def verify_entity_display_type(display_field_id: str, field_types: Mapping[str, 
         raise ResultProjectionError("entity display field must be textual")
 
 
+def verify_record_fields(fields: Mapping[str, str]) -> None:
+    if not fields or any(not isinstance(name,str) or not name.strip() or not isinstance(column,str) or not column.strip()
+                         for name,column in fields.items()):
+        raise ResultProjectionError('record projection requires nonempty field names and columns')
+
+
 @dataclass(frozen=True)
 class ProjectedResultRow:
     relation_id: str
@@ -90,14 +96,28 @@ class RelationResultOutput:
     label: str = ""
     role: str = ""
     display_field_id: str = ""
+    record_fields: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.display_field_id and self.entity_key is None:
             raise ResultProjectionError("display fields require an entity output")
-        if bool(self.field_id) == bool(self.entity_key):
+        if sum((bool(self.field_id), self.entity_key is not None, bool(self.record_fields))) != 1:
             raise ResultProjectionError(
-                "relation result output requires exactly one field or entity key"
+                "relation result output requires exactly one field, entity key or record"
             )
+
+        if self.record_fields:
+            verify_record_fields(self.record_fields)
+
+    @property
+    def value_field_ids(self) -> tuple[str, ...]:
+        if self.entity_key is not None:
+            return tuple(component.field_id for component in self.entity_key.components)
+        return tuple(self.record_fields.values()) if self.record_fields else (self.field_id,)
+
+    @property
+    def field_ids(self) -> tuple[str, ...]:
+        return (*self.value_field_ids, *((self.display_field_id,) if self.display_field_id else ()))
 
     @property
     def source_node_id(self) -> str:
@@ -106,6 +126,10 @@ class RelationResultOutput:
     def project(self, row: Mapping[str, RuntimeValue]) -> ResultValue:
         if self.entity_key is not None:
             return self.entity_key.project(row)
+        if self.record_fields:
+            if any(column not in row for column in self.record_fields.values()):
+                raise ResultProjectionError('record result field is unavailable')
+            return {name:row[column] for name,column in self.record_fields.items()}
         if self.field_id not in row:
             raise ResultProjectionError("result field is unavailable")
         return row[self.field_id]

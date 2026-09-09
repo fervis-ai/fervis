@@ -111,7 +111,7 @@ def test_sql_view_names_expose_declared_read_and_row_path_without_merging_source
         table = catalog.tables[view.name]
         assert "list_report" in view.name
         assert "__" + table["row_path"] + "__" in view.name
-        assert set(view.columns) == ({"data_count"} if table["row_path"] == "data" else {"summary_total"})
+        assert set(view.columns) == ({"count"} if table["row_path"] == "data" else {"total"})
     reordered = build_query_view_catalog(RelationCatalog(reads=tuple(reversed(reads))))
     assert {v.row_source_id:v.name for v in reordered.views} == {v.row_source_id:v.name for v in catalog.views}
 
@@ -126,12 +126,30 @@ def test_mixed_case_api_metadata_compiles_and_executes_with_canonical_sql_names(
         fields=(CatalogField('id','integer',path='Data.ID',row_path_id='data'),)),))
     views = build_query_view_catalog(catalog)
     name = views.views[0].name
-    compiled = compile_query_answer(question='How many items?',query=f'SELECT COUNT(*) AS total FROM "{name}"',
-        views=views.views,catalog=catalog,output_types={'total':'integer'},result_contract=ResultContract('scalar'))
+    compiled = compile_query_answer(question='How many items?',query=f'SELECT id AS total FROM "{name}"',
+        views=views.views,catalog=catalog,output_types={'total':'integer'},result_contract=ResultContract('rows',('total',)))
     class Port:
         def read(self, **kwargs):
             return {'responseStatus':200,'responseBody':{'Data':[{'ID':1},{'ID':2}]}}
     result = invoke_answer_program(program=compiled.program,bindings=compiled.bindings,
         environment=ExecutionEnvironment(catalog=catalog),ports=RuntimePorts(Port(),LookupMemory()))
     assert result.issue is None
-    assert next(iter(result.fact_result.outcome.projected_rows[0].values.values())) == 2
+    assert [next(iter(row.values.values())) for row in result.fact_result.outcome.projected_rows] == [1,2]
+
+
+def test_row_view_columns_use_relative_paths_and_preserve_physical_field_bindings():
+    from fervis.lookup.relation_catalog import RelationCatalog,CatalogField
+    from fervis.lookup.relation_catalog.model import EndpointRead,RowPath,RowCardinality,CandidateKey,CandidateKeyComponent
+    read=EndpointRead('records','records',row_paths=(RowPath('root','',RowCardinality.ONE),RowPath('entries','entries',RowCardinality.MANY)),
+        fields=(CatalogField('parent_id','integer',path='id',row_path_id='root'),
+                CatalogField('entry_id','integer',path='entries.id',row_path_id='entries'),
+                CatalogField('owner_name','string',path='entries.owner.name',row_path_id='entries')),
+        candidate_keys=(CandidateKey('primary','entry',(CandidateKeyComponent('id','entry_id'),),primary=True),))
+    projected=build_query_view_catalog(RelationCatalog(reads=(read,)))
+    name=next(name for name,table in projected.tables.items() if table['row_path']=='entries')
+    view=next(view for view in projected.views if view.name==name)
+    assert view.columns['id']=='id'
+    assert view.columns['owner_name']=='owner_name'
+    assert projected.tables[name]['candidate_keys'][0]['components']=={'id':'id'}
+    assert projected.tables[name]['columns']['id']['source_path']=='entries.id'
+    assert len(set(view.columns.values()))==len(view.columns)

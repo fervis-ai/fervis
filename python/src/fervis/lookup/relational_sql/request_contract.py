@@ -117,7 +117,7 @@ def verify_query_output(fact, fulfillment, program, relation_contracts):
         raise VerificationError('SQL projection differs from the declared requested output')
     actual_type = projected_query_output_type(projection,program,relation_contracts)
     from fervis.lookup.plan_execution.declared_values import declared_comparison_types_compatible, declared_kind, DeclaredValueKind
-    if requested.value_type == 'identity' or actual_type == 'identity':
+    if requested.value_type in {'identity','object'} or actual_type in {'identity','object'}:
         compatible = requested.value_type == actual_type
     else:
         compatible = (declared_kind(actual_type) is not DeclaredValueKind.RUNTIME
@@ -136,6 +136,8 @@ def projected_query_output_type(projection, program, relation_contracts):
     if isinstance(projection, RelationResultOutput):
         if projection.entity_key is not None:
             return 'identity'
+        if projection.record_fields:
+            return 'object'
         return relation_contracts[projection.relation_id].field_types[projection.field_id]
     scalar_types = {f'parameter:{item.id}':parameter_runtime_type(item.value_type) for item in program.parameters}
     node_types = {}

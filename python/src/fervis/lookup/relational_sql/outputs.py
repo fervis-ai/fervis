@@ -1,8 +1,8 @@
 """Public scalar/identity projection, independent of physical SQL columns."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
-from fervis.lookup.answer_program.result_projection import EntityKeyProjection, EntityKeyProjectionComponent, ResultProjectionError, verify_entity_display_type
+from fervis.lookup.answer_program.result_projection import EntityKeyProjection, EntityKeyProjectionComponent, ResultProjectionError, verify_entity_display_type, verify_record_fields
 from .execution import QueryValidationError
 
 
@@ -12,9 +12,12 @@ class QueryOutput:
     column: str = ''
     identity: EntityKeyProjection | None = None
     display_column: str = ''
+    record_fields: dict[str, str] = field(default_factory=dict)
 
     @property
     def columns(self) -> tuple[str, ...]:
+        if self.record_fields:
+            return tuple(self.record_fields.values())
         return (self.column,) if self.identity is None else (*tuple(item.field_id for item in self.identity.components),
             *((self.display_column,) if self.display_column else ()))
 
@@ -47,6 +50,11 @@ def parse_query_outputs(payload, *, columns: Mapping[str,str], tables, query: st
     for item in payload:
         if item['kind']=='value':
             output=QueryOutput(item['label'],column=item['column'])
+        elif item['kind']=='record':
+            fields={field['name']:field['column'] for field in item['fields']}
+            if len(fields)!=len(item['fields']):
+                raise QueryValidationError('Record output requires unique nonempty field names and columns')
+            output=QueryOutput(item['label'],record_fields=fields)
         elif item['kind']=='identity':
             authority=authorities.get(item['authority'])
             if authority is None or set(item['components'])!=set(authority['components']):
@@ -59,6 +67,8 @@ def parse_query_outputs(payload, *, columns: Mapping[str,str], tables, query: st
         if not set(output.columns)<=set(columns):
             raise QueryValidationError('Public output references an undeclared SQL column')
         try:
+            if item['kind']=='record':
+                verify_record_fields(output.record_fields)
             verify_entity_display_type(output.display_column, columns)
         except ResultProjectionError as exc:
             raise QueryValidationError(str(exc)) from exc

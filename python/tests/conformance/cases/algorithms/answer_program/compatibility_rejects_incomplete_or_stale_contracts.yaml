@@ -18,8 +18,8 @@ input:
           value: {kind: string_set, values: [COMPLETED]}
           provenance: {kind: semantic_choice}
       compatibility: &missing_function
-        schema_revision: 22
-        compiler_version: fervis.answer_program.compiler@37
+        schema_revision: 23
+        compiler_version: fervis.answer_program.compiler@39
         function_semantics:
           - {function_key: answer.materialize, version: '3'}
           - {function_key: fact.materialize, version: '3'}

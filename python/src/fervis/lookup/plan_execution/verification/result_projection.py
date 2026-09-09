@@ -78,7 +78,7 @@ def _result_output_proofs(
         contract = relation_contracts.get(result_output.relation_id)
         if contract is None:
             continue
-        field_ids = _result_output_field_ids(result_output)
+        field_ids = result_output.field_ids
         field_proofs = tuple(
             contract.field_proofs.get(field_id, ProofLineage())
             for field_id in field_ids
@@ -110,7 +110,7 @@ def _verify_result_references(
     result_outputs = tuple(answer.result_projection.relation_outputs)
     for relation_output in result_outputs:
         contract = relation_contracts.get(relation_output.relation_id)
-        field_ids = _result_output_field_ids(relation_output)
+        field_ids = relation_output.field_ids
         if contract is None or any(
             field_id not in contract.fields for field_id in field_ids
         ):
@@ -277,10 +277,3 @@ def _operation_input_refs_for_all(operations: tuple[Operation, ...]) -> tuple[st
             if reference.node_id in output_relation_by_node_id
         )
     return tuple(refs)
-
-
-def _result_output_field_ids(output: RelationResultOutput) -> tuple[str, ...]:
-    if output.entity_key is not None:
-        return (*tuple(component.field_id for component in output.entity_key.components),
-                *((output.display_field_id,) if output.display_field_id else ()))
-    return (output.field_id,)

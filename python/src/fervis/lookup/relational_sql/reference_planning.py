@@ -71,6 +71,9 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
                 if (authority['entity_kind'], authority['key_id'], set(authority['components'])) ==
                 (self.expected_key['entity_kind'], self.expected_key['key_id'], set(self.expected_key['components']))}
 
+    def allow_record_outputs(self):
+        return False
+
     def _result_modes(self):
         return ["rows"]
 
@@ -154,6 +157,8 @@ def parse_reference_query(payload, *, prompt, menu):
     )
     if isinstance(authored, QueryUnavailable):
         return authored
+    if len(authored.outputs) != 1 or authored.outputs[0].identity is None:
+        raise QueryValidationError('Reference resolution requires a canonical identity output')
     expected = getattr(prompt, 'expected_key', None)
     if expected is not None and (len(authored.outputs) != 1 or authored.outputs[0].identity is None or
         (authored.outputs[0].identity.entity_kind, authored.outputs[0].identity.key_id,
