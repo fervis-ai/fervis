@@ -41,7 +41,7 @@ def test_sql_author_does_not_bind_arguments_owned_by_complete_traversal():
     access=ReadAccessCatalog((parent,child),(ReadDependency(child.id,parent.id,
         (AccessArgument('facility_id','facilities.id'),),'Every instrument has a facility.'),))
     projected=build_query_view_catalog(catalog,access=access)
-    table=projected.tables[child.id]
+    table=projected.tables[next(view.name for view in projected.views if view.row_source_id == child.id)]
     assert table['request_parameters']==[]
     assert table['automatic_request_parameters']==['facility_id']
 
@@ -91,3 +91,45 @@ def test_sql_catalog_exposes_actual_uuid_and_decimal_representations():
     payload['query']=f'SELECT CAST(id AS VARCHAR) AS id FROM "{view.name}"'
     with pytest.raises(QueryValidationError,match='preserve key values'):
         parse_query_answer(payload,table_names=set(views.tables),parameter_names=set(),tables=views.tables)
+
+
+def test_sql_view_names_expose_declared_read_and_row_path_without_merging_sources():
+    from dataclasses import replace
+    from fervis.lookup.relation_catalog import RelationCatalog, CatalogField
+    from fervis.lookup.relation_catalog.model import RowPath, RowCardinality
+    from tests.lookup.relational_engine.test_dependent_reads import _read
+    reads = tuple(replace(_read(read_id), candidate_keys=(),
+        row_paths=(RowPath("data", "data", RowCardinality.MANY), RowPath("summary", "summary", RowCardinality.ONE)),
+        fields=(CatalogField("count", "integer", path="data.count", row_path_id="data"),
+                CatalogField("total", "integer", path="summary.total", row_path_id="summary")))
+        for read_id in ("list-report", "LIST_REPORT"))
+    catalog = build_query_view_catalog(RelationCatalog(reads=reads))
+    assert len({view.name.casefold() for view in catalog.views}) == 4
+    for view in catalog.views:
+        table = catalog.tables[view.name]
+        assert "list_report" in view.name
+        assert "__" + table["row_path"] + "__" in view.name
+        assert set(view.columns) == ({"data_count"} if table["row_path"] == "data" else {"summary_total"})
+    reordered = build_query_view_catalog(RelationCatalog(reads=tuple(reversed(reads))))
+    assert {v.row_source_id:v.name for v in reordered.views} == {v.row_source_id:v.name for v in catalog.views}
+
+
+def test_mixed_case_api_metadata_compiles_and_executes_with_canonical_sql_names():
+    from dataclasses import replace
+    from fervis.lookup.relation_catalog import RelationCatalog, CatalogField
+    from fervis.lookup.relation_catalog.model import RowPath, RowCardinality
+    from tests.lookup.relational_engine.test_dependent_reads import _read
+    catalog = RelationCatalog(reads=(replace(_read('listItems'), candidate_keys=(),
+        row_paths=(RowPath('data', 'Data', RowCardinality.MANY),),
+        fields=(CatalogField('id','integer',path='Data.ID',row_path_id='data'),)),))
+    views = build_query_view_catalog(catalog)
+    name = views.views[0].name
+    compiled = compile_query_answer(question='How many items?',query=f'SELECT COUNT(*) AS total FROM "{name}"',
+        views=views.views,catalog=catalog,output_types={'total':'integer'},result_contract=ResultContract('scalar'))
+    class Port:
+        def read(self, **kwargs):
+            return {'responseStatus':200,'responseBody':{'Data':[{'ID':1},{'ID':2}]}}
+    result = invoke_answer_program(program=compiled.program,bindings=compiled.bindings,
+        environment=ExecutionEnvironment(catalog=catalog),ports=RuntimePorts(Port(),LookupMemory()))
+    assert result.issue is None
+    assert next(iter(result.fact_result.outcome.projected_rows[0].values.values())) == 2

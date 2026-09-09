@@ -40,8 +40,11 @@ def build_query_view_catalog(catalog: RelationCatalog, *, access: ReadAccessCata
                                  'request_parameter_ref': field.request_parameter_ref}
         aliases = {field_id: name for name,field_id in columns.items()}
         read = catalog.read(source.read_id)
-        views.append(ApiView(source.id, source.id, columns, {}))
-        tables[source.id] = {
+        read_name = re.sub(r'[^a-zA-Z0-9_]', '_', read.id).strip('_') or 'read'
+        row_name = re.sub(r'[^a-zA-Z0-9_]', '_', source.row_path).strip('_') or 'root'
+        name = f'api_{read_name}__{row_name}__{source.id}'.lower()
+        views.append(ApiView(name, source.id, columns, {}))
+        tables[name] = {
             'read_id': source.read_id, 'path': read.path,
             'description': source.description, 'row_path': source.row_path,
             'columns': definitions,

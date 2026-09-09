@@ -12,7 +12,7 @@ def required_columns(query, columns_by_view):
     return project_query(query, columns_by_view)[1]
 
 
-def project_query(query, columns_by_view):
+def project_query(query, columns_by_view, *, output_columns=None):
     from .execution import QueryValidationError
     names={name.lower():name for name in columns_by_view}
     columns={name:{column.lower():column for column in values} for name,values in columns_by_view.items()}
@@ -28,6 +28,8 @@ def project_query(query, columns_by_view):
         statement=qualify(parsed.copy(),dialect='duckdb',schema=schema)
     except SqlglotError as exc:
         raise QueryValidationError(_column_diagnostic(parsed, columns_by_view, str(exc))) from exc
+    if output_columns is not None:
+        require_output_columns(statement.named_selects, output_columns)
     used={name:set() for name in columns_by_view}
     for scope in traverse_scope(statement):
         for column in scope.columns:
@@ -58,3 +60,10 @@ def _column_diagnostic(statement, columns_by_view, detail):
     return ('SQL query references an undeclared column: ' + detail + '. Declared columns in selected views: '
             + json.dumps(selected, sort_keys=True) + '. Other views containing referenced column names: '
             + json.dumps(alternatives, sort_keys=True))
+
+
+def require_output_columns(actual, declared):
+    from .execution import QueryValidationError
+    actual, declared = tuple(actual), tuple(declared)
+    if set(actual) != set(declared) or len(set(actual)) != len(actual) or len(set(declared)) != len(declared):
+        raise QueryValidationError(f'SQL result columns do not match the program declaration. Outer query columns: {actual}; declared columns: {declared}. CTE and subquery columns are not outer result columns.')

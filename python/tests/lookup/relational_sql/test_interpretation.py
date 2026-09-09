@@ -49,7 +49,7 @@ def test_catalog_interpretation_preserves_original_input_and_cannot_be_silently_
     parameters=tuple(replace(item,fixed_value_fingerprint=canonical_contract_fingerprint(original.payload))
         for item in menu.program_inputs.parameters)
     view_catalog=build_query_view_catalog(catalog)
-    compiled=compile_query_answer(question=origin.meaning,query=f'SELECT COUNT(*) AS total FROM "{source.id}" WHERE active=${choice}',
+    compiled=compile_query_answer(question=origin.meaning,query=f'SELECT COUNT(*) AS total FROM "{view_catalog.views[0].name}" WHERE active=${choice}',
         views=view_catalog.views,output_types={'total':'integer'},result_contract=ResultContract('scalar'),catalog=catalog,
         query_parameters=(SqlNamedInput(choice,menu.expressions[choice]),),parameters=parameters,
         bindings=menu.program_inputs.bindings,meaning_inputs=(menu.expressions['p1_1'],),

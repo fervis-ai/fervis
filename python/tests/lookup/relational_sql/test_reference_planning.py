@@ -23,10 +23,10 @@ from tests.lookup.relational_engine.test_dependent_reads import _read
 
 
 @pytest.mark.parametrize(('case','text','expected'),[
-    ('name','Default',1),('role','the primary record',2),('split','Ada Lovelace',2),
+    ('name','Default',1),('name_named','Default',1),('role','the primary record',2),('split','Ada Lovelace',2),
     ('unfiltered_name','Default',1),('unfiltered_missing','Default',None),
 ])
-def test_reference_authoring_supports_observed_expressions_without_backend_name_rules(case,text,expected):
+def test_reference_authoring_supports_observed_expressions_without_backend_name_rules(case,text,expected,monkeypatch):
     from fervis.lookup.relation_catalog import CatalogParam, ParamSource
     read=replace(_read('records', params=(CatalogParam('name', 'name', ParamSource.QUERY, 'string'),)),fields=(*_read('records').fields,
         CatalogField('name','string',path='name',row_path_id='root'),
@@ -39,6 +39,8 @@ def test_reference_authoring_supports_observed_expressions_without_backend_name_
     available=build_available_source_catalog(sources,read_eligibility=eligibility)
     view_catalog=build_query_view_catalog(catalog);view=view_catalog.views[0]
     value=FactValue.literal(id='reference_text',known_input_id='i1',literal_type=LiteralType.STRING,value=text,proof_refs=('question_input:i1',))
+    if case == 'name_named':
+        value = FactValue.named(id='reference_text', known_input_id='i1', text=text, proof_refs=('question_input:i1',))
     menu=with_catalog_choices(query_parameter_menu((CanonicalInputValue(value.id,'i1',('fact_1:sql_input:i1',),value,value.proof_refs),)),
         source_catalog=available,source_refs={source.id})
     origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,text)
@@ -96,6 +98,8 @@ def test_reference_authoring_supports_observed_expressions_without_backend_name_
         return
     assert executed.issue is None
     assert next(iter(executed.fact_result.outcome.projected_rows[0].values.values()))==expected
+    if case in {'name', 'name_named'}:
+        _assert_literal_reference_continuation(final, catalog, monkeypatch)
 
 
 @pytest.mark.parametrize('match_expression', ['$p1_1', "'Alpha'", "CASE WHEN $p1_1 = $p1_1 THEN 'Alpha' END", "COALESCE(name, 'Alpha')", "CASE WHEN name IS NULL THEN 'Alpha' ELSE name END", "CONCAT(name, 'Alpha')"])
@@ -212,3 +216,52 @@ def test_required_key_lookup_establishes_identity_from_observed_return_and_repla
             assert str(next(iter(result.fact_result.outcome.projected_rows[0].values.values()))) == literal
         else:
             assert result.issue.reference.reason is IdentityExecutionFailureReason.NOT_FOUND
+
+
+def _assert_literal_reference_continuation(compiled, catalog, monkeypatch):
+    from fervis.lookup.answer_program.persistence import ProgramInvocation, StoredProgramInvocation
+    from fervis.lookup.answer_program.rerun import RerunnableProgramInvocation
+    from fervis.lookup.conversation_resolution.callable_frames import CallableFrameProgram, CallableFrameArgument, callable_frame_bindings
+    from fervis.lookup.contract_codec import answer_program_id, canonical_answer_program_json, decode_answer_program
+    from fervis.lineage.enums import ProgramInvocationKind
+    from fervis.memory.conversation_context.semantic_frames import _semantic_frame_projection
+    from fervis.lookup.orchestration import semantic_compilation as compilation
+    from fervis.lookup.question_contract import QuestionContractRequest
+    from fervis.lookup.turn_prompts import HostPromptContext
+    from fervis.lookup.identity_types import IdentityExecutionFailureReason
+    program = decode_answer_program(canonical_answer_program_json(compiled.program))
+    stored = StoredProgramInvocation(ProgramInvocation('initial-invocation','initial-run',answer_program_id(program),
+        compiled.bindings,ProgramInvocationKind.COMPILED_QUESTION),program)
+    signature = _semantic_frame_projection(program.fact_template[0], stored=stored).callable
+    parameter = next(p for p in program.parameters if p.input_ref == 'i1')
+    frame = CallableFrameProgram(RerunnableProgramInvocation.parse(stored), signature,
+        (CallableFrameArgument(parameter.id,'i1',parameter.input_use_refs,'And Cedar?','Cedar',None),))
+    def forbidden(*args, **kwargs):
+        raise AssertionError('A saved literal-reference program must replay its guard without rediscovering identity routes')
+    monkeypatch.setattr(compilation, '_turn', forbidden)
+    class Port:
+        calls = 0
+        rows = [{'id':1,'name':'Default'}, {'id':2,'name':'Cedar'}]
+        def read(self, **kwargs):
+            self.calls += 1
+            return {'responseStatus':200, 'responseBody':self.rows}
+    port = Port()
+    request = compilation.SemanticCompilationRequest('continuation','And Cedar?',
+        QuestionContractRequest(current_question='And Cedar?',conversation_context={}),catalog,(),port,None,
+        'openai',64,10,None,{},HostPromptContext())
+    values = compilation.resolve_semantic_continuation_arguments(frame, request)
+    assert port.calls == 0
+    bindings = callable_frame_bindings(frame, grounded_values=values)
+    for rows, expected in [([{'id':1,'name':'Default'},{'id':2,'name':'Cedar'}],2),
+                           ([{'id':1,'name':'Default'}],IdentityExecutionFailureReason.NOT_FOUND),
+                           ([{'id':2,'name':'Cedar'},{'id':3,'name':'Cedar'}],IdentityExecutionFailureReason.AMBIGUOUS_RESULT)]:
+        port.rows = rows
+        result = invoke_answer_program(program=program,bindings=bindings,environment=ExecutionEnvironment(catalog=catalog),
+            ports=RuntimePorts(port,LookupMemory()))
+        if expected == 2:
+            assert result.issue is None
+            assert next(iter(result.fact_result.outcome.projected_rows[0].values.values())) == 2
+        else:
+            assert result.fact_result is None
+            assert result.issue.reference.reason is expected
+    assert port.calls == 3

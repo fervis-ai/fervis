@@ -275,3 +275,16 @@ def test_unknown_key_column_is_diagnosed_before_identity_lineage():
     assert 'undeclared column' in str(caught.value)
     assert 'data_id' in str(caught.value)
     assert 'records' in str(caught.value) and 'id' in str(caught.value)
+
+
+@pytest.mark.parametrize("declared", [["total", "inner_id"], ["wrong"], ["total"]])
+def test_authoring_output_inventory_belongs_to_outer_query_not_ctes(declared):
+    body = payload(query="WITH members AS (SELECT id AS inner_id FROM items) SELECT COUNT(*) AS total FROM members",
+        columns=[{"name": name, "value_type": "integer"} for name in declared],
+        outputs=[{"kind": "value", "column": declared[0], "label": "count"}])
+    arguments = dict(table_names={"items"}, parameter_names=set(), tables={"items": {"columns": {"id": {"type": "integer"}}}})
+    if declared == ["total"]:
+        assert parse_query_answer(body, **arguments).output_types == {"total": "integer"}
+    else:
+        with pytest.raises(QueryValidationError, match="result columns"):
+            parse_query_answer(body, **arguments)

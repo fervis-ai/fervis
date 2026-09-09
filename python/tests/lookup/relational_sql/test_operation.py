@@ -1,3 +1,4 @@
+import pytest
 from decimal import Decimal
 from fervis.lookup.answer_program.api_reads import ApiReadSession
 from fervis.lookup.answer_program.model import AnswerProgram, RelationProgram
@@ -177,3 +178,18 @@ def test_named_property_is_a_scalar_lookup_and_rebinding_reads_fresh_data():
     assert run(rebound)=='precision: 4.5'
     assert port.calls==4
     assert initial.get('question.name').value.payload.value=='Borealis'
+
+
+@pytest.mark.parametrize('columns', [('total', 'inner_id'), ('wrong',), ('total',)])
+def test_saved_sql_operation_validates_outer_output_inventory_before_execution(columns):
+    from fervis.lookup.answer_program.operations import SqlQuerySpec, SqlRelationInput, SqlColumnBinding, SqlOutputField
+    from fervis.lookup.relational_sql.operation import validate_sql_operation
+    from fervis.lookup.relational_sql.execution import QueryValidationError
+    spec = SqlQuerySpec('WITH members AS (SELECT id AS inner_id FROM items) SELECT COUNT(*) AS total FROM members',
+        (SqlRelationInput('items','rows',(SqlColumnBinding('id','id'),)),),
+        tuple(SqlOutputField(name,'integer') for name in columns))
+    if columns == ('total',):
+        validate_sql_operation(spec)
+    else:
+        with pytest.raises(QueryValidationError, match='result columns'):
+            validate_sql_operation(spec)

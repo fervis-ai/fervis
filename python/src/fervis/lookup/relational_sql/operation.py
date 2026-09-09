@@ -15,7 +15,7 @@ from fervis.lookup.plan_execution.operation_engine.shared import _operation_rela
 from fervis.lookup.plan_execution.verification.contract_types import ProofLineage, RelationContract
 from fervis.lookup.answer_program.relations import FieldBindingRole
 from fervis.lookup.relational_sql.acquisition import _sql_type
-from fervis.lookup.relational_sql.execution import SqlTable, _validate, execute_query
+from fervis.lookup.relational_sql.execution import SqlTable, _validate, execute_query, QueryValidationError
 from fervis.lookup.relational_sql.identity_lineage import sql_identity_keys
 
 
@@ -30,8 +30,9 @@ def validate_sql_operation(spec: SqlQuerySpec):
         raise VerificationError('SQL parameters must exactly match declared bindings')
     if any(expression_references(item.expression).fields for item in spec.parameters):
         raise VerificationError('SQL parameters must be scalar program inputs')
-    from .column_usage import required_columns
-    required_columns(spec.query,{name:table.columns for name,table in tables.items()})
+    from .column_usage import project_query
+    project_query(spec.query,{name:table.columns for name,table in tables.items()},
+                  output_columns=tuple(item.id for item in spec.outputs))
 
 
 def sql_relation_contract(operation, contracts, proof_context):
@@ -65,8 +66,11 @@ def execute_sql_operation(operation, relations, *, environment, operation_refs=(
         tables[item.name] = SqlTable(types, rows)
     parameters = {item.name:evaluate_expression(item.expression, environment=environment).value for item in spec.parameters}
     result = execute_query(spec.query, tables=tables, parameters=parameters, timezone=spec.timezone)
-    if set(result.columns) != {item.id for item in spec.outputs} or len(set(result.columns)) != len(result.columns):
-        raise VerificationError('SQL result columns do not match the program declaration')
+    from .column_usage import require_output_columns
+    try:
+        require_output_columns(result.columns, (item.id for item in spec.outputs))
+    except QueryValidationError as exc:
+        raise VerificationError(str(exc)) from exc
     positions = {name:index for index,name in enumerate(result.columns)}
     rows = tuple({item.id:_sql_output_value(row[positions[item.id]], item.value_type)
                   for item in spec.outputs} for row in result.rows)

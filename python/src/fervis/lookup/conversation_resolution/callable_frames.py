@@ -18,6 +18,9 @@ from fervis.lookup.answer_program.persistence import PriorProgramInvocationReade
 from fervis.lookup.answer_program.rerun import RerunnableProgramInvocation
 from fervis.lookup.answer_program.values import (
     FactValue,
+    LiteralType,
+    LiteralValuePayload,
+    NamedValuePayload,
     IdentitySetValuePayload,
     IdentityValuePayload,
 )
@@ -113,19 +116,33 @@ class CallableFrameProgram:
     @property
     def certified_argument_values(self) -> tuple[FactValue, ...]:
         requested_fact_ids = tuple(item.id for item in self.program.fact_template)
-        return tuple(
-            FactValue.identity(
-                id=f"{argument.input_ref}:conversation_identity",
-                known_input_id=argument.input_ref,
-                key=argument.canonical_identity.key,
-                display_value=argument.operand,
-                proof_refs=argument.canonical_identity.authority_refs,
-                source_refs=argument.canonical_identity.lineage_refs,
-                applies_to_requested_fact_ids=requested_fact_ids,
-            )
-            for argument in self.arguments
-            if argument.canonical_identity is not None
-        )
+        parameters = {item.id: item for item in self.program.parameters}
+        values = []
+        for argument in self.arguments:
+            if argument.canonical_identity is not None:
+                values.append(FactValue.identity(
+                    id=f"{argument.input_ref}:conversation_identity",
+                    known_input_id=argument.input_ref,
+                    key=argument.canonical_identity.key,
+                    display_value=argument.operand,
+                    proof_refs=argument.canonical_identity.authority_refs,
+                    source_refs=argument.canonical_identity.lineage_refs,
+                    applies_to_requested_fact_ids=requested_fact_ids,
+                ))
+                continue
+            # A stored text parameter consumes the supplied text. Any identity
+            # resolution belongs to the saved program's guarded operations.
+            kind = parameters[argument.parameter_id].value_type
+            if kind is ParameterValueType.NAMED:
+                payload: NamedValuePayload | LiteralValuePayload = NamedValuePayload(text=argument.operand, reference_text=argument.operand)
+            elif kind is ParameterValueType.STRING:
+                payload = LiteralValuePayload(literal_type=LiteralType.STRING, value=argument.operand)
+            else:
+                continue
+            values.append(FactValue(id=f"{argument.input_ref}:conversation_text", known_input_id=argument.input_ref,
+                label=argument.operand, payload=payload, proof_refs=(f"conversation_resolution:{argument.input_ref}",),
+                applies_to_requested_fact_ids=requested_fact_ids))
+        return tuple(values)
 
 
 def load_callable_frame_program(

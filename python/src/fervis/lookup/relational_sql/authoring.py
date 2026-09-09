@@ -132,9 +132,6 @@ def parse_query_answer(
         if changed:
             payload = {**payload, 'query': statement.sql(dialect='duckdb')}
             statement, referenced_views = _validate(payload['query'], {name: SqlTable({}, ()) for name in table_names})
-    if tables:
-        from .column_usage import project_query
-        project_query(payload['query'], {name: table['columns'] for name, table in tables.items()})
     names = tuple(sorted({node.name for node in statement.find_all(exp.Placeholder)}))
     if not set(names) <= parameter_names:
         raise QueryValidationError("Query references an undeclared grounded parameter")
@@ -150,6 +147,10 @@ def parse_query_answer(
         )
     if not set(output_types.values()) <= set(SQL_VALUE_TYPES):
         raise QueryValidationError("Query output has an unsupported value type")
+    if tables:
+        from .column_usage import project_query
+        project_query(payload['query'], {name: table['columns'] for name, table in tables.items()},
+                      output_columns=output_types)
     mode = payload["mode"]
     outputs = (
         ()
