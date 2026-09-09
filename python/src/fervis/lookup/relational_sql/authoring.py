@@ -120,6 +120,17 @@ def parse_query_answer(
     statement, referenced_views = _validate(
         payload["query"], {name: SqlTable({}, ()) for name in table_names}
     )
+    if instances:
+        from sqlglot.optimizer.scope import traverse_scope
+        changed = False
+        for scope in traverse_scope(statement):
+            for _, source in scope.selected_sources.values():
+                if isinstance(source, exp.Table) and instances.get(source.alias) == source.name:
+                    source.set('this', exp.to_identifier(source.alias, quoted=True))
+                    changed = True
+        if changed:
+            payload = {**payload, 'query': statement.sql(dialect='duckdb')}
+            statement, referenced_views = _validate(payload['query'], {name: SqlTable({}, ()) for name in table_names})
     if tables:
         from .column_usage import project_query
         project_query(payload['query'], {name: table['columns'] for name, table in tables.items()})
@@ -437,7 +448,7 @@ class QueryAnswerPrompt(TurnPromptBase):
             "Use DuckDB SQL over only the declared views. Quote identifiers when necessary. No files, network, external tables or database access.",
             "Copy SQL parameters from the menu sql_expression exactly. Use the menu key for request_arguments bindings. FROM and JOIN use the exact Declared API views keys as SQL tables, never endpoint paths or resource labels. These views are not SQL functions: do not put parentheses or request parameters after a view name. REST arguments belong exclusively in request_arguments. Do not invent values or inline grounded operands. SQL literals may express arithmetic constants and documented catalog enum values.",
             "SQL calendar operations and date-to-timestamp conversions use the timezone in Compilation scope.",
-            "request_arguments binds declared view request parameter refs to the same grounded menu. Supply only arguments needed for the question; automatic_request_parameters are already supplied by complete traversal; never bind them. To invoke the same API view with different bindings in one query, assign a distinct instance name to each invocation and use those names as SQL tables. All arguments sharing an instance must name the same declared view. Use instance=null for the default view. Physical prerequisite enumeration and pagination belong to Fervis.",
+            "request_arguments binds declared view request parameter refs to the same grounded menu. Supply only arguments needed for the question; automatic_request_parameters are already supplied by complete traversal; never bind them. To invoke the same API view with different bindings in one query, assign a distinct instance name to each invocation. Use FROM declared_view AS instance, or refer to the named invocation directly as a SQL table. All arguments sharing an instance must name the same declared view. Use instance=null for the default view. Physical prerequisite enumeration and pagination belong to Fervis.",
         )
 
     def instruction_sections(self, builder):

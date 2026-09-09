@@ -292,4 +292,3 @@ def validate_bound_program_parameters(program, bindings, row_sources, contracts)
             {item.name: describe(item.expression, literal_lookup=(isinstance(item.expression, ParameterRef) and
                 parameter_inputs.get(item.expression.parameter_id) == spec.lookup_input_ref)) for item in spec.parameters},
             lookup_input_ref=spec.lookup_input_ref)
-

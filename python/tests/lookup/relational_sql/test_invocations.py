@@ -116,3 +116,21 @@ def test_reference_argument_operations_are_owned_by_fact_namespace():
     for bound in (first, second):
         outputs = {operation.output_relation for operation in bound.argument_operations}
         assert {view.argument_relation_id for view in bound.views if view.name in answer.referenced_views} <= outputs
+
+
+def test_declared_invocations_bind_sql_range_aliases_without_changing_the_query_population():
+    answer = authored(query='SELECT (SELECT COUNT(*) FROM items AS first_item) + (SELECT COUNT(*) FROM items AS second_item) AS total')
+    assert set(answer.referenced_views) == {'first_item', 'second_item'}
+    from fervis.lookup.relational_sql.execution import execute_query, SqlTable
+    result = execute_query(answer.query, tables={
+        'first_item': SqlTable({'id': 'integer'}, ({'id': 1}, {'id': 2})),
+        'second_item': SqlTable({'id': 'integer'}, ({'id': 3},)),
+    })
+    assert result.rows == ((3,),)
+
+
+def test_invocation_range_alias_in_cte_does_not_capture_the_cte_reference():
+    answer = authored(arguments=[{'view':'items','instance':'selected','parameter_ref':'id','binding':'p1'}],
+        query='WITH selected AS (SELECT id FROM items AS selected) SELECT COUNT(*) AS total FROM selected')
+    from fervis.lookup.relational_sql.execution import execute_query, SqlTable
+    assert execute_query(answer.query, tables={'selected': SqlTable({'id':'integer'}, ({'id':1},))}).rows == ((1,),)
