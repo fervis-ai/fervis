@@ -38,7 +38,19 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
 
     def __init__(self, *, meaning, tables, parameters, consumer_view_refs=None, expected_key=None):
         self.expected_key = expected_key
-        self.consumer_view_refs = consumer_view_refs
+        if meaning.reference_kind == 'literal' and expected_key is not None:
+            from .outputs import identity_authorities
+            tables = {name:table for name,table in tables.items() if any(
+                (authority['entity_kind'], authority['key_id'], set(authority['components'])) ==
+                (expected_key['entity_kind'], expected_key['key_id'], set(expected_key['components']))
+                for authority in identity_authorities({name:table}).values())}
+            from fervis.lookup.api_arguments import compatible_argument
+            parameters = {name:description for name,description in parameters.items()
+                          if description.get('kind') != 'catalog_choice' or any(
+                              compatible_argument(parameter,description,literal_lookup=True)
+                              for table in tables.values() for parameter in table.get('request_parameters',()))}
+        self.consumer_view_refs = (tuple(name for name in consumer_view_refs if name in tables)
+                                   if consumer_view_refs is not None else None)
         super().__init__(question=meaning.reference_text, meaning=meaning, tables=tables, timezone=meaning.timezone,
             parameters={name:{**{key:value for key,value in description.items() if key != 'may_interpret'},
                               **({'kind':'definition' if meaning.reference_kind == 'description' else 'input'} if description.get('input_ref') else {})}

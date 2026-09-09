@@ -277,3 +277,50 @@ def _assert_literal_reference_continuation(compiled, catalog, monkeypatch):
             assert result.fact_result is None
             assert result.issue.reference.reason is expected
     assert port.calls == 3
+
+
+@pytest.mark.parametrize('reference_kind',['literal','description'])
+def test_literal_reference_prompt_retains_only_possible_identity_carriers(reference_kind):
+    origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,'Find the supplied member.')
+    meaning=ReferenceMeaning('fact_1','i1','member','Find the member.',(origin,),('i1',),
+        reference_text='Cedar',reference_kind=reference_kind)
+    key={'entity_kind':'member','key_id':'primary','components':{'id':'id'}}
+    tables={
+        'members':{'source_ref':'members','columns':{'id':{'type':'uuid'},'name':{'type':'string'}},'candidate_keys':[key]},
+        'observations':{'source_ref':'observations','columns':{'member_id':{'type':'uuid'},'member_name':{'type':'string'}},
+            'entity_references':[{'target_entity_kind':'member','target_key_id':'primary','components':{'id':'member_id'}}]},
+        'settings':{'source_ref':'settings','columns':{'selected_id':{'type':'uuid'}}},
+        'unrelated':{'source_ref':'unrelated','columns':{'id':{'type':'integer'}},
+            'candidate_keys':[{'entity_kind':'other','key_id':'primary','components':{'id':'id'}}]},
+    }
+    parameters={'p1':{'input_ref':'i1','kind':'literal','value_type':'string','value':'Cedar'},
+        'c1':{'kind':'catalog_choice','source_ref':'members','type':'string','value':'active'},
+        'c2':{'kind':'catalog_choice','source_ref':'unrelated','type':'string','value':'closed'}}
+    prompt=ReferenceQueryPrompt(meaning=meaning,tables=tables,parameters=parameters,expected_key=key,
+        consumer_view_refs=('observations','unrelated'))
+    assert set(prompt.tables)==({'members','observations'} if reference_kind=='literal' else set(tables))
+    assert set(prompt.parameters)==({'p1'} if reference_kind=='literal' else set(parameters))
+    assert set(prompt.consumer_view_refs)<=set(prompt.tables)
+
+
+def test_literal_reference_keeps_compatible_control_values_from_noncarrier_sources():
+    from types import SimpleNamespace
+    origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,'Cedar')
+    meaning=ReferenceMeaning('fact_1','i1','member','Cedar',(origin,),('i1',),reference_text='Cedar')
+    key={'entity_kind':'member','key_id':'primary','components':{'id':'id'}}
+    tables={'members':{'columns':{'id':{'type':'integer'},'name':{'type':'string'}},'candidate_keys':[key],
+                'request_parameters':[{'param_ref':'representation','name':'representation','source':'query','type':'string','required':True}]},
+            'settings':{'columns':{'format':{'type':'string'}},'request_parameters':[]}}
+    parameters={'p1':{'input_ref':'i1','kind':'literal','value_type':'string','value':'Cedar'},
+                'c1':{'kind':'catalog_choice','source_ref':'settings','type':'string','value':'full'}}
+    prompt=ReferenceQueryPrompt(meaning=meaning,tables=tables,parameters=parameters,expected_key=key)
+    assert set(prompt.tables)=={'members'}
+    assert 'c1' in prompt.parameters
+    body=query_payload(query='SELECT id,name AS matched FROM members',mode='rows',
+        columns=[{'name':'id','value_type':'integer'},{'name':'matched','value_type':'string'}],
+        outputs=[{'kind':'identity','authority':'member/primary(id)','components':{'id':'id'},'label':'member','display_column':None}],
+        reference_binding={'kind':'literal','match_column':'matched'},
+        api_bindings=[{'view':'members','parameter_ref':'representation','binding':'c1'}])
+    validate(body,prompt._schema())
+    answer=parse_reference_query(body,prompt=prompt,menu=SimpleNamespace(expressions={'p1':None,'c1':None},descriptions=parameters))
+    assert answer.request_arguments[0].binding=='c1'

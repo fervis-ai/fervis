@@ -633,7 +633,7 @@ programs:
           $type: ProgramCompatibility
           fields:
             schema_revision: 23
-            compiler_version: fervis.answer_program.compiler@39
+            compiler_version: fervis.answer_program.compiler@41
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
@@ -715,7 +715,7 @@ programs:
           $type: ProgramCompatibility
           fields:
             schema_revision: 23
-            compiler_version: fervis.answer_program.compiler@39
+            compiler_version: fervis.answer_program.compiler@41
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
@@ -779,7 +779,7 @@ programs:
           $type: ProgramCompatibility
           fields:
             schema_revision: 23
-            compiler_version: fervis.answer_program.compiler@39
+            compiler_version: fervis.answer_program.compiler@41
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
@@ -981,7 +981,7 @@ programs:
           $type: ProgramCompatibility
           fields:
             schema_revision: 23
-            compiler_version: fervis.answer_program.compiler@39
+            compiler_version: fervis.answer_program.compiler@41
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
@@ -1264,7 +1264,7 @@ programs:
           $type: ProgramCompatibility
           fields:
             schema_revision: 23
-            compiler_version: fervis.answer_program.compiler@39
+            compiler_version: fervis.answer_program.compiler@41
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
@@ -1488,7 +1488,7 @@ programs:
           $type: ProgramCompatibility
           fields:
             schema_revision: 23
-            compiler_version: fervis.answer_program.compiler@39
+            compiler_version: fervis.answer_program.compiler@41
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
@@ -1690,7 +1690,7 @@ programs:
           $type: ProgramCompatibility
           fields:
             schema_revision: 23
-            compiler_version: incompatible.compiler@39
+            compiler_version: incompatible.compiler@41
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
@@ -1884,7 +1884,7 @@ programs:
           $type: ProgramCompatibility
           fields:
             schema_revision: 23
-            compiler_version: fervis.answer_program.compiler@39
+            compiler_version: fervis.answer_program.compiler@41
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
@@ -2023,7 +2023,7 @@ programs:
           $type: ProgramCompatibility
           fields:
             schema_revision: 23
-            compiler_version: fervis.answer_program.compiler@39
+            compiler_version: fervis.answer_program.compiler@41
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
