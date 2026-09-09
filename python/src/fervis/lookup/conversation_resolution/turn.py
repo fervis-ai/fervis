@@ -23,6 +23,7 @@ from fervis.lookup.model_turn import (
     generation_error_kwargs,
     run_one_of_tool_model_turn,
 )
+from fervis.model_io.structured_output.errors import ModelValidationKind
 from fervis.model_io.turn_artifacts import (
     ModelTurnArtifact,
 )
@@ -47,8 +48,19 @@ def generate_conversation_resolution(
     provider: str,
     model_key: str,
     max_thinking_tokens: int,
+    validation_failure_observer=None,
 ) -> ConversationResolutionTurnResult:
-    invocation = ConversationResolutionTurnPrompt(request).to_model_invocation()
+    from fervis.lookup.turn_prompts.correction import run_with_correction
+    return run_with_correction(ConversationResolutionTurnPrompt(request),
+        lambda prompt: _generate(request=request, prompt=prompt, model_port=model_port,
+            provider=provider, max_thinking_tokens=max_thinking_tokens),
+        validation_failure_observer)
+
+
+def _generate(*, request, prompt, model_port, provider, max_thinking_tokens):
+    from fervis.lookup.turn_prompts import build_turn_prompt_context
+    invocation = prompt.to_model_invocation(build_turn_prompt_context(
+        current_question=request.question, conversation_context=request.conversation_context, host=request.host))
     try:
         output = run_one_of_tool_model_turn(
             invocation=invocation,
@@ -79,6 +91,7 @@ def generate_conversation_resolution(
             usage=output.usage,
             duration_ms=output.duration_ms,
             artifact=output.artifact,
+            validation_kind=ModelValidationKind.SEMANTIC if isinstance(exc,ValueError) else None,
         ) from exc
     artifact = replace(
         output.artifact,

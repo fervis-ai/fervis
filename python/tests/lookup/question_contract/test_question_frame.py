@@ -524,12 +524,13 @@ def _frame_payload(
     operands = []
     for item in supplied_values or []:
         normalized = dict(item)
+        normalized.setdefault("answer_request_numbers",[1])
         reference = normalized.get("entity_reference")
         if isinstance(reference, dict):
             reference = dict(reference)
             value = reference.get("value")
             if isinstance(value, dict) and isinstance(value.get("operands"), list):
-                identity_values = value["operands"]
+                identity_values = [{"kind": value.get("reference_kind", "literal"), "value": operand} for operand in value["operands"]]
                 reference["value"] = (
                     {
                         "kind": "single_identity",
@@ -588,3 +589,29 @@ def test_related_entity_output_obeys_declared_result_grain(result_kind):
     else:
         validate(payload, schema)
         assert isinstance(parse_semantic_question_frame(payload, question_context_texts=('List workers at each store.',)), ParsedSemanticQuestionMeaning)
+
+
+@pytest.mark.parametrize('owners',[[],[0],[2],[1,1],[True]])
+def test_question_frame_rejects_invalid_operand_ownership(owners):
+    value={'meaning':'threshold','denotation_basis':'The threshold qualifies the count.',
+        'answer_request_numbers':owners,
+        'non_entity_value':{'kind':'number','value':{'operands':['1'],'origin':{'kind':'question'}}}}
+    with pytest.raises(ValueError):
+        parse_semantic_question_frame(_frame_payload(supplied_values=[value]),question_context_texts=('Count stores above 1.',))
+
+
+def test_mixed_reference_members_preserve_literal_values_and_description_forms():
+    frame = _frame_payload(supplied_values=[{
+        "meaning": "the default site or the site named Default",
+        "denotation_basis": "Two alternative sites restrict the observations.",
+        "entity_reference": {"instance_kind": "site", "value": {
+            "kind": "identity_alternatives",
+            "identity_values": [{"kind": "description", "value": "the default site"},
+                                {"kind": "literal", "value": "Default"}],
+            "origin": {"kind": "question"},
+        }},
+    }])
+    parsed = parse_semantic_question_frame(frame,
+        question_context_texts=("How many observations belong to the default site or the site named Default?",))
+    assert parsed.inputs[0].operand == ("the default site", "Default")
+    assert parsed.input_denotations[0].reference_descriptions == ("the default site",)

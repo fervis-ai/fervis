@@ -135,8 +135,8 @@ class SemanticReadEligibilityTurnPrompt(TurnPromptBase):
     def _requirements_payload(self) -> dict[str, object]:
         return {
             "requested_facts": [
-                semantic_requirements_prompt_payload(index)
-                for index in self.request.indexes
+                _context_requirements(context)
+                for context in self.request.contexts
             ]
         }
 
@@ -340,3 +340,25 @@ __all__ = [
     "SEMANTIC_READ_ELIGIBILITY_TOOL_NAME",
     "SemanticReadEligibilityTurnPrompt",
 ]
+
+
+def _context_requirements(context):
+    if context.graph_index is not None:
+        return semantic_requirements_prompt_payload(context.graph_index)
+    from fervis.lookup.contract_codec import canonical_contract_payload
+    from fervis.lookup.question_contract import QueryRequestedFact
+    fact = context.requested_fact
+    return {
+        'requested_fact_ref': fact.id,
+        'original_request': fact.origin.meaning,
+        'current_inputs': [
+            {'input_ref':use.input_ref, 'operand':context.input_by_ref[use.input_ref].operand,
+             'meaning':use.operand_meaning,
+             'denoted_instance_kind':context.input_denotation_by_ref[use.input_ref].denoted_instance_kind}
+            for use in context.input_use_sites
+        ],
+        'requested_outputs': [{'output_ref':output.id,'meaning':output.origin.meaning,
+                               'value_type':output.value_type} for output in fact.outputs],
+        **({'pinned_computation_contract':canonical_contract_payload(fact)}
+           if isinstance(fact, QueryRequestedFact) else {'result_kind':fact.result_kind}),
+    }

@@ -12,6 +12,11 @@ from fervis.model_io.backbone.dto import ToolSpec
 from .parsing import raw_tool_output_text
 
 
+class ModelValidationKind(StrEnum):
+    SCHEMA = 'schema'
+    SEMANTIC = 'semantic'
+
+
 class ModelIoErrorCode(StrEnum):
     PROVIDER_RUNTIME_FAILED = "provider_runtime_failed"
     PROVIDER_CONNECTION_FAILED = "provider_connection_failed"
@@ -47,6 +52,7 @@ class RequiredToolOutputError(ValueError):
         tool_specs: tuple[ToolSpec, ...] = (),
         error_code: str = "",
         error_context: dict[str, Any] | None = None,
+        validation_kind: ModelValidationKind | None = None,
     ) -> None:
         super().__init__(message)
         self.output = dict(output or {})
@@ -55,6 +61,7 @@ class RequiredToolOutputError(ValueError):
         self.raw_output = raw_tool_output_text(self.output)
         self.error_code = str(error_code or "")
         self.error_context = dict(error_context or {})
+        self.validation_kind = validation_kind
 
 
 def provider_error_code(exc: BaseException) -> str:

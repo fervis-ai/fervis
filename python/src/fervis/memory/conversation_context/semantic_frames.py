@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from fervis.lookup.answer_program.persistence import StoredProgramInvocation
 from fervis.lookup.answer_program.values import FactValue
@@ -13,6 +13,7 @@ from fervis.lookup.question_contract import (
     ExpressionNode,
     FactTerm,
     RequestedFact,
+    QueryRequestedFact,
     SetTerm,
     analyze_requested_fact,
     semantic_value_type,
@@ -109,10 +110,24 @@ def prior_request_frames(
 
 
 def _semantic_frame_projection(
-    fact: RequestedFact,
+    fact: RequestedFact | QueryRequestedFact,
     *,
     stored: StoredProgramInvocation,
 ) -> _SemanticFrameProjection:
+    if isinstance(fact, QueryRequestedFact):
+        meanings = {item.input_ref:item.operand_meaning for item in stored.program.input_denotations}
+        input_parts = tuple(replace(part, text=f"{meanings.get(part.source_ref, part.source_ref)}: {part.text}")
+                            for part in _input_parts(stored=stored,used_input_refs=set(fact.input_refs)))
+        query_parts = (
+            ConversationFramePart(part_id='subject',kind=ConversationFramePartKind.SUBJECT,
+                text=f'Original request; the input values below are current: {fact.origin.meaning}'),
+            *(ConversationFramePart(part_id=f'output:{index}',kind=ConversationFramePartKind.REQUESTED_OUTPUT,
+                text=output.origin.meaning,source_ref=output.id,value_type=output.value_type)
+              for index,output in enumerate(fact.outputs,start=1)),
+            *input_parts,
+        )
+        return _SemanticFrameProjection(parts=query_parts, callable=_callable_signature(fact,stored=stored,input_parts=input_parts)
+                                        if len(stored.program.fact_template)==1 else None)
     analysis = _semantic_analysis(fact, stored=stored)
     types_by_local_ref = {
         local_id: analysis.inferred_type_by_ref[ref]
@@ -336,7 +351,7 @@ def _semantic_analysis(
 
 
 def _callable_signature(
-    fact: RequestedFact,
+    fact: RequestedFact | QueryRequestedFact,
     *,
     stored: StoredProgramInvocation,
     input_parts: tuple[ConversationFramePart, ...],
@@ -353,6 +368,7 @@ def _callable_signature(
         )
         for parameter in stored.program.parameters
         if parameter.input_ref in parts_by_input_ref
+        if not parameter.fixed_value_fingerprint
         if (binding := stored.bindings.get(parameter.id)) is not None
     )
     return ConversationCallableSignature(

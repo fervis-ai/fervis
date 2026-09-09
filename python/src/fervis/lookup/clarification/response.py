@@ -62,6 +62,7 @@ def clarification_response_payload(
             "clarificationId": response.clarification_id,
             "requestedFactId": response.requested_fact_id,
             "knownInputId": response.known_input_id,
+            **({"referenceOperand":response.reference_operand} if response.reference_operand else {}),
             "option": _option_payload(response.option),
         }
     if isinstance(response, SourceBindingCatalogInputResponse):
@@ -108,6 +109,7 @@ def clarification_response_from_payload(
             clarification_id=_required_text(payload, "clarificationId"),
             requested_fact_id=_required_text(payload, "requestedFactId"),
             known_input_id=_required_text(payload, "knownInputId"),
+            reference_operand=_optional_text(payload, "referenceOperand"),
             option=_option_from_payload(_mapping(payload, "option")),
         )
     if kind == "source_binding_catalog_input":
@@ -307,6 +309,7 @@ def parse_clarification_response(
                 clarification_id=clarification.id,
                 requested_fact_id=clarification.requested_fact_id,
                 known_input_id=continuation.known_input_id,
+                reference_operand=continuation.reference_operand,
                 option=selected,
             )
         if not continuation.accepts_free_text:

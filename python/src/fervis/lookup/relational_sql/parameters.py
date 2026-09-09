@@ -1,0 +1,234 @@
+"""Expose scalar projections of certified inputs without copying their values."""
+
+from dataclasses import dataclass, replace
+from typing import Any, Mapping
+from datetime import date, datetime
+from decimal import Decimal
+
+from fervis.lookup.answer_program.compiler_inputs import (
+    grounded_program_inputs,
+    compiler_input_context_from_program_inputs,
+)
+from fervis.lookup.answer_program.contracts import ProgramInputs
+from fervis.lookup.answer_program.expressions import Expression
+from fervis.lookup.answer_program.values import (
+    IdentityValuePayload,
+    IdentitySetValuePayload,
+    TimeValuePayload,
+    LiteralValuePayload,
+    LiteralType,
+    NamedValuePayload,
+    ConstantRef,
+    StringSetValuePayload,
+)
+
+
+@dataclass(frozen=True)
+class QueryParameterMenu:
+    program_inputs: ProgramInputs
+    expressions: Mapping[str, Expression]
+    descriptions: Mapping[str, Any]
+
+
+def query_parameter_menu(values) -> QueryParameterMenu:
+    program_inputs = grounded_program_inputs(values)
+    context = compiler_input_context_from_program_inputs(program_inputs)
+    expressions, descriptions = {}, {}
+    for index, value in enumerate(values, start=1):
+        payload = value.typed_value.payload
+        identity = _identity_contract(payload)
+        if identity:
+            components = tuple(
+                f"key_component:{component}" for component in identity["components"]
+            )
+        elif isinstance(payload, TimeValuePayload):
+            components = ("start", "end")
+        else:
+            components = ("value",)
+        for component_index, component in enumerate(components, start=1):
+            name = f"p{index}_{component_index}"
+            expressions[name] = context.expression_for_value(
+                value.canonical_value_id, component=component
+            )
+            descriptions[name] = {
+                "input_ref": value.input_ref,
+                **projection_description(value.typed_value, component),
+                "label": (
+                    f"Canonical {identity['entity_kind']} {component}"
+                    if identity
+                    else value.typed_value.label
+                ),
+                **(
+                    {"resolved_entity_label": value.typed_value.label}
+                    if identity
+                    else {}
+                ),
+                **(
+                    {
+                        "value_type": "datetime"
+                        if payload.granularity == "hour"
+                        else "date",
+                        "boundary": "inclusive",
+                        "granularity": payload.granularity,
+                    }
+                    if isinstance(payload, TimeValuePayload)
+                    else {}
+                ),
+                "may_interpret": isinstance(payload, NamedValuePayload)
+                or (
+                    isinstance(payload, LiteralValuePayload)
+                    and payload.literal_type is LiteralType.STRING
+                ),
+            }
+    return QueryParameterMenu(program_inputs, expressions, descriptions)
+
+
+def with_catalog_choices(
+    menu: QueryParameterMenu, *, source_catalog, source_refs
+) -> QueryParameterMenu:
+    from fervis.lookup.available_sources import source_choice_literal
+
+    expressions, descriptions = dict(menu.expressions), dict(menu.descriptions)
+    for index, choice in enumerate(
+        sorted(source_catalog.choice_values, key=lambda item: item.value_ref), start=1
+    ):
+        if choice.source_ref not in source_refs:
+            continue
+        surface = source_catalog.choice_surface(choice.surface_ref)
+        if surface.declared_entity_kind:
+            # Entity types describe authority, not observed values to which a
+            # lexical question operand can be translated.
+            continue
+        name = f"c{index}"
+        value = source_choice_literal(
+            choice, snapshot_ref=source_catalog.contract_snapshot.ref
+        )
+        expressions[name] = ConstantRef(value.id, "catalog_choice@1", value)
+        descriptions[name] = {
+            "kind": "catalog_choice",
+            "source_ref": choice.source_ref,
+            "surface_ref": choice.surface_ref,
+            "target_ref": surface.target_ref,
+            "surface_kind": surface.kind.value,
+            "description": surface.description,
+            "value": choice.value,
+            "label": choice.label,
+            "type": choice.declared_type.value,
+        }
+    return replace(menu, expressions=expressions, descriptions=descriptions)
+
+
+def _projection_type(payload, component):
+    if isinstance(payload, (IdentitySetValuePayload, StringSetValuePayload)):
+        return "array"
+    if isinstance(payload, IdentityValuePayload):
+        keys = (
+            (payload.key,)
+            if isinstance(payload, IdentityValuePayload)
+            else payload.keys
+        )
+        kinds = {
+            _primitive_type(
+                next(
+                    item.value
+                    for item in key.components
+                    if item.component_id == component.split(":", 1)[1]
+                )
+            )
+            for key in keys
+        }
+        return next(iter(kinds)) if len(kinds) == 1 else "unknown"
+    if isinstance(payload, TimeValuePayload):
+        return "datetime" if payload.granularity == "hour" else "date"
+    if isinstance(payload, LiteralValuePayload):
+        if payload.literal_type is LiteralType.NUMBER:
+            value = Decimal(str(payload.value))
+            return "integer" if value == value.to_integral_value() else "number"
+        return payload.literal_type.value
+    return "string"
+
+
+def _primitive_type(value):
+    if type(value) is bool:
+        return "boolean"
+    if type(value) is int:
+        return "integer"
+    if isinstance(value, (Decimal, float)):
+        return "number"
+    if isinstance(value, datetime):
+        return "datetime"
+    if isinstance(value, date):
+        return "date"
+    if isinstance(value, str):
+        return "string"
+    return "unknown"
+
+
+def _identity_contract(payload):
+    if isinstance(payload, IdentityValuePayload):
+        key = payload.key
+    elif isinstance(payload, IdentitySetValuePayload):
+        key = payload.keys[0]
+    else:
+        return None
+    return {
+        "entity_kind": key.entity_kind,
+        "key_id": key.key_id,
+        "components": [item.component_id for item in key.components],
+    }
+
+
+def projection_description(value, component, item_index=None):
+    payload = value.payload
+    identity = _identity_contract(payload)
+    original_component = component
+    if identity and component == "value" and len(identity["components"]) == 1:
+        component = "key_component:" + identity["components"][0]
+    kind = _projection_type(payload, component)
+    if identity and original_component == "value":
+        kind = "array" if isinstance(payload, IdentitySetValuePayload) else "string"
+    if item_index is not None and isinstance(payload, IdentitySetValuePayload):
+        kind = _primitive_type(
+            payload.keys[item_index].component_value(component.split(":", 1)[1])
+        )
+    elif item_index is not None and isinstance(payload, StringSetValuePayload):
+        kind = "string"
+    return {
+        "kind": value.kind.value,
+        "identity": identity,
+        "projection": component,
+        "value_type": kind,
+        **({"value": payload.value} if isinstance(payload, LiteralValuePayload) else {}),
+    }
+
+
+def with_reference_arguments(menu, references):
+    """Expose guarded relation fields as per-row REST argument bindings."""
+    from fervis.lookup.answer_program.expressions import FieldRef
+
+    expressions, descriptions = dict(menu.expressions), dict(menu.descriptions)
+    for position, reference in enumerate(references, start=1):
+        key = reference.table['candidate_keys'][0]
+        for index, (component, column) in enumerate(key['components'].items(), start=1):
+            name = f'r{position}_{index}'
+            if name in expressions:
+                raise ValueError('Reference argument symbol collides with an input')
+            expressions[name] = FieldRef(reference.view.columns[column])
+            descriptions[name] = {
+                'kind':'reference_argument', 'input_ref':reference.table['input_ref'],
+                'input_refs':list(reference.input_refs),
+                'relation_id':reference.view.relation_id, 'view':reference.view.name,
+                'column':column, 'value_type':reference.table['columns'][column]['type'],
+                'identity':{'entity_kind':key['entity_kind'], 'key_id':key['key_id'],
+                            'components':list(key['components'])},
+                'projection':'key_component:'+component,
+                'label':f"{reference.table.get('operand_meaning', reference.table['input_ref'])}: {component}",
+            }
+    return replace(menu, expressions=expressions, descriptions=descriptions)
+
+
+def without_input_parameters(menu, input_refs):
+    """Keep compiler-owned inputs bound without offering them for SQL authoring."""
+    names={name for name,description in menu.descriptions.items() if description.get('input_ref') not in input_refs}
+    return replace(menu, expressions={name:expression for name,expression in menu.expressions.items() if name in names},
+                   descriptions={name:description for name,description in menu.descriptions.items() if name in names})

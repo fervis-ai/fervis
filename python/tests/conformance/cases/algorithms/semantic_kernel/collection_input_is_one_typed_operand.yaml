@@ -52,13 +52,16 @@ input:
         operands:
         - meaning: the alternative members included in the result
           denotation_basis: Each supplied member name refers to one particular member.
+          answer_request_numbers: [1]
           entity_reference:
             instance_kind: member
             value:
               kind: identity_alternatives
               identity_values:
-              - member A
-              - member B
+              - kind: literal
+                value: member A
+              - kind: literal
+                value: member B
               origin:
                 kind: question
       question_input_inventory_check:

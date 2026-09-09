@@ -702,6 +702,7 @@ def test_semantic_question_frame_schema_is_valid_and_basis_first():
     assert tuple(identity["properties"]) == (
         "meaning",
         "denotation_basis",
+        "answer_request_numbers",
         "entity_reference",
     )
     reference = identity["properties"]["entity_reference"]
@@ -985,13 +986,14 @@ def _question_frame_payload(
     supplied_value: dict[str, object] = {
         "meaning": "the supplied value",
         "denotation_basis": "This states what the supplied value denotes.",
+        "answer_request_numbers": [1],
     }
     if denotation_kind == "identity_reference":
         supplied_value["entity_reference"] = {
             "instance_kind": instance_kind,
             "value": {
                 "kind": "single_identity",
-                "identity_value": operand,
+                "identity_value": {"kind": "literal", "value": operand},
                 "origin": {"kind": "question"},
             },
         }

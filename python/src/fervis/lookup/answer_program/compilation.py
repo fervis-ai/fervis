@@ -19,7 +19,7 @@ from fervis.lookup.answer_program.values import (
     BindingSet,
     EnvironmentRef,
 )
-from fervis.lookup.question_contract import QuestionContract
+from fervis.lookup.question_contract import QuestionContract, QueryQuestionContract
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.relation_catalog.row_sources.model import RowSourceCatalog
@@ -30,7 +30,7 @@ from fervis.lookup.relation_catalog.row_sources.lookup import row_source_for_rel
 def compile_answer_program(
     program: AnswerProgram,
     *,
-    question_contract: QuestionContract,
+    question_contract: QuestionContract | QueryQuestionContract,
     catalog: RelationCatalog,
     bindings: BindingSet,
     memory_relations: tuple[RelationRows, ...] = (),

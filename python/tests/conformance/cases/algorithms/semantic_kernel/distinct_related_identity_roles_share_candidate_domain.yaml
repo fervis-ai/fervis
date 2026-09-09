@@ -38,20 +38,26 @@ input:
         operands:
         - meaning: source account
           denotation_basis: Account A identifies the source account.
+          answer_request_numbers: [1]
           entity_reference:
             instance_kind: account
             value:
               kind: single_identity
-              identity_value: Account A
+              identity_value:
+                kind: literal
+                value: Account A
               origin:
                 kind: question
         - meaning: destination account
           denotation_basis: Account B identifies the destination account.
+          answer_request_numbers: [1]
           entity_reference:
             instance_kind: account
             value:
               kind: single_identity
-              identity_value: Account B
+              identity_value:
+                kind: literal
+                value: Account B
               origin:
                 kind: question
       question_input_inventory_check:

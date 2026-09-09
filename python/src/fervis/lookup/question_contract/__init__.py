@@ -37,6 +37,12 @@ from .model import (
     Quantify,
     RelatedRow,
     RequestedFact,
+    QueryOperationDeclaration,
+    QuerySourceDeclaration,
+    QueryParameterDeclaration,
+    QueryQuestionContract,
+    QueryRequestedFact,
+    QueryRequestedOutput,
     SetTerm,
     TemporalBucket,
 )
@@ -92,4 +98,9 @@ __all__ = [
     "semantic_value_type",
     "parse_semantic_question_contract",
     "parse_semantic_question_frame",
+]
+
+__all__ += [
+    "QueryOperationDeclaration", "QuerySourceDeclaration", "QueryParameterDeclaration",
+    "QueryQuestionContract", "QueryRequestedFact", "QueryRequestedOutput",
 ]

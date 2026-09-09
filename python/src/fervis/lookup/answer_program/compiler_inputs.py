@@ -123,3 +123,25 @@ def compiler_input_context_from_program_inputs(
         expressions_by_value_id=expressions,
         value_types_by_value_id=value_types,
     )
+
+
+def program_value_parameter_id(value_ref: str) -> str:
+    return f'value.{value_ref}'
+
+
+def grounded_program_inputs(canonical_values, *, fixed_value_refs=frozenset()) -> ProgramInputs:
+    """Preserve one canonical value, its question-use signature and its evidence."""
+    from fervis.lookup.answer_program.values import (ParameterDeclaration, ParameterRole, ParameterBinding,
+        BindingProvenance, BindingProvenanceKind, BindingSet)
+    from fervis.lookup.contract_codec import canonical_contract_fingerprint
+    parameters,bindings=[],[]
+    for value in canonical_values:
+        parameter_id=program_value_parameter_id(value.canonical_value_id)
+        parameters.append(ParameterDeclaration(parameter_id,ParameterRole.QUESTION_INPUT,
+            parameter_value_type(value.typed_value),input_ref=value.input_ref,input_use_refs=value.use_refs,
+            fixed_value_fingerprint=canonical_contract_fingerprint(value.typed_value.payload)
+                if value.canonical_value_id in fixed_value_refs else ''))
+        bindings.append(ParameterBinding(parameter_id,value.typed_value,
+            BindingProvenance(BindingProvenanceKind.QUESTION_INPUT,
+                              tuple(dict.fromkeys((value.input_ref,*value.certification_refs))))))
+    return ProgramInputs(tuple(parameters),BindingSet.from_bindings(tuple(bindings)))

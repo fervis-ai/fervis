@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fervis.lookup.answer_program.operations import JoinMode
+from fervis.lookup.answer_program.operations import JoinMode, SqlQuerySpec
 
 from typing_extensions import assert_never
 
@@ -42,7 +42,10 @@ def verify_operation(operation: Operation) -> None:
     spec = operation.spec
     if not isinstance(spec, ComputeSpec) and not operation.output_relation:
         raise VerificationError(f"{operation.id} requires output relation")
-    if isinstance(spec, FilterSpec):
+    if isinstance(spec, SqlQuerySpec):
+        from fervis.lookup.relational_sql.operation import validate_sql_operation
+        validate_sql_operation(spec)
+    elif isinstance(spec, FilterSpec):
         _require_input(spec.input_relation, "filter")
         _require_condition(spec.condition, "filter")
     elif isinstance(spec, ProjectSpec):

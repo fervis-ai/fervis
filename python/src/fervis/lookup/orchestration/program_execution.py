@@ -35,7 +35,6 @@ from fervis.lookup.lineage.steps import (
 from fervis.lookup.orchestration.request import LookupRequest
 from fervis.lookup.orchestration.result import LookupResult, RunStatus
 from fervis.lookup.plan_execution.errors import VerificationError
-from fervis.lookup.question_contract import QuestionContract
 from fervis.observability.event_contracts import EventPayloadKey
 
 from .result_synthesis import _synthesize_result
@@ -183,7 +182,10 @@ def run_answer_program_execution(
         EventPayloadKey.RUN_ID: request.run_id,
         EventPayloadKey.RELATION_COUNT: len(execution.relations),
     }
-    if execution.issue is not None:
+    reference_issue = (
+        execution.issue is not None and execution.issue.reference is not None
+    )
+    if execution.issue is not None and not reference_issue:
         execution_payload.update(
             {
                 EventPayloadKey.ERROR_CODE: execution.issue.kind.value,
@@ -202,6 +204,44 @@ def run_answer_program_execution(
         source_reads=execution_lineage.source_reads,
         artifacts=execution_lineage.artifacts,
     )
+    if reference_issue:
+        from .terminal_results import reference_clarification_fact_result
+
+        try:
+            reference_result = reference_clarification_fact_result(
+                execution.issue, contract=program.question_contract
+            )
+        except ValueError as exc:
+            record_runtime_error_lineage(
+                request=request,
+                ports=ports,
+                failed_step_id=execution_step_id(ports),
+                error_code=ErrorCode.PLAN_VALIDATION_FAILED,
+                message=str(exc),
+            )
+            return LookupResult(
+                status=RunStatus.FAILED,
+                error=ErrorCode.PLAN_VALIDATION_FAILED,
+                usage=usage or {},
+            )
+        return _synthesize_result(
+            request=request,
+            ports=ports,
+            fact_result=reference_result,
+            status=RunStatus.NEEDS_CLARIFICATION,
+            usage=usage or {},
+            question_contract=program.question_contract,
+            grounded_values=grounded_values,
+            extra_fact_addresses=extra_fact_addresses,
+            known_input_step_id=known_input_step_id,
+            question_contract_step_id=question_contract_step_id,
+            compile_step_id=compile_step_id(ports),
+            execute_step_id=execution_step_id(ports),
+            proof_graph=execution.proof_graph,
+            answer_plan=execution.program,
+            proof_node_refs_by_result_output_id=execution.proof_node_refs_by_result_output_id,
+            conversation_resolution_activation=conversation_resolution_activation,
+        )
     if execution.issue is not None or execution.fact_result is None:
         error_code = (
             execution.issue.kind.value
@@ -228,11 +268,7 @@ def run_answer_program_execution(
         fact_result=execution.fact_result,
         status=_status_for_fact_result(execution.fact_result),
         usage=usage or {},
-        question_contract=QuestionContract(
-            inputs=program.inputs,
-            requested_facts=execution.effective_requested_facts,
-            input_denotations=program.input_denotations,
-        ),
+        question_contract=program.question_contract,
         grounded_values=grounded_values,
         extra_fact_addresses=extra_fact_addresses,
         known_input_step_id=known_input_step_id,

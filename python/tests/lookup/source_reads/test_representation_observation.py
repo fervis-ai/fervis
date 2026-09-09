@@ -792,6 +792,8 @@ def test_continuation_inspection_failure_retains_terminal_usage_and_lineage(
     state = SimpleNamespace(
         request=SimpleNamespace(run_id="continuation_failure"),
         conversation_turn=SimpleNamespace(usage={"costUsd": 0.01}),
+        conversation_failed_usage={"costUsd": 0.005},
+        conversation_turn_number=2,
         semantic_usage={"costUsd": 0.02},
         full_catalog=RelationCatalog(
             reads=(
@@ -840,7 +842,7 @@ def test_continuation_inspection_failure_retains_terminal_usage_and_lineage(
     )
     assert result.status == "FAILED"
     assert result.error == "program_execution_failed"
-    assert result.usage["costUsd"] == pytest.approx(0.03)
+    assert result.usage["costUsd"] == pytest.approx(0.035)
     assert len(recorder.reads) == 1
     assert len(recorder.errors) == 1
     assert recorder.errors[0].result.run_id == "continuation_failure"

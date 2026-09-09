@@ -59,6 +59,7 @@ input:
         operands:
         - meaning: the reporting period
           denotation_basis: April 2026 is a period applied to event occurrences.
+          answer_request_numbers: [1, 2]
           non_entity_value:
             kind: temporal_scope
             value:

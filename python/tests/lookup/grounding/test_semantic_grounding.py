@@ -635,6 +635,8 @@ def test_abstract_numeric_inputs_receive_canonical_scalar_values(operand, expect
     )
     assert len(values) == 1
     assert values[0].typed_value.payload.value == expected
+    from fervis.lookup.relational_sql.parameters import query_parameter_menu
+    assert query_parameter_menu(values).descriptions['p1_1']['value'] == expected
 
 @pytest.mark.parametrize('shape', ['range', 'open_range'])
 def test_explicit_date_interval_has_calendar_day_precision(shape):

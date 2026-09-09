@@ -1,6 +1,8 @@
 """Terminal-result assembly owned by the semantic lookup runtime."""
 
 from hashlib import sha256
+from dataclasses import replace
+from fervis.lookup.question_contract.grounding_context import grounding_fact_context
 
 from fervis.lookup.clarification import (
     ClarificationCause,
@@ -25,7 +27,8 @@ from fervis.lookup.grounding import (
     IdentityExecutionFailureReason,
 )
 from fervis.lookup.outcomes.model import FactResult, NeedsClarification
-from fervis.lookup.question_contract import QuestionContract, analyze_requested_fact
+from fervis.lookup.question_contract import QuestionContract, QueryQuestionContract
+from fervis.lookup.question_contract.model import IntentQuestionContract
 from fervis.lookup.question_contract.clarification import (
     IncompleteFactualRequestKind,
     QuestionContractNeedsClarification,
@@ -73,7 +76,7 @@ def _question_contract_clarification_fact_result(
 def semantic_clarification_fact_result(
     cause: object,
     *,
-    contract: QuestionContract | None,
+    contract: QuestionContract | QueryQuestionContract | IntentQuestionContract | None,
 ) -> FactResult:
     if isinstance(cause, QuestionContractNeedsClarification):
         return _question_contract_clarification_fact_result(cause)
@@ -96,11 +99,9 @@ def semantic_clarification_fact_result(
 
 
 def _identity_cause(
-    cause: IdentityExecutionClarification
-    | NoCanonicalInterpretation
-    | NoResolverRoute,
+    cause: IdentityExecutionClarification | NoCanonicalInterpretation | NoResolverRoute,
     *,
-    contract: QuestionContract,
+    contract: QuestionContract | QueryQuestionContract | IntentQuestionContract,
 ) -> ClarificationCause:
     task_ref = cause.task_ref
     input_ref, use_refs = _identity_subject(cause, contract=contract)
@@ -165,16 +166,14 @@ def _identity_cause(
 
 
 def _identity_subject(
-    cause: IdentityExecutionClarification
-    | NoCanonicalInterpretation
-    | NoResolverRoute,
+    cause: IdentityExecutionClarification | NoCanonicalInterpretation | NoResolverRoute,
     *,
-    contract: QuestionContract,
+    contract: QuestionContract | QueryQuestionContract | IntentQuestionContract,
 ) -> tuple[str, tuple[str, ...]]:
     if isinstance(cause, IdentityExecutionClarification):
         return cause.input_ref, cause.use_refs
     for fact in contract.requested_facts:
-        index = analyze_requested_fact(
+        index = grounding_fact_context(
             fact,
             inputs={item.id: item for item in contract.inputs},
             input_denotations={
@@ -188,13 +187,13 @@ def _identity_subject(
 
 
 def _requested_fact_id(
-    contract: QuestionContract,
+    contract: QuestionContract | QueryQuestionContract | IntentQuestionContract,
     *,
     use_refs: tuple[str, ...],
 ) -> str:
     use_ref_set = set(use_refs)
     for fact in contract.requested_facts:
-        index = analyze_requested_fact(
+        index = grounding_fact_context(
             fact,
             inputs={item.id: item for item in contract.inputs},
             input_denotations={
@@ -258,3 +257,71 @@ def _source_binding_causes(
                 )
             )
     return tuple(output)
+
+
+def reference_clarification_fact_result(issue, *, contract):
+    """Use the normal identity clarification contract for an executed subplan."""
+    from fervis.lookup.grounding import IdentityExecutionCandidate
+
+    failure = issue.reference
+    if failure is None or contract is None:
+        raise ValueError("Reference clarification requires its input contract")
+    uses = tuple(
+        use.use_ref
+        for fact in contract.requested_facts
+        for use in grounding_fact_context(
+            fact,
+            inputs={item.id: item for item in contract.inputs},
+            input_denotations={
+                item.input_ref: item for item in contract.input_denotations
+            },
+        ).input_use_sites
+        if use.input_ref == failure.input_ref
+    )
+    if not uses:
+        raise ValueError("Reference clarification has no declared question input")
+    cause = IdentityExecutionClarification(
+        task_ref=f"executed_reference:{failure.input_ref}",
+        input_ref=failure.input_ref,
+        use_refs=uses,
+        reason=failure.reason,
+        evidence_refs=issue.proof_refs,
+        candidates=tuple(
+            IdentityExecutionCandidate(
+                key=key,
+                display_value=canonical_runtime_json(key.component_values()),
+                matched_field_ref="",
+                matched_field_path="",
+                resolver_read_id="",
+            )
+            for key in failure.candidates
+        ),
+    )
+    result = semantic_clarification_fact_result(cause, contract=contract)
+    if failure.operand:
+        term = next(item for item in contract.inputs if item.id == failure.input_ref)
+        if not isinstance(term.operand, tuple) or failure.operand not in term.operand:
+            raise ValueError("Reference operand is not a member of its declared input")
+        result = replace(
+            result,
+            outcome=replace(
+                result.outcome,
+                clarifications=tuple(
+                    replace(
+                        item,
+                        id=item.id
+                        + ":"
+                        + sha256(failure.operand.encode()).hexdigest()[:16],
+                        continuation=replace(
+                            item.continuation, reference_operand=failure.operand
+                        ),
+                        subjects=tuple(
+                            replace(subject, source_text=failure.operand)
+                            for subject in item.subjects
+                        ),
+                    )
+                    for item in result.outcome.clarifications
+                ),
+            ),
+        )
+    return result

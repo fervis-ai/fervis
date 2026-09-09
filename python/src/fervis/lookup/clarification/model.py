@@ -154,8 +154,11 @@ class QuestionContractContinuation:
 class GroundingContinuation:
     known_input_id: str
     accepts_free_text: bool = False
+    reference_operand: str = ""
 
     def __post_init__(self) -> None:
+        if not isinstance(self.reference_operand,str):
+            raise ValueError("Reference operand must be text")
         if not self.known_input_id:
             raise ValueError("grounding continuation requires known_input_id")
 
@@ -323,6 +326,7 @@ class GroundingIdentityResponse:
     requested_fact_id: str
     known_input_id: str
     option: ClarificationOption
+    reference_operand: str = ""
 
 
 @dataclass(frozen=True)

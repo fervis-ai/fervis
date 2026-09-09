@@ -36,6 +36,7 @@ from fervis.lookup.answer_program.operations import (
     ComputeSpec,
     FilterSpec,
     OrderSpec,
+    SqlQuerySpec,
     ProjectSpec,
     Take,
     AtPosition,
@@ -59,7 +60,7 @@ from fervis.lookup.answer_program.expressions import (
     expression_input_id,
     expression_references,
 )
-from fervis.lookup.question_contract import InputTerm, RequestedFact
+from fervis.lookup.question_contract import InputTerm, RequestedFact, QueryRequestedFact
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
     ResolvedOperationInput,
@@ -185,7 +186,7 @@ class _MaterializedExecution(MaterializedRelationInputs):
     row_sources: RowSourceCatalog
     authority_ref: str
     proof_graph: ExecutionProofGraph
-    effective_requested_facts: tuple[RequestedFact, ...]
+    effective_requested_facts: tuple[RequestedFact | QueryRequestedFact, ...]
 
     @property
     def proof_node_refs_by_result_output_id(self) -> dict[str, tuple[str, ...]]:
@@ -359,6 +360,9 @@ def instantiate_relation_operations(
                             operation_id=operation.id,
                         )
                     )
+        if isinstance(spec, SqlQuerySpec):
+            for sql_expression in (*tuple(item.expression for item in spec.parameters),*spec.meaning_inputs):
+                inputs.extend(_resolve_expression_inputs(sql_expression, bindings=bindings, operation_id=operation.id))
         if isinstance(spec, ProjectSpec):
             for output in spec.outputs:
                 inputs.extend(
@@ -588,6 +592,7 @@ def _execution_proof_graph(
             ExecutionProofNode(
                 id=operation_node_id,
                 kind=ProofNodeKind.OPERATION,
+                operator=operation.kind.value,
             )
         )
         for node_id in dict.fromkeys(

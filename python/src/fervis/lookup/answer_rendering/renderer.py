@@ -80,7 +80,7 @@ def _render_rows(outcome: AnswerResult) -> tuple[Mapping[str, RuntimeValue], ...
     }
     return tuple(
         {
-            output_id: _render_value(value)
+            output_id: projected_row.display_values.get(output_id) or _render_value(value)
             for output_id, value in projected_row.values.items()
             if output_id in public_output_ids
         }

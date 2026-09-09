@@ -163,6 +163,7 @@ def test_computed_row_values_can_define_grouping_keys(boolean_key,comparison_for
         case["payload"]["outcome"]["answer_requests"][0]["ordering"] = []
         case["frame_payload"]["outcome"]["supplied_values"]["operands"].append({
             "meaning": "amount cutoff", "denotation_basis": "100 separates the requested groups.",
+            "answer_request_numbers": [1],
             "non_entity_value": {"kind": "number", "value": {
                 "operands": ["100"], "origin": {"kind": "question"},
             }},

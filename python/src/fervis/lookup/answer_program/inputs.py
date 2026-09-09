@@ -44,6 +44,7 @@ from fervis.lookup.answer_program.operations import (
     FilterSpec,
     JoinSpec,
     Operation,
+    SqlQuerySpec,
     ProjectSpec,
     ProjectToKeySpec,
     OrderSpec,
@@ -188,6 +189,11 @@ def _operation_value_expressions(
         )
     if isinstance(spec, FilterSpec):
         return _condition_value_expressions(operation.id, spec.condition)
+    if isinstance(spec, SqlQuerySpec):
+        return tuple(NamedValueExpression(sink=f"operation.{operation.id}.sql.{item.name}",
+                                         expression=item.expression) for item in spec.parameters) + tuple(
+            NamedValueExpression(sink=f"operation.{operation.id}.meaning.{index}",expression=item)
+            for index,item in enumerate(spec.meaning_inputs))
     if isinstance(spec, ProjectSpec):
         return tuple(
             NamedValueExpression(

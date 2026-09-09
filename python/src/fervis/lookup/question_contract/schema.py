@@ -620,10 +620,20 @@ def _rewrite_definition_refs(
         _rewrite_definition_refs(child, names=names, suffix=suffix)
 
 
+def _identity_operand_schema():
+    return output.IdentityOperandOutput.schema({
+        "kind": {"enum": ["literal", "description"]},
+        "value": {"type": "string", "minLength": 1,
+                  "description": "For literal, copy only the supplied name or code, excluding surrounding naming words. For description, copy the complete role or relational description whose entity must be established from data."},
+    })
+
+
 def _supplied_values_ledger_schema() -> dict[str, object]:
     common: dict[str, object] = {
         "meaning": {"type": "string", "minLength": 1},
         "denotation_basis": {"type": "string", "minLength": 1},
+        "answer_request_numbers": {"type":"array", "minItems":1, "maxItems":4,
+            "items":{"type":"integer", "minimum":1, "maximum":4}},
     }
     entity_item = output.SuppliedEntityReferenceOutput.schema(
         {
@@ -636,10 +646,7 @@ def _supplied_values_ledger_schema() -> dict[str, object]:
                             output.SingleIdentityValueOutput.schema(
                                 {
                                     "kind": {"enum": ["single_identity"]},
-                                    "identity_value": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                    },
+                                    "identity_value": _identity_operand_schema(),
                                     "origin": {"$ref": "#/$defs/frame_origin"},
                                 }
                             ),
@@ -649,10 +656,7 @@ def _supplied_values_ledger_schema() -> dict[str, object]:
                                     "identity_values": {
                                         "type": "array",
                                         "minItems": 1,
-                                        "items": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                        },
+                                        "items": _identity_operand_schema(),
                                     },
                                     "origin": {"$ref": "#/$defs/frame_origin"},
                                 }
@@ -687,7 +691,9 @@ def _supplied_values_ledger_schema() -> dict[str, object]:
         }
     ) | {
         "description": (
-            "Only concrete operand values already given by the question. Candidate "
+            "Entity references and literal values given by the question. References may "
+            "be names, codes, or definite descriptions whose identities are resolved "
+            "later from data. Candidate "
             "kinds, requested unknowns, grouping meanings, and observed or computed "
             "ordering meanings remain in answer_requests."
         )

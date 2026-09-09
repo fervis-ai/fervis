@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from fervis.lookup.source_reads.access_model import ReadAccessCatalog
+from fervis.lookup.question_contract.grounding_context import GroundingFactContext, grounding_context_from_index
 
 from dataclasses import dataclass
 from typing import TypeAlias
@@ -138,11 +139,16 @@ class SemanticReadEligibilityRequest:
     identity_tasks: tuple[IdentityResolutionTask, ...]
     resolver_catalog: RelationCatalog
     read_access: ReadAccessCatalog = ReadAccessCatalog()
+    fact_contexts: tuple[GroundingFactContext, ...] = ()
+
+    @property
+    def contexts(self) -> tuple[GroundingFactContext, ...]:
+        return self.fact_contexts or tuple(grounding_context_from_index(index) for index in self.indexes)
 
     def input_term(self, input_ref: str) -> InputTerm:
         terms = {
             index.input_by_ref[input_ref]
-            for index in self.indexes
+            for index in self.contexts
             if input_ref in index.input_by_ref
         }
         if len(terms) != 1:

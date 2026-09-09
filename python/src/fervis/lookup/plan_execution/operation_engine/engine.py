@@ -16,10 +16,12 @@ from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.outcomes.errors import (
     IncompleteEvidenceError,
+    UnresolvedReferenceError,
     UndefinedOperationError,
 )
 from fervis.lookup.outcomes.model import Undefined
 from fervis.lookup.answer_program.operations import (
+    SqlQuerySpec,
     AggregateSpec,
     AntiJoinSpec,
     CrossJoinSpec,
@@ -50,6 +52,7 @@ from .relation_operations import (
     _universal_condition,
 )
 from .shared import (
+    _expression_input_proofs,
     _input_relations,
     _input_scalar_proof_refs,
     _operation_proof_refs,
@@ -92,6 +95,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
     scalar_types: dict[str, str] = {}
     node_outputs: dict[str, dict[str, RuntimeValue]] = {}
     node_output_types: dict[str, dict[str, str]] = {}
+    node_output_proofs: dict[str, dict[str, tuple[str, ...]]] = {}
     for scalar_input in engine_input.scalar_inputs:
         if not isinstance(scalar_input, ScalarInput):
             raise RelationEngineError("scalar input must be ScalarInput")
@@ -106,6 +110,10 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
         try:
             for relation_id in operation_input_relation_ids(operation.spec):
                 require_relation(relation_id)
+            operation_proof_refs[operation.id] = tuple(dict.fromkeys((
+                *operation_proof_refs.get(operation.id, ()),
+                *_expression_input_proofs(operation, scalar_proofs, node_output_proofs),
+            )))
             result = _execute_operation(
                 operation,
                 relations,
@@ -118,6 +126,9 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                 environment_types=dict(engine_input.environment_types or {}),
                 operation_proof_refs=operation_proof_refs,
             )
+        except UnresolvedReferenceError as exc:
+            return RelationEngineOutput(relations=tuple(relations.values()),scalars=scalars,
+                scalar_proofs=scalar_proofs,scalar_types=scalar_types,issue=exc.issue())
         except IncompleteEvidenceError as exc:
             return RelationEngineOutput(
                 relations=tuple(relations.values()),
@@ -156,6 +167,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                     raise RelationEngineError(
                         f"operation {operation.id} did not produce one scalar row"
                     )
+                node_output_proofs[operation.id] = {output_id:result.evidence.proof_refs for output_id in scalar_output_ids}
                 node_output_types[operation.id] = {output_id:(result.field_types or {}).get(output_id, "") for output_id in scalar_output_ids}
                 node_outputs[operation.id] = {
                     output_id: result.rows[0][output_id]
@@ -175,6 +187,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                     *operation_proof_refs.get(operation.id, ()),
                 ),
             )
+            node_output_proofs[operation.id] = {output_scalar:scalar_proofs[output_scalar]}
             scalar_types[output_scalar] = expression_value_type(operation.spec.expression, scalar_types=scalar_types, node_output_types=node_output_types, environment_types=engine_input.environment_types)
             node_output_types[operation.id] = {output_scalar:scalar_types[output_scalar]}
         else:
@@ -207,6 +220,14 @@ def _execute_operation(
     operation_proof_refs: dict[str, tuple[str, ...]],
 ) -> RelationRows | RuntimeValue:
     spec = operation.spec
+    if isinstance(spec, SqlQuerySpec):
+        from fervis.lookup.relational_sql.operation import execute_sql_operation
+        from .expression_evaluator import ExpressionEnvironment
+        return execute_sql_operation(operation, relations,
+            environment=ExpressionEnvironment(scalars=scalars, scalar_types=scalar_types,
+                node_outputs=node_outputs, node_output_types=node_output_types,
+                environment_values=environment_values, environment_types=environment_types),
+            operation_refs=operation_proof_refs.get(operation.id, ()))
     if isinstance(spec, FilterSpec):
         return _filter(
             operation,

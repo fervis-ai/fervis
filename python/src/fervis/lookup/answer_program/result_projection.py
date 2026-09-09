@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 from fervis.lookup.canonical_data import (
@@ -22,6 +22,7 @@ class ProjectedResultRow:
     relation_id: str
     row_index: int
     values: Mapping[str, ResultValue]
+    display_values: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -82,8 +83,11 @@ class RelationResultOutput:
     entity_key: EntityKeyProjection | None = None
     label: str = ""
     role: str = ""
+    display_field_id: str = ""
 
     def __post_init__(self) -> None:
+        if self.display_field_id and self.entity_key is None:
+            raise ResultProjectionError("display fields require an entity output")
         if bool(self.field_id) == bool(self.entity_key):
             raise ResultProjectionError(
                 "relation result output requires exactly one field or entity key"
@@ -99,6 +103,19 @@ class RelationResultOutput:
         if self.field_id not in row:
             raise ResultProjectionError("result field is unavailable")
         return row[self.field_id]
+
+
+    def project_display(self, row: Mapping[str, RuntimeValue]) -> str:
+        if not self.display_field_id:
+            return ''
+        if self.display_field_id not in row:
+            raise ResultProjectionError('entity display field is unavailable')
+        value=row[self.display_field_id]
+        if value is None:
+            return ''
+        if not isinstance(value,str):
+            raise ResultProjectionError('entity display value must be text')
+        return value
 
 
 @dataclass(frozen=True)
@@ -135,6 +152,7 @@ class ResultProjection:
                     relation_id=relation_id,
                     row_index=row_index,
                     values={output.id: output.project(row) for output in outputs},
+                    display_values={output.id:output.project_display(row) for output in outputs if output.display_field_id},
                 )
                 for row_index, row in enumerate(rows)
             )

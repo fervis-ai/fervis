@@ -364,3 +364,26 @@ def test_orchestrated_identity_evidence_records_each_tasks_response():
         artifact.artifact_id for artifact in lineage.artifacts
     }
     assert all(read.response_hash for read in lineage.source_reads)
+
+
+@pytest.mark.parametrize('alternative_field',[False,True])
+@pytest.mark.parametrize('truncated',[False,True])
+def test_uniqueness_proof_covers_the_entire_identity_match_predicate(alternative_field,truncated):
+    read=_staff_read()
+    read=replace(read,candidate_keys=(*read.candidate_keys,CandidateKey('full_name','staff',
+        (CandidateKeyComponent('full_name','field.data.full_name'),),stable=True)))
+    case=_identity_case('Ada',catalog=RelationCatalog(reads=(read,)))
+    if alternative_field:
+        route=case.task.resolver_routes[0]
+        case.task=replace(case.task,resolver_routes=(replace(route,compatibility=replace(route.compatibility,
+            returned_identity_verification_field_paths=('data.full_name','data.first_name'))),))
+    rows=[{'staff_id':'staff_1','full_name':'Ada','first_name':'Ada'}]
+    if not truncated:rows.append({'staff_id':'staff_2','full_name':'Ada Byron','first_name':'Ada'})
+    result=case.execute(_DataAccess({'data':rows},truncated=truncated))
+    if not alternative_field:
+        assert isinstance(result,ResolvedIdentity)
+        assert result.canonical_value.typed_value.payload.key.component_values()=={'staff_id':'staff_1'}
+    else:
+        assert isinstance(result,IdentityExecutionClarification)
+        assert result.reason is (IdentityExecutionFailureReason.INVALID_RESOLVER_RESULT if truncated
+            else IdentityExecutionFailureReason.AMBIGUOUS_RESULT)

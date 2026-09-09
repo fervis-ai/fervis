@@ -23,7 +23,7 @@ from .execution_proof import ExecutionProofContext
 from .operation_contracts import _operation_relation_contract
 from fervis.lookup.plan_execution.expression_schema import expression_value_type
 from fervis.lookup.answer_program.inputs import parameter_runtime_type
-from fervis.lookup.answer_program.operations import operation_scalar_output_ids
+from fervis.lookup.answer_program.operations import operation_scalar_output_ids, operation_expression_references
 from fervis.lookup.answer_program.operations import (
     ComputeSpec,
     Operation,
@@ -53,6 +53,7 @@ def _relation_contracts(
     contracts: dict[str, RelationContract] = {}
     scalar_types = {f"parameter:{p.id}":parameter_runtime_type(p.value_type) for p in answer.parameters}
     node_output_types: dict[str, dict[str, str]] = {}
+    node_output_proofs: dict[str, dict[str, ProofLineage]] = {}
     for item in execution_schedule(answer):
         if isinstance(item, Relation):
             contract = _base_relation_contract(item, catalog=catalog, row_sources=row_sources, proof_context=proof_context)
@@ -69,15 +70,26 @@ def _relation_contracts(
             contracts[item.id] = _with_declared_semantic_guarantee(contract, declarations.pop(item.id, None))
             continue
         operation = item
+        value_refs = set(proof_context.operation_refs.get(operation.id, ()))
+        for refs in operation_expression_references(operation.spec):
+            for ref in refs.outputs:
+                producer = node_output_proofs.get(ref.node_id, {})
+                if ref.output_id not in producer:
+                    raise VerificationError('Derived operation input has no producer proof contract')
+                value_refs.update(producer[ref.output_id].value_refs)
+        current_proof = replace(proof_context,operation_refs={**proof_context.operation_refs,
+                                                            operation.id:frozenset(value_refs)})
         if isinstance(operation.spec, ComputeSpec):
+            node_output_proofs[operation.id] = {operation.spec.output_scalar:ProofLineage.value(frozenset(value_refs))}
             node_output_types[operation.id] = {operation.spec.output_scalar:expression_value_type(operation.spec.expression, scalar_types=scalar_types, node_output_types=node_output_types)}
         if not operation.output_relation:
             continue
         contract = _operation_relation_contract(
-            operation, contracts, proof_context=proof_context,
+            operation, contracts, proof_context=current_proof,
             scalar_types=scalar_types, node_output_types=node_output_types,
         )
         node_output_types[operation.id] = {key:contract.field_types.get(key, "") for key in operation_scalar_output_ids(operation.spec)}
+        node_output_proofs[operation.id] = {key:contract.field_proofs[key] for key in operation_scalar_output_ids(operation.spec)}
         contracts[operation.output_relation] = _with_declared_semantic_guarantee(
             contract, declarations.pop(operation.output_relation, None),
         )

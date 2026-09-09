@@ -9,9 +9,11 @@ from typing_extensions import assert_never
 
 from fervis.lookup.answer_program.expressions import Expression, ExpressionReferences, expression_input_id, expression_references
 from fervis.lookup.answer_program.values import ConstantRef, ParameterRef, NodeOutputRef
+from fervis.lookup.answer_program.result_projection import EntityKeyProjection
 
 
 class OperationKind(StrEnum):
+    SQL_QUERY = "sql_query"
     FILTER = "filter"
     PROJECT = "project"
     PROJECT_TO_KEY = "project_to_key"
@@ -232,8 +234,86 @@ def compute_value_input_id(expression: Expression) -> str:
     raise ValueError("compute input coverage requires a parameter or constant")
 
 
+@dataclass(frozen=True)
+class SqlColumnBinding:
+    name: str
+    field_id: str
+
+
+@dataclass(frozen=True)
+class SqlRelationInput:
+    name: str
+    relation_id: str
+    columns: tuple[SqlColumnBinding, ...]
+
+    def __post_init__(self):
+        names = tuple(item.name.casefold() for item in self.columns)
+        if not self.name or not self.relation_id or len(set(names)) != len(names):
+            raise ValueError('SQL relation input requires unique named columns')
+        if any(not item.name or not item.field_id for item in self.columns):
+            raise ValueError('SQL column binding is incomplete')
+
+
+@dataclass(frozen=True)
+class SqlNamedInput:
+    name: str
+    expression: Expression
+
+
+SQL_VALUE_TYPES = ("integer", "number", "string", "boolean", "date", "datetime", "uuid")
+
+
+@dataclass(frozen=True)
+class SqlOutputField:
+    id: str
+    value_type: str
+
+    def __post_init__(self):
+        if self.value_type not in SQL_VALUE_TYPES:
+            raise ValueError("SQL output has an unsupported scalar type")
+
+
+@dataclass(frozen=True)
+class SqlQuerySpec:
+    query: str
+    inputs: tuple[SqlRelationInput, ...]
+    outputs: tuple[SqlOutputField, ...]
+    parameters: tuple[SqlNamedInput, ...] = ()
+    scalar: bool = False
+    # Fixed lexical inputs interpreted against catalog semantics when authoring
+    # this query. They carry evidence and cannot be rebound as runtime values.
+    meaning_inputs: tuple[ParameterRef, ...] = ()
+    entity_keys: tuple[EntityKeyProjection, ...] = ()
+    reference_input_ref: str = ""
+    reference_operand: str = ""
+    timezone: str = "UTC"
+    kind: OperationKind = field(default=OperationKind.SQL_QUERY, init=False)
+
+    def __post_init__(self):
+        if not isinstance(self.timezone, str) or not self.timezone.strip():
+            raise ValueError("SQL timezone must be a nonempty name")
+        if not isinstance(self.reference_input_ref,str) or (self.reference_input_ref and not self.reference_input_ref.strip()):
+            raise ValueError('Reference query input ref must be a nonempty string when present')
+        if not isinstance(self.reference_operand,str):
+            raise ValueError("Reference operand must be text")
+        if self.reference_operand and not self.reference_input_ref:
+            raise ValueError("Reference operand requires an owning input")
+        if self.reference_input_ref:
+            if not self.scalar or len(self.entity_keys)!=1 or {item.id for item in self.outputs}!={item.field_id for item in self.entity_keys[0].components}:
+                raise ValueError('Reference query must return exactly one complete identity key')
+
+        if not self.query.strip() or not self.inputs or not self.outputs:
+            raise ValueError('SQL operation requires a query, input views and output fields')
+        for names in (tuple(item.name for item in self.inputs),
+                      tuple(item.name for item in self.parameters),
+                      tuple(item.id for item in self.outputs)):
+            if len(names) != len(set(names)) or any(not name for name in names):
+                raise ValueError('SQL operation names must be nonempty and unique')
+
+
 OperationSpec: TypeAlias = (
-    FilterSpec
+    SqlQuerySpec
+    | FilterSpec
     | ProjectSpec
     | ProjectToKeySpec
     | JoinSpec
@@ -296,12 +376,16 @@ def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
         )
     if isinstance(spec, ComputeSpec):
         return ()
+    if isinstance(spec, SqlQuerySpec):
+        return tuple(dict.fromkeys(item.relation_id for item in spec.inputs))
     assert_never(spec)
 
 
 def operation_expression_references(spec: OperationSpec) -> tuple[ExpressionReferences, ...]:
     expressions: tuple[Expression, ...]
-    if isinstance(spec, ComputeSpec):
+    if isinstance(spec, SqlQuerySpec):
+        expressions = (*tuple(item.expression for item in spec.parameters), *spec.meaning_inputs)
+    elif isinstance(spec, ComputeSpec):
         expressions = (spec.expression,)
     elif isinstance(spec, FilterSpec):
         expressions = (spec.condition,)
@@ -328,6 +412,8 @@ def operation_scalar_output_ids(spec: OperationSpec) -> tuple[str, ...]:
 
     if isinstance(spec, ComputeSpec):
         return (spec.output_scalar,) if spec.output_scalar else ()
+    if isinstance(spec, SqlQuerySpec) and spec.scalar:
+        return tuple(item.id for item in spec.outputs)
     if isinstance(spec, AggregateSpec) and not spec.group_by:
         return tuple(aggregation.output_field for aggregation in spec.aggregations)
     return ()

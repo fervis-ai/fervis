@@ -56,6 +56,7 @@ input:
         operands:
         - meaning: March 2026
           denotation_basis: March 2026 bounds the event occurrences.
+          answer_request_numbers: [1]
           non_entity_value:
             kind: temporal_scope
             value:

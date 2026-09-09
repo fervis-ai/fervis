@@ -28,7 +28,7 @@ from fervis.lookup.answer_program.values import BindingSet
 from fervis.lookup.contract_codec import answer_program_id
 from fervis.lookup.answer_program.persistence import ProgramInvocationBinding
 from fervis.lineage.enums import ProgramInvocationKind
-from fervis.lookup.question_contract import RequestedFact
+from fervis.lookup.question_contract import RequestedFact, QueryRequestedFact
 
 if TYPE_CHECKING:
     from fervis.lookup.memory.projection import LookupMemory
@@ -47,7 +47,7 @@ class AnswerExecution:
     relations: tuple[RelationRows, ...] = ()
     proof_refs: tuple[str, ...] = ()
     proof_graph: ExecutionProofGraph = field(default_factory=ExecutionProofGraph)
-    effective_requested_facts: tuple[RequestedFact, ...] = ()
+    effective_requested_facts: tuple[RequestedFact | QueryRequestedFact, ...] = ()
     row_context: RowContextStore = field(default_factory=RowContextStore)
 
 

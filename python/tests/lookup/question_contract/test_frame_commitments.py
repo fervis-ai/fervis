@@ -42,7 +42,7 @@ def test_equal_names_preserve_independently_declared_references(kinds):
     request = case("distinct_related_identity_roles_share_candidate_domain")
     operands = request["frame_payload"]["outcome"]["supplied_values"]["operands"]
     for operand, kind in zip(operands, kinds):
-        operand["entity_reference"]["value"]["identity_value"] = "Central"
+        operand["entity_reference"]["value"]["identity_value"] = {"kind": "literal", "value": "Central"}
         operand["entity_reference"]["instance_kind"] = kind
     meaning = parse_semantic_question_frame(
         request["frame_payload"],

@@ -26,7 +26,7 @@ def build_semantic_read_eligibility_schema(
             "read_assessments_by_requested_fact": _closed_object(
                 {
                     index.requested_fact_id: _closed_object(reads)
-                    for index in request.indexes
+                    for index in request.contexts
                 }
             ),
             "identity_outcomes": _closed_object(outcomes),

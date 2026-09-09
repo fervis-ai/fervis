@@ -44,16 +44,22 @@ class NonEntityValueOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class IdentityOperandOutput(ProviderOutput):
+    kind: str
+    value: str
+
+
+@dataclass(frozen=True)
 class SingleIdentityValueOutput(ProviderOutput):
     kind: str
-    identity_value: str
+    identity_value: IdentityOperandOutput
     origin: FrameOriginOutput
 
 
 @dataclass(frozen=True)
 class IdentityAlternativesValueOutput(ProviderOutput):
     kind: str
-    identity_values: tuple[str, ...]
+    identity_values: tuple[IdentityOperandOutput, ...]
     origin: FrameOriginOutput
 
 
@@ -67,6 +73,7 @@ class EntityReferenceOutput(ProviderOutput):
 class SuppliedEntityReferenceOutput(ProviderOutput):
     meaning: str
     denotation_basis: str
+    answer_request_numbers: tuple[int, ...]
     entity_reference: EntityReferenceOutput
 
 
@@ -93,6 +100,7 @@ class DurationOperandOutput(ProviderOutput):
 class SuppliedNonEntityValueOutput(ProviderOutput):
     meaning: str
     denotation_basis: str
+    answer_request_numbers: tuple[int, ...]
     non_entity_value: ProviderObject
 
 

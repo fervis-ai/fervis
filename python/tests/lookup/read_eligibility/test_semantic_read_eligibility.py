@@ -561,11 +561,12 @@ def _semantic_contract() -> ParsedSemanticQuestionContract:
                             "denotation_basis": (
                                 "Ada names one particular staff member."
                             ),
+                            "answer_request_numbers": [1],
                             "entity_reference": {
                                 "instance_kind": "staff members",
                                 "value": {
                                     "kind": "single_identity",
-                                    "identity_value": "Ada",
+                                    "identity_value": {"kind": "literal", "value": "Ada"},
                                     "origin": {"kind": "question"},
                                 },
                             },

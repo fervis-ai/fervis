@@ -115,6 +115,8 @@ def _verify_result_references(
             raise VerificationError(
                 f"result output {relation_output.id} references unknown output field"
             )
+        if relation_output.display_field_id and contract.field_types.get(relation_output.display_field_id) not in {"string","text"}:
+            raise VerificationError("entity display field must be textual")
         if relation_output.entity_key is not None:
             _verify_declared_entity_key(relation_output, contract=contract)
         if relation_output.entity_key is None and any(
@@ -275,5 +277,6 @@ def _operation_input_refs_for_all(operations: tuple[Operation, ...]) -> tuple[st
 
 def _result_output_field_ids(output: RelationResultOutput) -> tuple[str, ...]:
     if output.entity_key is not None:
-        return tuple(component.field_id for component in output.entity_key.components)
+        return (*tuple(component.field_id for component in output.entity_key.components),
+                *((output.display_field_id,) if output.display_field_id else ()))
     return (output.field_id,)

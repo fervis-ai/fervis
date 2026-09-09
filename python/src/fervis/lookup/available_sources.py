@@ -296,10 +296,12 @@ def build_available_source_catalog(
     read_eligibility: SemanticReadEligibilityResult,
     snapshot_namespace: str = "test",
     read_access: ReadAccessCatalog = ReadAccessCatalog(),
+    requested_fact_id: str | None = None,
 ) -> AvailableSourceCatalog:
     retained_by_assessment = tuple(
         (assessment, source_refs)
         for assessment in read_eligibility.read_assessments
+        if requested_fact_id is None or assessment.requested_fact_id == requested_fact_id
         if assessment.decision is SemanticReadDecision.RETAIN
         for source_refs in (
             _retained_row_source_refs(
@@ -320,6 +322,14 @@ def build_available_source_catalog(
     sources = tuple(
         source for source in row_sources.sources if source.id in retained_refs
     )
+    return snapshot_source_catalog(sources, snapshot_namespace=snapshot_namespace, read_access=read_access)
+
+
+def snapshot_source_catalog(
+    sources: tuple[RowSource, ...], *, snapshot_namespace: str = "test",
+    read_access: ReadAccessCatalog = ReadAccessCatalog(),
+) -> AvailableSourceCatalog:
+    """Capture source authority independently of a factual retention decision."""
     relations = row_source_relation_evidence(sources)
     snapshot_payload = {
         "sources": [asdict(source) for source in sources],

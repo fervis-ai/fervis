@@ -51,11 +51,14 @@ input:
         operands:
         - meaning: the staff member whose shifts qualify
           denotation_basis: Nadia Wanjiku is a supplied name for one staff member.
+          answer_request_numbers: [1]
           entity_reference:
             instance_kind: staff member
             value:
               kind: single_identity
-              identity_value: Nadia Wanjiku
+              identity_value:
+                kind: literal
+                value: Nadia Wanjiku
               origin:
                 kind: question
         selection_limits:

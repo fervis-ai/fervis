@@ -2,6 +2,8 @@
 
 from fervis.lookup.answer_program.compiler_inputs import (
     CompilerInputContext,
+    grounded_program_inputs,
+    program_value_parameter_id,
     compiler_input_context_from_program_inputs,
 )
 from fervis.lookup.answer_program.contracts import (
@@ -33,36 +35,9 @@ def semantic_compiler_inputs(
         for owner in choice.selection_requirement_refs
         for value_ref in request.requirement_value_refs(owner)
     }
-    parameters: list[ParameterDeclaration] = []
-    bindings: list[ParameterBinding] = []
-    for value in request.canonical_values:
-        parameter_id = _parameter_id(value.canonical_value_id)
-        parameters.append(
-            ParameterDeclaration(
-                id=parameter_id,
-                role=ParameterRole.QUESTION_INPUT,
-                value_type=parameter_value_type(value.typed_value),
-                input_ref=value.input_ref,
-                input_use_refs=value.use_refs,
-                fixed_value_fingerprint=canonical_contract_fingerprint(
-                    value.typed_value.payload
-                )
-                if value.canonical_value_id in mapped_value_refs
-                else "",
-            )
-        )
-        bindings.append(
-            ParameterBinding(
-                parameter_id=parameter_id,
-                value=value.typed_value,
-                provenance=BindingProvenance(
-                    kind=BindingProvenanceKind.QUESTION_INPUT,
-                    refs=tuple(
-                        dict.fromkeys((value.input_ref, *value.certification_refs))
-                    ),
-                ),
-            )
-        )
+    initial = grounded_program_inputs(request.canonical_values,fixed_value_refs=frozenset(mapped_value_refs))
+    parameters = list(initial.parameters)
+    bindings = list(initial.bindings.bindings)
     selected_choice_refs = {
         target.value_ref
         for application in verified.binding_plan.invocation_applications
@@ -137,7 +112,7 @@ def semantic_compiler_inputs(
 
 
 def _parameter_id(value_ref: str) -> str:
-    return f"value.{value_ref}"
+    return program_value_parameter_id(value_ref)
 
 
 __all__ = ["semantic_compiler_inputs"]

@@ -45,7 +45,7 @@ def validate_tool_arguments(
     output: dict[str, Any],
     tool_specs: tuple[ToolSpec, ...],
 ) -> None:
-    from .errors import RequiredToolOutputError
+    from .errors import RequiredToolOutputError, ModelValidationKind
 
     if not tool_spec.strict:
         return
@@ -57,6 +57,7 @@ def validate_tool_arguments(
             output=output,
             arguments=arguments,
             tool_specs=tool_specs,
+            validation_kind=ModelValidationKind.SCHEMA,
             error_context={
                 "argument_path": list(exc.absolute_path),
                 "schema_path": list(exc.absolute_schema_path),

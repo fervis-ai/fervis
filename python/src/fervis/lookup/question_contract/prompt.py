@@ -249,7 +249,10 @@ _MISSING_REQUESTED_FACT_INSTRUCTION = (
 _UNRESOLVED_PRIOR_REFERENCE_INSTRUCTION = (
     "Return kind=unresolved_prior_turn_references when the factual result is "
     "identifiable and a required person, object, time, or value is expressed "
-    "only by a pronoun or dependent phrase whose antecedent is absent."
+    "only by a pronoun or dependent phrase whose antecedent is absent. "
+    "A self-contained name, code, or role description remains a supplied entity "
+    "reference; it does not require prior conversation merely because its "
+    "identifier must be resolved from API data."
 )
 
 
@@ -259,10 +262,14 @@ Authoring order
 Write decision_basis first. For a complete question, write every answer_request,
 then supplied_values.
 
-decision_basis inventories the independent requested results and the concrete
-supplied operands that constrain or compute them. Candidate-population nouns
+decision_basis inventories the independent requested results and the
+references and literal values that constrain or compute them. Candidate-population nouns
 belong to requested meaning. Concrete names, codes, identifiers, times, and
 property values that restrict those candidates belong to supplied_values.
+A pre-existing definite entity description used to restrict other rows is also
+a supplied entity reference. Its identifier may need to be obtained from API
+data; a configured role or a particular relationship is not a candidate-kind
+modifier merely because no literal name is given.
 
 Answer requests
 
@@ -380,21 +387,27 @@ requested fact, not one fact per key.
 
 Supplied values
 
-supplied_values contains only concrete operand values already given by the
-question. Candidate kinds, requested unknowns, grouping meanings, and observed
+supplied_values contains entity references and literal operand values given
+by the question. A reference may identify its entity by a name, a code, or a
+definite description; its resolved identifier is obtained later from data. Candidate kinds, requested unknowns, grouping meanings, and observed
 or computed ordering meanings remain in answer_requests. A selection limit is
 declared only in supplied_values.selection_limits.
 
 A business subject or requested unknown belongs to the answer request.
 Entity references and values used by a condition or computation each belong to
-one supplied_values.operands item. Result counts belong to selection_limits.
+one supplied_values.operands item. Each operand declares answer_request_numbers:
+the one-based numbers of every answer request it constrains or computes. A shared
+condition belongs to every request that retains it, including a reference to those
+same qualifying rows. Independent requests keep their separate operands. Never
+assign an operand to a request merely because both occur in the question.
+Result counts belong to selection_limits.
 
 A business modifier may define the result row source when it names the
 business population, or a supplied scalar when it is independently compared.
 That meaning has one owner.
 
-A supplied value is a concrete operand already provided by the question for
-a comparison, arithmetic, time scope, or supplied collection. Qualifying rows
+A supplied value is an entity reference or literal value provided by the
+question for a comparison, arithmetic, time scope, or collection. Qualifying rows
 and required sets are owned by the result row-source field or relational_shape.
 A bounded result count is declared once in selection_limits for its answer
 request. Requested unknowns are owned by the answer request.
@@ -412,13 +425,19 @@ supplied_values.operands contains one item for each independent supplied operand
 role. Each item writes meaning and denotation_basis, then chooses exactly one
 closed branch.
 
-entity_reference is a supplied name, code, or identifier that denotes a
-person, organization, place, product, or other entity whose exact identity the
+entity_reference is a supplied name, code, identifier, or pre-existing definite
+entity description that denotes a person, organization, place, product, or other
+entity whose exact identity the
 question qualifies or returns. A name, code, or identifier used to locate that
 entity through a name, code, or identifier field remains an entity reference
 and requires canonical identity resolution or validation. Write instance_kind, then value. value is
 single_identity with one identity_value, or identity_alternatives with distinct
-identity_values that fill the same role. For conversation_resolution origin,
+identity_values that fill the same role. Each identity operand declares kind
+literal for an explicitly supplied name or code, or description for a role or
+relational description. A literal value contains the name or code itself; the
+surrounding words that introduce it belong to meaning. A description value
+contains the complete description. Preserve each member's form independently.
+For conversation_resolution origin,
 identity_value copies the shown resolved_value_text; resolved_input_ref is copied
 only into origin.
 

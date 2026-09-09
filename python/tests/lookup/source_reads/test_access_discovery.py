@@ -1,3 +1,4 @@
+from fervis.lookup.source_reads.access_model import ReadAccessCatalog
 from dataclasses import replace
 import pytest
 from jsonschema import validate
@@ -107,7 +108,7 @@ def test_pending_dependent_read_is_assessed_before_executable_filtering(monkeypa
     monkeypatch.setattr(compilation, "_turn", model_turn)
     access = compilation._discover_catalog_read_access(
         selection, resolver_catalog=RelationCatalog(reads=()),
-        request=SimpleNamespace(full_catalog=catalog),
+        request=SimpleNamespace(full_catalog=catalog, read_access=ReadAccessCatalog()),
         context=TurnPromptContext(current_question="How many instruments?"),
         on_turn=None,
     )

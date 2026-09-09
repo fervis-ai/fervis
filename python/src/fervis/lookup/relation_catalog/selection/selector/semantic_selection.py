@@ -8,6 +8,7 @@ from fervis.lookup.query_enrichment import (
     RecallBucketMatch,
     semantic_recall_buckets,
 )
+from fervis.lookup.query_enrichment.semantic import SemanticRecallBucket
 from fervis.lookup.question_contract import RequestedFactSemanticIndex
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.relation_catalog import CatalogFact
@@ -31,24 +32,36 @@ from .terms import _catalog_facts_by_read, _explicit_catalog_search_query_terms
 
 
 @dataclass(frozen=True)
+class FactRecallBuckets:
+    requested_fact_id: str
+    buckets: tuple[SemanticRecallBucket, ...]
+
+
+@dataclass(frozen=True)
 class SemanticCatalogSelectionRequest:
     relation_catalog: RelationCatalog
     indexes: tuple[RequestedFactSemanticIndex, ...]
     resource_matches: tuple[RecallBucketMatch, ...]
     max_reads_per_fact: int
+    fact_buckets: tuple[FactRecallBuckets, ...] = ()
+
+    @property
+    def facts(self):
+        return self.fact_buckets or tuple(FactRecallBuckets(index.requested_fact_id,semantic_recall_buckets(index))
+                                         for index in self.indexes)
 
 
 def select_semantic_relation_catalog(
     request: SemanticCatalogSelectionRequest,
 ) -> CatalogSelectionResult:
-    if request.max_reads_per_fact < 1 or not request.indexes:
+    if request.max_reads_per_fact < 1 or not request.facts:
         raise ValueError(
             "semantic catalog selection requires facts and a positive limit"
         )
     known_buckets = {
         bucket.bucket_ref
-        for index in request.indexes
-        for bucket in semantic_recall_buckets(index)
+        for fact in request.facts
+        for bucket in fact.buckets
     }
     matches = {item.bucket_ref: item for item in request.resource_matches}
     if len(matches) != len(request.resource_matches) or set(matches) != known_buckets:
@@ -58,12 +71,12 @@ def select_semantic_relation_catalog(
     read_facts = _catalog_facts_by_read(request.relation_catalog)
     selections = tuple(
         _select_semantic_fact(
-            index,
+            fact,
             request=request,
             matches=matches,
             read_facts=read_facts,
         )
-        for index in request.indexes
+        for fact in request.facts
     )
     selected_ids = selected_read_ids_from_fact_selections(selections)
     return CatalogSelectionResult(
@@ -77,13 +90,13 @@ def select_semantic_relation_catalog(
 
 
 def _select_semantic_fact(
-    index: RequestedFactSemanticIndex,
+    fact: FactRecallBuckets,
     *,
     request: SemanticCatalogSelectionRequest,
     matches: dict[str, RecallBucketMatch],
     read_facts: dict[str, tuple[CatalogFact, ...]],
 ) -> RequestedFactCatalogSelection:
-    buckets = semantic_recall_buckets(index)
+    buckets = fact.buckets
     recall_selections = tuple(
         resource_name_selection(
             resource_names=matches[bucket.bucket_ref].exhaustive_resource_names,
@@ -107,7 +120,7 @@ def _select_semantic_fact(
         )
     )
     return RequestedFactCatalogSelection(
-        requested_fact_id=index.requested_fact_id,
+        requested_fact_id=fact.requested_fact_id,
         query_terms=_explicit_catalog_search_query_terms(resource_names),
         rankings=selected,
         selected_read_ids=tuple(item.read_id for item in selected),

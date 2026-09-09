@@ -99,6 +99,7 @@ from fervis.lookup.relation_catalog.row_sources import (
 )
 from fervis.lookup.question_contract import (
     RequestedFact,
+    QueryRequestedFact,
     RequestedFactSemanticIndex,
     Singleton,
     SubjectRows,
@@ -340,7 +341,7 @@ def _multi_fact_outputs(
 
 
 def _multi_fact_output_label(
-    fact: RequestedFact,
+    fact: RequestedFact | QueryRequestedFact,
     *,
     answer_output_id: str,
 ) -> str:

@@ -210,6 +210,8 @@ def relative_response_path(field_path: str, row_path: str) -> str:
 
 
 def _path_part_value(value: Any, part: str, *, missing: object = None) -> Any:
+    if value is None:
+        return None
     if isinstance(value, dict):
         return value[part] if part in value else missing
     if isinstance(value, list):

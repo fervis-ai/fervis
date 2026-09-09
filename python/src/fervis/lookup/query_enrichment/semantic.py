@@ -56,7 +56,7 @@ class ReferenceInputRecallTask:
     input_ref: str
     input_origin: SourceOrigin
     operand_meaning: str
-    reference_fact_ref: FactLocalRef
+    reference_fact_ref: FactLocalRef | None
     expected_set_ref: FactLocalRef | None
 
 
@@ -235,7 +235,7 @@ def reference_input_recall_tasks(
         )
         for index in indexes
         for use in index.input_use_sites
-        if use.reference_fact_ref is not None
+        if use.is_identity_reference or use.reference_fact_ref is not None or use.identity_set_ref is not None
     )
 
 

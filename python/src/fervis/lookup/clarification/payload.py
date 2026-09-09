@@ -110,6 +110,7 @@ def _continuation_payload(
         return {
             "kind": "grounding",
             "knownInputId": continuation.known_input_id,
+            **({"referenceOperand":continuation.reference_operand} if continuation.reference_operand else {}),
             "acceptsFreeText": continuation.accepts_free_text,
         }
     if isinstance(continuation, SourceBindingCatalogInputContinuation):
@@ -155,8 +156,12 @@ def _continuation_from_payload(
             expected_value_kind=_required_text(payload, "expectedValueKind"),
         )
     if kind == "grounding":
+        operand=payload.get("referenceOperand", "")
+        if not isinstance(operand,str):
+            raise ValueError("Reference operand must be text")
         return GroundingContinuation(
             known_input_id=_required_text(payload, "knownInputId"),
+            reference_operand=operand,
             accepts_free_text=_boolean(payload.get("acceptsFreeText")),
         )
     target = _catalog_target_from_payload(_required_mapping(payload, "target"))

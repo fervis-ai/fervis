@@ -51,7 +51,6 @@ from fervis.lookup.clarification.model import (
 from fervis.lookup.answer_program.values import (
     FactValue,
 )
-from fervis.lookup.question_contract import QuestionContract
 from fervis.lookup.question_contract.request import QuestionContractRequest
 from fervis.lookup.orchestration.request import (
     LookupRequest,
@@ -120,6 +119,8 @@ class _LookupPipelineState:
     memory_card_projection: ConversationMemoryCardProjection
     activated_memory: ExpandedActivatedMemory | None = None
     conversation_turn: ConversationResolutionTurnResult | None = None
+    conversation_turn_number: int = 0
+    conversation_failed_usage: dict[str, Any] | None = None
     conversation_resolution: ConversationResolution | None = None
     compiled_conversation_resolution: CompiledConversationResolution | None = None
     full_catalog: Any = None
@@ -148,8 +149,16 @@ class _SemanticTurnRecorder:
             turn=self.next_turn,
             model_turn=model_turn,
         )
-        self.turn_numbers.setdefault(purpose, []).append(self.next_turn)
-        self.usage = _merge_usage(self.usage, model_turn.usage)
+        self._advance(purpose,model_turn.usage,succeeded=True)
+
+    def failed(self,purpose, failure):
+        _append_model_turn_failed(self.state,phase=purpose,turn=self.next_turn,exc=failure,strict_audit=True)
+        self._advance(purpose,failure.usage,succeeded=False)
+
+    def _advance(self,purpose,usage,*,succeeded):
+        if succeeded:
+            self.turn_numbers.setdefault(purpose, []).append(self.next_turn)
+        self.usage = _merge_usage(self.usage, usage)
         self.next_turn += 1
         failure = _limit_before_next_model_turn(
             self.state.ports,
@@ -254,7 +263,7 @@ def _run_semantic_compile_question(
                 for numbers in (state.semantic_turn_numbers or {}).values()
                 for number in numbers
             ),
-            default=1 if state.conversation_turn is not None else 0,
+            default=state.conversation_turn_number,
         )
         + 1,
         usage=dict(state.semantic_usage or {}),
@@ -281,6 +290,7 @@ def _run_semantic_compile_question(
             replace(
                 _semantic_compilation_request(state),
                 representation_observer=inspection.observe,
+                validation_failure_observer=recorder.failed,
                 identity_read_lineage=identity_audit.buffered.scope,
             ),
             on_turn=recorder,
@@ -556,7 +566,7 @@ def _run_continue_prior_request_execution(
     )
     recorder = _SemanticTurnRecorder(
         state=state,
-        next_turn=2,
+        next_turn=state.conversation_turn_number + 1,
         usage={},
         turn_numbers={},
     )
@@ -572,7 +582,8 @@ def _run_continue_prior_request_execution(
         grounded_values = resolve_semantic_continuation_arguments(
             execution.frame,
             replace(_semantic_compilation_request(state),
-                    identity_read_lineage=identity_audit.buffered.scope),
+                    identity_read_lineage=identity_audit.buffered.scope,
+                    validation_failure_observer=recorder.failed),
             on_turn=recorder,
         )
     except _RunLimitReached as exc:
@@ -598,11 +609,11 @@ def _run_continue_prior_request_execution(
     state.semantic_turn_numbers = recorder.turn_numbers
     if isinstance(grounded_values, IdentityExecutionClarification):
         program = execution.frame.program
-        question_contract = QuestionContract(
-            inputs=program.inputs,
-            requested_facts=program.fact_template,
-            input_denotations=program.input_denotations,
-        )
+        changed_inputs = {item.id:item for item in execution.frame.changed_inputs}
+        changed_denotations = {item.input_ref:item for item in execution.frame.changed_input_denotations}
+        question_contract = replace(program.question_contract,
+            inputs=tuple(changed_inputs.get(item.id,item) for item in program.inputs),
+            input_denotations=tuple(changed_denotations.get(item.input_ref,item) for item in program.input_denotations))
         return _synthesize_result(
             request=state.request,
             ports=state.ports,
@@ -703,6 +714,10 @@ def _run_conversation_resolution_phase(
         stage="conversation_resolution",
         message="resolving conversation context",
     )
+    recorder = _SemanticTurnRecorder(state, 1, {}, {})
+    def record_rejected(failure):
+        recorder.failed(ModelTurnPurpose.CONVERSATION_RESOLUTION, failure)
+        state.conversation_failed_usage = dict(recorder.usage)
     try:
         resolution_request = ConversationResolutionRequest(
             question=state.request.question,
@@ -718,19 +733,21 @@ def _run_conversation_resolution_phase(
             provider=state.provider,
             model_key=state.model_key,
             max_thinking_tokens=state.request.max_thinking_tokens,
+            validation_failure_observer=record_rejected,
         )
     except ConversationResolutionGenerationError as exc:
         return _model_turn_failure_result(
             state,
             phase=ModelTurnPurpose.CONVERSATION_RESOLUTION,
-            turn=1,
+            turn=recorder.next_turn,
             exc=exc,
-            usage=exc.usage,
+            usage=_merge_usage(recorder.usage, exc.usage),
         )
+    state.conversation_turn_number = recorder.next_turn
     _append_model_turn_completed(
         state,
         phase=ModelTurnPurpose.CONVERSATION_RESOLUTION,
-        turn=1,
+        turn=state.conversation_turn_number,
         model_turn=state.conversation_turn,
     )
     state.conversation_resolution = state.conversation_turn.result.outcome
@@ -743,13 +760,13 @@ def _run_conversation_resolution_phase(
             ports=state.ports,
             fact_result=fact_result,
             status=RunStatus.NEEDS_CLARIFICATION,
-            usage=state.conversation_turn.usage,
+            usage=_conversation_usage(state) or {},
             question_contract=None,
             grounded_values=(),
             question_contract_step_id=model_turn_step_id(
                 state.ports,
                 purpose=ModelTurnPurpose.CONVERSATION_RESOLUTION,
-                turn=1,
+                turn=recorder.next_turn,
             ),
         )
     try:
@@ -763,7 +780,7 @@ def _run_conversation_resolution_phase(
             state,
             error_code=ErrorCode.PLANNING_FAILED,
             message="conversation resolution could not be compiled",
-            usage=state.conversation_turn.usage,
+            usage=_conversation_usage(state) or {},
         )
     activation_error = _activate_selected_memory(state)
     if activation_error is not None:
@@ -977,14 +994,14 @@ def _continue_prior_request_known_input_step_id(
     return model_turn_step_id(
         state.ports,
         purpose=ModelTurnPurpose.CONVERSATION_RESOLUTION,
-        turn=1,
+        turn=state.conversation_turn_number,
     )
 
 
 def _conversation_usage(state: _LookupPipelineState) -> dict[str, Any] | None:
     if state.conversation_turn is None:
         return None
-    return state.conversation_turn.usage
+    return _merge_usage(state.conversation_failed_usage, state.conversation_turn.usage)
 
 
 def _append_model_turn_completed(
@@ -1033,14 +1050,7 @@ def _append_model_turn_completed(
     return step
 
 
-def _model_turn_failure_result(
-    state: _LookupPipelineState,
-    *,
-    phase: ModelTurnPurpose,
-    turn: int,
-    exc: Any,
-    usage: dict[str, Any],
-) -> LookupResult:
+def _append_model_turn_failed(state, *, phase, turn, exc, strict_audit=False):
     payload = _model_turn_event_payload(
         request=state.request,
         phase=phase,
@@ -1086,7 +1096,20 @@ def _model_turn_failure_result(
             succeeded=False,
         )
     except LineagePersistenceUnavailable:
-        pass
+        if strict_audit:
+            raise
+    return failed_step
+
+
+def _model_turn_failure_result(
+    state: _LookupPipelineState,
+    *,
+    phase: ModelTurnPurpose,
+    turn: int,
+    exc: Any,
+    usage: dict[str, Any],
+) -> LookupResult:
+    failed_step=_append_model_turn_failed(state,phase=phase,turn=turn,exc=exc)
     try:
         record_runtime_error_lineage(
             request=state.request,

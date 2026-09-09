@@ -24,7 +24,7 @@ from .result_projection import (
     _verify_result_output_targets,
     _verify_result_references,
 )
-from fervis.lookup.question_contract import analyze_requested_fact
+from fervis.lookup.question_contract import analyze_requested_fact, QueryRequestedFact
 from fervis.lookup.qualification import qualification_entails
 from fervis.lookup.answer_program.inputs import CompiledProgramInputs
 from fervis.lookup.answer_program.expression_instantiation import (
@@ -67,6 +67,8 @@ def prepare_answer_program(
         memory_relations=memory_relations,catalog_selection=catalog_selection,authorized_sources=authorized_sources)
     _verify_answer_uses_evidence_input(answer)
     _verify_result_output_targets(answer, require_output=False)
+    if prepared.structural_contracts:
+        _verify_result_references(answer, relation_contracts=prepared.structural_contracts)
     return prepared
 
 
@@ -127,6 +129,7 @@ def _verify_fact_fulfillment(
             input_denotations=semantic_denotations,
         )
         for fact in answer.fact_template
+        if not isinstance(fact, QueryRequestedFact)
     }
     for item in answer.fulfillment:
         fact = requested.get(item.requested_fact_id)
@@ -145,6 +148,12 @@ def _verify_fact_fulfillment(
             raise VerificationError("fulfillment result output is not projected")
         if not result_output_fact_refs.get(item.result_output_id):
             raise VerificationError("fulfillment result output requires evidence proof")
+        if isinstance(fact, QueryRequestedFact):
+            from fervis.lookup.relational_sql.request_contract import verify_query_output
+            verify_query_output(fact, item, answer, relation_contracts)
+            fulfillments.add(fulfillment_key)
+            fulfilled_outputs.add((fact.id, item.answer_output_id))
+            continue
         semantic_guarantee = result_output_guarantees.get(
             item.result_output_id, {}
         ).get(fact.id)
@@ -177,6 +186,11 @@ def _verify_fact_fulfillment(
 def _verify_semantic_templates(answer: AnswerProgram) -> None:
     if not answer.fact_template:
         raise VerificationError("answer program requires a semantic fact template")
+    from fervis.lookup.question_contract.model import validate_input_denotations
+    try:
+        validate_input_denotations(answer.inputs, answer.input_denotations)
+    except ValueError as exc:
+        raise VerificationError(str(exc)) from exc
     inputs = {item.id: item for item in answer.inputs}
     denotations = {item.input_ref: item for item in answer.input_denotations}
     if len(denotations) != len(answer.input_denotations):
@@ -196,6 +210,14 @@ def _verify_semantic_templates(answer: AnswerProgram) -> None:
         raise VerificationError("answer program repeats an input parameter signature")
     required_signatures: dict[str, set[str]] = {}
     for fact in answer.fact_template:
+        if isinstance(fact, QueryRequestedFact):
+            from fervis.lookup.relational_sql.request_contract import verify_query_request
+            verify_query_request(fact, answer)
+            for ref in fact.input_refs:
+                if ref not in inputs:
+                    raise VerificationError('SQL request references an undeclared input')
+                required_signatures.setdefault(ref, set()).add(fact.input_use_ref(ref))
+            continue
         try:
             index = analyze_requested_fact(
                 fact,

@@ -123,6 +123,7 @@ class AnswerRequestMeaning:
     selection_kind: str
     selection_limit_input_ref: str | None
     relational_shape: str
+    input_refs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -325,21 +326,25 @@ def parse_semantic_question_frame(
         )
     if selection_limits:
         raise ValueError("selection limit references no bounded answer request")
+    input_refs_by_fact = {request.requested_fact_id: ([request.selection_limit_input_ref]
+        if request.selection_limit_input_ref is not None else []) for request in answer_requests}
     for supplied_operand in parsed.supplied_values.operands:
         if supplied_operand.has_field("entity_reference"):
-            _append_entity_reference(
-                supplied_operand.parse_as(output.SuppliedEntityReferenceOutput),
-                input_collector=input_collector,
-                denotations=denotations,
-            )
+            entity_operand = supplied_operand.parse_as(output.SuppliedEntityReferenceOutput)
+            owners = entity_operand.answer_request_numbers
+            ref = _append_entity_reference(entity_operand, input_collector=input_collector, denotations=denotations)
         elif supplied_operand.has_field("non_entity_value"):
-            _append_non_entity_value(
-                supplied_operand.parse_as(output.SuppliedNonEntityValueOutput),
-                input_collector=input_collector,
-                denotations=denotations,
-            )
+            scalar_operand = supplied_operand.parse_as(output.SuppliedNonEntityValueOutput)
+            owners = scalar_operand.answer_request_numbers
+            ref = _append_non_entity_value(scalar_operand, input_collector=input_collector, denotations=denotations)
         else:
             raise ValueError("supplied operand has no declared value branch")
+        if not owners or len(owners)!=len(set(owners)) or any(type(number) is not int or not 1<=number<=len(answer_requests) for number in owners):
+            raise ValueError("operand ownership must name existing answer requests exactly once")
+        for number in owners:
+            input_refs_by_fact[f'fact_{number}'].append(ref)
+    answer_requests = [replace(request,input_refs=tuple(input_refs_by_fact[request.requested_fact_id]))
+        for request in answer_requests]
     if {item.input_ref for item in denotations} != set(input_collector.input_by_id):
         raise ValueError(
             "input denotations must cover every supplied input exactly once"
@@ -573,11 +578,12 @@ def _append_entity_reference(
     instance_kind = reference.instance_kind.strip()
     if not instance_kind:
         raise ValueError("entity reference requires an instance kind")
-    operands, origin = _identity_value(reference.value)
+    operands, origin, descriptions = _identity_value(reference.value)
     return _record_supplied_value(
         meaning=item.meaning,
         denotation_basis=item.denotation_basis,
         operands=operands,
+        reference_descriptions=descriptions,
         origin=origin,
         value_type=TextType(),
         kind=InputDenotationKind.IDENTITY_REFERENCE,
@@ -587,17 +593,23 @@ def _append_entity_reference(
     )
 
 
-def _identity_value(
-    value: ProviderObject,
-) -> tuple[tuple[str, ...], output.FrameOriginOutput]:
+def _identity_value(value: ProviderObject):
+    values: tuple[output.IdentityOperandOutput, ...]
     kind = value.discriminator("kind")
     if kind == "single_identity":
         single = value.parse_as(output.SingleIdentityValueOutput)
-        return (single.identity_value,), single.origin
-    if kind == "identity_alternatives":
+        values, origin = (single.identity_value,), single.origin
+    elif kind == "identity_alternatives":
         alternatives = value.parse_as(output.IdentityAlternativesValueOutput)
-        return alternatives.identity_values, alternatives.origin
-    raise ValueError("unknown identity value kind")
+        values, origin = alternatives.identity_values, alternatives.origin
+    else:
+        raise ValueError("unknown identity value kind")
+    if any(item.kind not in {"literal", "description"} for item in values):
+        raise ValueError("Entity reference operands require literal or description syntax")
+    if len({(item.value.strip(), item.kind) for item in values}) != len({item.value.strip() for item in values}):
+        raise ValueError("Equal reference values with different forms require separate operand declarations")
+    return (tuple(item.value.strip() for item in values), origin,
+            tuple(item.value.strip() for item in values if item.kind == "description"))
 
 
 def _append_non_entity_value(
@@ -657,6 +669,7 @@ def _record_supplied_value(
     instance_kind: str | None,
     input_collector: _InputCollector,
     denotations: list[InputDenotation],
+    reference_descriptions: tuple[str, ...] = (),
 ) -> str:
     input_ref = input_collector.supplied_value_reference(
         meaning=meaning,
@@ -672,6 +685,7 @@ def _record_supplied_value(
             denotation_basis=denotation_basis.strip(),
             denoted_instance_kind=instance_kind,
             kind=kind,
+            reference_descriptions=reference_descriptions,
         )
     )
     return input_ref

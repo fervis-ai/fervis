@@ -122,6 +122,7 @@ class InputUseSite:
     expected_value_type: ValueType
     identity_set_ref: FactLocalRef | None
     reference_fact_ref: FactLocalRef | None
+    is_identity_reference: bool = False
 
 
 @dataclass(frozen=True)

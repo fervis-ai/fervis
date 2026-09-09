@@ -78,7 +78,7 @@ class SemanticQueryEnrichmentTurnPrompt(TurnPromptBase):
                             "input_use_ref": item.input_use_ref,
                             "input_text": item.input_origin.meaning,
                             "operand_meaning": item.operand_meaning,
-                            "reference_fact_ref": item.reference_fact_ref.token,
+                            "reference_fact_ref": item.reference_fact_ref.token if item.reference_fact_ref is not None else None,
                             "expected_set_ref": (
                                 item.expected_set_ref.token
                                 if item.expected_set_ref is not None

@@ -1,7 +1,7 @@
 """Physical graph checks shared by identity discovery and factual execution."""
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 from fervis.lookup.answer_program.model import (
     RelationProgram,
@@ -16,6 +16,7 @@ from fervis.lookup.relation_catalog.row_sources import (
 )
 from fervis.lookup.plan_execution.relations import RelationRows
 from ._shared import verify_operation
+from .contract_types import RelationContract
 from .sources import (
     _allowed_read_ids,
     _verify_sources,
@@ -42,6 +43,7 @@ class PreparedRelationProgram(Generic[_Program]):
     program: _Program
     bindings: BindingSet
     row_sources: RowSourceCatalog
+    structural_contracts: dict[str, RelationContract] = field(default_factory=dict)
 
 
 def prepare_relation_program(
@@ -71,6 +73,8 @@ def prepare_relation_program(
     for operation in answer.operations:
         verify_operation(operation)
     _verify_operation_references(answer)
+    from fervis.lookup.relational_sql.reference_matching import verify_reference_candidate_completeness
+    verify_reference_candidate_completeness(answer)
     _verify_program_expression_targets(
         answer,
         bindings=bindings,
@@ -83,7 +87,17 @@ def prepare_relation_program(
             row_sources=row_sources,
         )
     _verify_compute_scalar_availability(answer)
-    return PreparedRelationProgram(answer, bindings, row_sources)
+    contracts = {}
+    if catalog is not None:
+        # Structural field/key contracts are already known. Validate them before
+        # any read; current-run evidence is checked again after materialization.
+        contracts=_relation_contracts(answer,catalog=catalog,row_sources=row_sources,
+            proof_context=ExecutionProofContext.empty())
+        _verify_operation_field_references(answer,relation_contracts=contracts)
+        verify_dependent_argument_contracts(answer,relation_contracts=contracts,row_sources=row_sources)
+        from fervis.lookup.relational_sql.parameter_usage import validate_bound_program_parameters
+        validate_bound_program_parameters(answer,bindings,row_sources,contracts)
+    return PreparedRelationProgram(answer, bindings, row_sources, contracts)
 
 
 def verify_prepared_relation_program(

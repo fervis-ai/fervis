@@ -14,6 +14,7 @@ from fervis.lookup.model_turn import (
 )
 from fervis.lookup.turn_prompts import TurnPromptBase, TurnPromptContext
 from fervis.model_io.turn_artifacts import ModelTurnArtifact
+from fervis.model_io.structured_output.errors import ModelValidationKind
 
 
 T = TypeVar("T")
@@ -64,6 +65,7 @@ def generate_semantic_turn(
             duration_ms=output.duration_ms,
             artifact=output.artifact,
             error_context={"exception_class": type(exc).__name__, "message": str(exc)},
+            validation_kind=ModelValidationKind.SEMANTIC if isinstance(exc,ValueError) else None,
         ) from exc
     return SemanticTurnResult(
         result=result,

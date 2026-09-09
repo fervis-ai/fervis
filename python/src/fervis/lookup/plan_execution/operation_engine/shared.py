@@ -671,3 +671,17 @@ class _Descending:
 
 
 __all__ = tuple(name for name in globals() if not name.startswith("__"))
+
+
+def _expression_input_proofs(operation, scalar_proofs, node_output_proofs):
+    from fervis.lookup.answer_program.operations import operation_expression_references
+    refs = []
+    for expression_refs in operation_expression_references(operation.spec):
+        for item in (*expression_refs.parameters, *expression_refs.constants):
+            refs.extend(scalar_proofs.get(expression_input_id(item), ()))
+        for item in expression_refs.outputs:
+            producer = node_output_proofs.get(item.node_id, {})
+            if item.output_id not in producer:
+                raise RelationEngineError('A derived operation input has no producer proof')
+            refs.extend(producer[item.output_id])
+    return tuple(dict.fromkeys(refs))

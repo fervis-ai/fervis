@@ -8,7 +8,6 @@ from fervis.lookup.relation_catalog import (
     EndpointRead,
     RelationCatalog,
     primary_stable_key_entity_kinds,
-    read_has_primary_stable_key,
 )
 
 from .constants import _RESOLVER_ENDPOINT_STOPWORDS
@@ -35,8 +34,6 @@ def select_resolver_reads(
     for read in catalog.reads:
         order += 1
         if read.method.upper() != "GET":
-            continue
-        if not _has_stable_identity_field(read):
             continue
         identity_terms = set(_resolver_identity_terms(read))
         identity_score = sum(
@@ -132,10 +129,6 @@ def _resolver_selection_with_primary_class_routes(
         if len(selected) >= limit:
             break
     return tuple(item.read for item in selected)
-
-
-def _has_stable_identity_field(read: EndpointRead) -> bool:
-    return read_has_primary_stable_key(read)
 
 
 def _resolver_identity_terms(read: EndpointRead) -> tuple[str, ...]:

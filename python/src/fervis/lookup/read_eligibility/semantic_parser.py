@@ -28,7 +28,7 @@ def parse_semantic_read_eligibility(
     candidates = {
         candidate.candidate_ref: candidate for candidate in request.read_candidates
     }
-    fact_ids = tuple(index.requested_fact_id for index in request.indexes)
+    fact_ids = tuple(index.requested_fact_id for index in request.contexts)
     if set(parsed.read_assessments_by_requested_fact) != set(fact_ids):
         raise ValueError("read eligibility must assess every requested fact once")
 

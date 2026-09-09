@@ -25,7 +25,7 @@ from fervis.lookup.semantic_types import (
     ValueType,
     SourceOrigin,
 )
-from fervis.types.enums import StrEnum
+from fervis.lookup.identity_types import IdentityExecutionFailureReason
 
 
 @dataclass(frozen=True)
@@ -118,12 +118,6 @@ class SemanticTimeGroundingTask:
     operand_meaning: str
 
 
-class IdentityExecutionFailureReason(StrEnum):
-    NOT_FOUND = "NOT_FOUND"
-    AMBIGUOUS_RESULT = "AMBIGUOUS_RESULT"
-    INVALID_RESOLVER_RESULT = "INVALID_RESOLVER_RESULT"
-
-
 @dataclass(frozen=True)
 class ResolvedIdentity:
     task_ref: str
@@ -167,6 +161,11 @@ class GroundingPartition:
     expected_set_ref: FactLocalRef | None
     operand_meaning: str
     reference_fact_ref: FactLocalRef | None = None
+    is_identity_reference: bool = False
+
+    @property
+    def requires_identity_resolution(self) -> bool:
+        return self.is_identity_reference or self.expected_set_ref is not None or self.reference_fact_ref is not None
 
 
 @dataclass(frozen=True)
@@ -212,7 +211,7 @@ def grounding_partitions(
     input_use_sites: tuple[InputUseSite, ...],
 ) -> tuple[GroundingPartition, ...]:
     grouped: dict[
-        tuple[str, ValueType, FactLocalRef | None, FactLocalRef | None, str], list[str]
+        tuple[str, ValueType, FactLocalRef | None, FactLocalRef | None, str, bool], list[str]
     ] = {}
     for use in input_use_sites:
         key = (
@@ -221,6 +220,7 @@ def grounding_partitions(
             use.identity_set_ref,
             use.reference_fact_ref,
             use.operand_meaning,
+            use.is_identity_reference,
         )
         grouped.setdefault(key, []).append(use.use_ref)
     return tuple(
@@ -231,6 +231,7 @@ def grounding_partitions(
             expected_set_ref=set_ref,
             operand_meaning=operand_meaning,
             reference_fact_ref=reference_fact_ref,
+            is_identity_reference=is_identity_reference,
         )
         for (
             input_ref,
@@ -238,6 +239,7 @@ def grounding_partitions(
             set_ref,
             reference_fact_ref,
             operand_meaning,
+            is_identity_reference,
         ), use_refs in grouped.items()
     )
 
@@ -250,7 +252,7 @@ def reference_grounding_tasks(
 ) -> tuple[ReferenceGroundingTask, ...]:
     tasks: list[ReferenceGroundingTask] = []
     for partition in partitions:
-        if partition.reference_fact_ref is None and partition.expected_set_ref is None:
+        if not partition.requires_identity_resolution:
             continue
         options = tuple(
             {
@@ -360,9 +362,7 @@ def deterministic_scalar_values(
 ) -> tuple[CanonicalInputValue, ...]:
     output: list[CanonicalInputValue] = []
     for index, partition in enumerate(partitions, start=1):
-        if partition.expected_set_ref is not None:
-            continue
-        if partition.reference_fact_ref is not None:
+        if partition.requires_identity_resolution:
             continue
         input_term = inputs[partition.input_ref]
         fact_value = _deterministic_scalar_value(

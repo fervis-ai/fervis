@@ -18,6 +18,9 @@ from fervis.lookup.question_contract import (
     InputDenotation,
     InputTerm,
     RequestedFact,
+    QueryRequestedFact,
+    QuestionContract,
+    QueryQuestionContract,
 )
 from fervis.lookup.qualification import QualificationGuarantee, SubjectGuarantee
 
@@ -84,9 +87,20 @@ class RelationProgram:
 class AnswerProgram(RelationProgram):
     inputs: tuple[InputTerm, ...] = ()
     input_denotations: tuple[InputDenotation, ...] = ()
-    fact_template: tuple[RequestedFact, ...] = ()
+    fact_template: tuple[RequestedFact | QueryRequestedFact, ...] = ()
     fulfillment: tuple[FactFulfillment, ...] = ()
     relation_guarantees: tuple[RelationGuaranteeDeclaration, ...] = ()
     capabilities: tuple[NarrowPopulationCapability, ...] = ()
     result_projection: ResultProjection = ResultProjection()
     compatibility: ProgramCompatibility = ProgramCompatibility()
+
+
+    @property
+    def question_contract(self) -> QuestionContract | QueryQuestionContract:
+        query_facts = tuple(item for item in self.fact_template if isinstance(item,QueryRequestedFact))
+        graph_facts = tuple(item for item in self.fact_template if isinstance(item,RequestedFact))
+        if query_facts and graph_facts:
+            raise ValueError('One question program cannot mix request representations')
+        if query_facts:
+            return QueryQuestionContract(self.inputs,query_facts,self.input_denotations)
+        return QuestionContract(self.inputs,graph_facts,self.input_denotations)

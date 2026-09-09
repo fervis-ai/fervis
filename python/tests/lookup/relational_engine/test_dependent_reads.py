@@ -261,19 +261,10 @@ def test_dependent_read_counts_all_children_and_calls_each_argument_once(
 def test_dependent_argument_contract_is_rejected_before_any_transport(kwargs):
     from fervis.lookup.plan_execution.errors import VerificationError
 
-    program, bindings, catalog = _program(**kwargs)
-
-    class Port:
-        def read(self, **kwargs):
-            pytest.fail("Invalid dependent argument contract reached the API")
-
-    with pytest.raises(VerificationError):
-        invoke_answer_program(
-            program=program,
-            bindings=bindings,
-            environment=ExecutionEnvironment(catalog=catalog),
-            ports=RuntimePorts(data_access_port=Port(), memory=LookupMemory()),
-        )
+    # No transport exists at compilation: bad fields and incompatible types
+    # are now rejected from the declared metadata alone.
+    with pytest.raises(VerificationError,match='dependent argument'):
+        _program(**kwargs)
 
 
 def test_source_dependency_cycle_is_rejected_before_any_transport():

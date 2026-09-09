@@ -104,6 +104,7 @@ class InputDenotation:
     denotation_basis: str
     denoted_instance_kind: str | None
     kind: InputDenotationKind
+    reference_descriptions: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if (
@@ -122,6 +123,12 @@ class InputDenotation:
             and not self.denoted_instance_kind.strip()
         ):
             raise ValueError("denoted instance kind must be non-empty")
+        if self.reference_descriptions and self.kind is not InputDenotationKind.IDENTITY_REFERENCE:
+            raise ValueError("Only entity references have descriptive operands")
+        if len(set(self.reference_descriptions)) != len(self.reference_descriptions) or any(
+            not isinstance(value, str) or not value.strip() for value in self.reference_descriptions
+        ):
+            raise ValueError("Reference descriptions must be distinct nonempty operands")
 
 
 class BooleanCompositionOperator(StrEnum):
@@ -321,18 +328,120 @@ class RequestedFact:
 
 
 @dataclass(frozen=True)
+class QueryOperationDeclaration:
+    operation_id: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class QuerySourceDeclaration:
+    relation_id: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class QueryParameterDeclaration:
+    parameter_id: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class QueryRequestedOutput:
+    id: str
+    origin: SourceOrigin
+    result_output_id: str
+    projection_fingerprint: str
+    value_type: str
+
+    @classmethod
+    def from_projection(cls, id, origin, projection, value_type):
+        from fervis.lookup.contract_codec import canonical_contract_fingerprint
+        return cls(id,origin,projection.id,canonical_contract_fingerprint(projection),value_type)
+
+
+@dataclass(frozen=True)
+class QueryRequestedFact:
+    """A factual request pinned to its complete computation and result projection."""
+    id: str
+    origin: SourceOrigin
+    operations: tuple[QueryOperationDeclaration, ...]
+    outputs: tuple[QueryRequestedOutput, ...]
+    input_refs: tuple[str, ...] = ()
+    sources: tuple[QuerySourceDeclaration, ...] = ()
+    parameters: tuple[QueryParameterDeclaration, ...] = ()
+
+    def input_use_ref(self, input_ref: str) -> str:
+        if input_ref not in self.input_refs:
+            raise ValueError('Input does not belong to this requested fact')
+        return f'{self.id}:sql_input:{input_ref}'
+
+
+@dataclass(frozen=True)
 class QuestionContract:
     inputs: tuple[InputTerm, ...]
     requested_facts: tuple[RequestedFact, ...]
     input_denotations: tuple[InputDenotation, ...] = ()
 
     def __post_init__(self) -> None:
-        input_refs = {item.id for item in self.inputs}
-        denotation_refs = [item.input_ref for item in self.input_denotations]
-        if len(denotation_refs) != len(set(denotation_refs)):
-            raise ValueError("one supplied input has multiple denotations")
-        if input_refs != set(denotation_refs):
-            raise ValueError("input denotations must cover every supplied input")
+        validate_input_denotations(self.inputs, self.input_denotations)
+
+
+@dataclass(frozen=True)
+class QueryQuestionContract:
+    inputs: tuple[InputTerm, ...]
+    requested_facts: tuple[QueryRequestedFact, ...]
+    input_denotations: tuple[InputDenotation, ...] = ()
+
+    def __post_init__(self):
+        validate_input_denotations(self.inputs, self.input_denotations)
+
+
+def validate_input_denotations(inputs, denotations):
+    input_refs = {item.id for item in inputs}
+    denotation_refs = [item.input_ref for item in denotations]
+    if len(denotation_refs) != len(set(denotation_refs)):
+        raise ValueError('one supplied input has multiple denotations')
+    if input_refs != set(denotation_refs):
+        raise ValueError('input denotations must cover every supplied input')
+    values = {item.id: set(item.operand if isinstance(item.operand, tuple) else (item.operand,)) for item in inputs}
+    for item in denotations:
+        if not set(item.reference_descriptions) <= values[item.input_ref]:
+            raise ValueError('Reference descriptions must name original input operands')
+
+
+@dataclass(frozen=True)
+class IntentOutput:
+    id: str
+    origin: SourceOrigin
+    value_type: str = 'unspecified'
+
+
+@dataclass(frozen=True)
+class IntentFact:
+    """A request meaning before any computation or source has been selected."""
+    id: str
+    origin: SourceOrigin
+    outputs: tuple[IntentOutput, ...]
+    input_refs: tuple[str, ...]
+    result_kind: str
+
+    def input_use_ref(self, input_ref: str) -> str:
+        if input_ref not in self.input_refs:
+            raise ValueError('Input does not belong to this intent')
+        return f'{self.id}:sql_input:{input_ref}'
+
+
+@dataclass(frozen=True)
+class IntentQuestionContract:
+    """Question intent available for clarification before computation exists."""
+    inputs: tuple[InputTerm, ...]
+    requested_facts: tuple[IntentFact, ...]
+    input_denotations: tuple[InputDenotation, ...]
+
+    def __post_init__(self):
+        validate_input_denotations(self.inputs, self.input_denotations)
+
+
 
 
 __all__ = tuple(name for name in globals() if not name.startswith("_"))

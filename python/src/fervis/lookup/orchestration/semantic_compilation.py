@@ -58,10 +58,10 @@ from fervis.lookup.query_enrichment import (
 from fervis.lookup.question_contract import (
     InputTerm,
     QuestionContract,
+    QueryQuestionContract,
     QuestionContractNeedsClarification,
     QuestionContractRequest,
     RequestedFactSemanticIndex,
-    analyze_requested_fact,
     ParsedSemanticQuestionContract,
     ParsedSemanticQuestionMeaning,
     parse_semantic_question_contract,
@@ -113,6 +113,8 @@ from fervis.lookup.turn_prompts import (
 )
 from fervis.model_io.turns import ModelTurnPurpose
 from fervis.lookup.source_reads.access_model import ReadAccessCatalog
+from fervis.lookup.question_contract.grounding_context import GroundingFactContext
+from fervis.lookup.question_contract.model import IntentQuestionContract
 from fervis.lookup.lineage.source_reads import SourceReadLineageScope
 
 
@@ -142,11 +144,12 @@ class SemanticCompilationRequest:
     representation_observer: Callable | None = None
     discovery_failures: list[ValueError] = field(default_factory=list)
     read_access: ReadAccessCatalog = ReadAccessCatalog()
+    validation_failure_observer: Callable[[ModelTurnPurpose, SemanticTurnGenerationError], None] | None = None
 
 
 @dataclass(frozen=True)
 class SemanticCompilationSuccess:
-    question_contract: QuestionContract
+    question_contract: QuestionContract | QueryQuestionContract
     canonical_values: tuple[CanonicalInputValue, ...]
     catalog_selection: CatalogSelectionResult
     source_contract_snapshot: SourceContractSnapshot
@@ -156,13 +159,13 @@ class SemanticCompilationSuccess:
 @dataclass(frozen=True)
 class SemanticCompilationClarification:
     cause: object
-    question_contract: QuestionContract | None = None
+    question_contract: QuestionContract | QueryQuestionContract | IntentQuestionContract | None = None
     canonical_values: tuple[CanonicalInputValue, ...] = ()
 
 
 @dataclass(frozen=True)
 class SemanticCompilationImpossible:
-    question_contract: QuestionContract
+    question_contract: QuestionContract | QueryQuestionContract | IntentQuestionContract
     canonical_values: tuple[CanonicalInputValue, ...]
     blocked_fact_ids: tuple[str, ...]
     source_contract_snapshot: SourceContractSnapshot
@@ -198,16 +201,12 @@ def resolve_semantic_continuation_arguments(
     denotation_by_ref.update(
         {item.input_ref: item for item in frame.changed_input_denotations}
     )
-    indexes = tuple(
-        analyze_requested_fact(
-            fact,
-            inputs=input_by_ref,
-            input_denotations=denotation_by_ref,
-        )
-        for fact in frame.program.fact_template
-    )
+    from fervis.lookup.question_contract.grounding_context import grounding_fact_context
+    contexts = tuple(grounding_fact_context(fact,inputs=input_by_ref,input_denotations=denotation_by_ref)
+                     for fact in frame.program.fact_template)
+    indexes = tuple(context.graph_index for context in contexts if context.graph_index is not None)
     response_values = _grounding_response_values(
-        indexes=indexes,
+        indexes=contexts,
         responses=request.clarification_responses,
     )
     response_use_refs = {
@@ -221,7 +220,7 @@ def resolve_semantic_continuation_arguments(
     }
     unresolved_use_sites = tuple(
         use
-        for index in indexes
+        for index in contexts
         for use in index.input_use_sites
         if use.use_ref in changed_use_refs
         and use.use_ref not in response_use_refs
@@ -238,8 +237,7 @@ def resolve_semantic_continuation_arguments(
             expected_identity=expected_identities.get(partition.input_ref),
         )
         for partition in partitions
-        if partition.expected_set_ref is not None
-        or partition.reference_fact_ref is not None
+        if partition.requires_identity_resolution
     }
     options_by_use_ref = {
         use_ref: options_by_input.get(partition.input_ref, ())
@@ -249,7 +247,7 @@ def resolve_semantic_continuation_arguments(
     reference_tasks = reference_grounding_tasks(
         partitions,
         resolver_options_by_use_ref=options_by_use_ref,
-        denoted_instance_kinds_by_input_ref=_denoted_instance_kinds(indexes),
+        denoted_instance_kinds_by_input_ref=_denoted_instance_kinds(contexts),
     )
     resolver_read_ids = {
         option.candidate.resolver_read_id
@@ -268,7 +266,7 @@ def resolve_semantic_continuation_arguments(
     time_tasks = time_grounding_tasks(partitions, inputs=input_by_ref)
     set_origins = {
         ref: term.origin
-        for index in indexes
+        for index in contexts
         for ref, term in index.term_by_ref.items()
         if ref.kind.value == "set"
     }
@@ -342,6 +340,7 @@ def resolve_semantic_continuation_arguments(
         ).relation_catalog
         eligibility_request = SemanticReadEligibilityRequest(
             indexes=indexes,
+            fact_contexts=contexts,
             source_catalog=build_row_source_catalog(answer_catalog),
             answer_catalog=answer_catalog,
             identity_tasks=grounding_result.identity_tasks,
@@ -408,70 +407,8 @@ def compile_semantic_question(
     *,
     on_turn: SemanticTurnObserver | None = None,
 ) -> SemanticCompilationOutcome:
-    request = replace(request, discovery_failures=[])
-    context = build_turn_prompt_context(
-        current_question=request.question,
-        conversation_context=request.conversation_context,
-        host=request.host,
-    )
-    parsed_question = _parse_question_contract(
-        request,
-        context=context,
-        on_turn=on_turn,
-    )
-    if not isinstance(parsed_question, ParsedSemanticQuestionContract):
-        return SemanticCompilationClarification(cause=parsed_question)
-    grounded = _recall_and_ground(
-        parsed_question,
-        request=request,
-        context=context,
-        on_turn=on_turn,
-    )
-    request = replace(request, full_catalog=grounded.full_catalog, read_access=grounded.read_access)
-    indexes = grounded.parsed.semantic_indexes
-    contract = grounded.parsed.contract
-    inputs = {item.id: item for item in contract.inputs}
-
-    eligibility_request = SemanticReadEligibilityRequest(
-        indexes=indexes,
-        source_catalog=grounded.answer_sources,
-        answer_catalog=grounded.catalog_selection.relation_catalog,
-        identity_tasks=grounded.grounding_result.identity_tasks,
-        resolver_catalog=grounded.resolver_catalog,
-        read_access=grounded.read_access,
-    )
-    eligibility = _read_eligibility_turn(
-        eligibility_request,
-        context=context,
-        request=request,
-        on_turn=on_turn,
-    )
-    canonical_values = _resolve_identity_tasks(
-        grounded,
-        eligibility=eligibility,
-        inputs=inputs,
-        request=request,
-    )
-    if isinstance(canonical_values, SemanticCompilationClarification):
-        return canonical_values
-    canonical_values = build_canonical_input_ledger(
-        canonical_values,
-        required_use_refs=tuple(
-            use.use_ref for index in indexes for use in index.input_use_sites
-        ),
-    )
-    outcome = _select_bind_and_compile(
-        grounded,
-        initial_eligibility=eligibility,
-        canonical_values=canonical_values,
-        context=context,
-        request=request,
-        on_turn=on_turn,
-    )
-
-    if isinstance(outcome, SemanticCompilationImpossible) and request.discovery_failures:
-        raise request.discovery_failures[0]
-    return outcome
+    from .query_compilation import compile_query_question
+    return compile_query_question(request, on_turn=on_turn)
 
 
 def _parse_question_contract(
@@ -936,7 +873,7 @@ def _grounding_response_values(
     values: list[CanonicalInputValue] = []
     indexes_by_fact = {item.requested_fact_id: item for item in indexes}
     for response in responses:
-        if not isinstance(response, GroundingIdentityResponse):
+        if not isinstance(response, GroundingIdentityResponse) or response.reference_operand:
             continue
         index = indexes_by_fact.get(response.requested_fact_id)
         if index is None:
@@ -945,7 +882,7 @@ def _grounding_response_values(
             use.use_ref
             for use in index.input_use_sites
             if use.input_ref == response.known_input_id
-            and use.reference_fact_ref is not None
+            and (use.is_identity_reference or use.reference_fact_ref is not None or use.identity_set_ref is not None)
         )
         if not use_refs or response.option.key is None:
             raise ValueError("grounding clarification lacks an identity use or key")
@@ -961,7 +898,7 @@ def _grounding_response_values(
                 matched_field_ref=response.option.matched_field,
                 matched_value=response.option.matched_value,
                 proof_refs=(proof_ref,),
-                source_refs=(response.option.resolver_read_id,),
+                source_refs=(response.option.resolver_read_id,) if response.option.resolver_read_id else (),
             )
         else:
             fact_value = FactValue.identity(
@@ -970,7 +907,7 @@ def _grounding_response_values(
                 key=response.option.key,
                 display_value=response.option.label,
                 proof_refs=(proof_ref,),
-                source_refs=(response.option.resolver_read_id,),
+                source_refs=(response.option.resolver_read_id,) if response.option.resolver_read_id else (),
             )
         values.append(
             CanonicalInputValue(
@@ -1172,14 +1109,16 @@ def _turn(
     on_turn: SemanticTurnObserver | None,
     parsed_payload_for_result=None,
 ):
+    from fervis.lookup.turn_prompts.correction import run_with_correction
     try:
-        result = generate_semantic_turn(
-            prompt=prompt,
-            context=context,
-            parse=parse,
-            model_port=request.model_port,
-            provider=request.provider,
-            max_thinking_tokens=request.max_thinking_tokens,
+        result = run_with_correction(prompt,
+            lambda current: generate_semantic_turn(
+                prompt=current, context=context, parse=parse,
+                model_port=request.model_port, provider=request.provider,
+                max_thinking_tokens=request.max_thinking_tokens,
+            ),
+            (lambda failure: request.validation_failure_observer(purpose,failure))
+            if request.validation_failure_observer is not None else None,
         )
     except SemanticTurnGenerationError as exc:
         raise SemanticCompilationTurnError(purpose, exc) from exc
@@ -1233,7 +1172,7 @@ def _resolver_options(
 
 
 def _denoted_instance_kinds(
-    indexes: tuple[RequestedFactSemanticIndex, ...],
+    indexes: tuple[RequestedFactSemanticIndex | GroundingFactContext, ...],
 ) -> dict[str, str]:
     kinds: dict[str, str] = {}
     for index in indexes:
@@ -1287,7 +1226,7 @@ def _discover_read_access(read_ids, *, request, context, on_turn):
                   and any(requires_caller_supplied_input(param) for param in source.params))
     queue=deque((source,0) for source in targets)
     visited=set()
-    dependencies=[]
+    dependencies=list(request.read_access.dependencies)
     while queue:
         source,offset=queue.popleft()
         marker=(source.id,offset)

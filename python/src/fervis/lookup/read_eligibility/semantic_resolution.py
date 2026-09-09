@@ -364,6 +364,8 @@ def _matched_field_is_stable_unique(
     *,
     route: IdentityResolverRoute,
 ) -> bool:
+    if route.compatibility.returned_identity_verification_field_paths != (match.matched_field_path,):
+        return False
     candidate = route.option.candidate
     return any(
         key.entity_kind == candidate.entity_kind

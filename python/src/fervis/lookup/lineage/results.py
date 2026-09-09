@@ -872,7 +872,9 @@ def _execution_lineage_value(
             for row in outcome.projected_rows
             if result_output_id in row.values
         )
-        return _projected_lineage_values(values)
+        displays=tuple(row.display_values.get(result_output_id,'') for row in outcome.projected_rows
+            if result_output_id in row.values)
+        return _projected_lineage_values(values,display_values=displays)
     for scalar_output in outcome.result_projection.scalar_outputs:
         if scalar_output.id != result_output_id:
             continue
@@ -883,7 +885,14 @@ def _execution_lineage_value(
 
 def _projected_lineage_values(
     values: tuple[ResultValue, ...],
+    *, display_values: tuple[str,...] = (),
 ) -> tuple[AnswerValueKind | None, dict[str, Any]]:
+    if display_values and any(display_values):
+        payloads=[_entity_key_json(value,label=label) if isinstance(value,EntityKeyValue) else _json_safe(value)
+            for value,label in zip(values,display_values)]
+        if len(payloads)==1 and isinstance(values[0],EntityKeyValue):
+            return AnswerValueKind.ENTITY,_entity_key_json(values[0],label=display_values[0])
+        return AnswerValueKind.LIST,{'kind':'list','values':payloads}
     if len(values) == 1:
         return _lineage_value(values[0])
     if values:
@@ -932,7 +941,7 @@ def _json_safe(value: object) -> object:
     return runtime_value_to_payload(value)
 
 
-def _entity_key_json(value: EntityKeyValue) -> dict[str, object]:
+def _entity_key_json(value: EntityKeyValue, *, label: str = '') -> dict[str, object]:
     components = {
         component.component_id: _json_safe(component.value)
         for component in value.components
@@ -942,4 +951,5 @@ def _entity_key_json(value: EntityKeyValue) -> dict[str, object]:
         "entity_kind": value.entity_kind,
         "key_id": value.key_id,
         "components": components,
+        **({"label":label} if label else {}),
     }
