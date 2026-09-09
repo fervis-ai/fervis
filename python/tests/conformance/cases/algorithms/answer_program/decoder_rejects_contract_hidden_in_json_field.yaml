@@ -5,7 +5,7 @@ description: Open JSON fields cannot carry self-describing contract objects.
 input:
   schema_revision: 1
   program:
-    schema_revision: 21
+    schema_revision: 22
     program:
       $type: AnswerProgram
       fields:
@@ -48,7 +48,7 @@ input:
                                         - - hidden_contract
                                           - $type: ProgramCompatibility
                                             fields:
-                                              schema_revision: 21
+                                              schema_revision: 22
                                               compiler_version: ""
                                               function_semantics: {$tuple: []}
                                               source_contracts: {$tuple: []}
@@ -74,7 +74,7 @@ input:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 21
+            schema_revision: 22
             compiler_version: ""
             function_semantics: {$tuple: []}
             source_contracts: {$tuple: []}

@@ -275,7 +275,9 @@ def parse_query_answer(
             None,
         )
         if parameter is not None and not compatible_argument(
-            parameter, descriptions.get(argument.binding, {})
+            parameter, descriptions.get(argument.binding, {}), literal_lookup=(
+                getattr(meaning, 'reference_kind', None) == 'literal' and
+                descriptions.get(argument.binding, {}).get('input_ref') == getattr(meaning, 'reference_input_ref', None))
         ):
             raise QueryValidationError(
                 "Request argument type or identity authority does not match the bound parameter"
@@ -389,21 +391,26 @@ class QueryAnswerPrompt(TurnPromptBase):
             ),
         )
 
+    def sql_surface_instructions(self):
+        return (
+            "Use DuckDB SQL over only the declared views. Quote identifiers when necessary. No files, network, external tables or database access.",
+            "Copy SQL parameters from the menu sql_expression exactly. Use the menu key for request_arguments bindings. FROM and JOIN use the exact Declared API views keys as SQL tables, never endpoint paths or resource labels. These views are not SQL functions: do not put parentheses or request parameters after a view name. REST arguments belong exclusively in request_arguments. Do not invent values or inline grounded operands. SQL literals may express arithmetic constants and documented catalog enum values.",
+            "SQL calendar operations and date-to-timestamp conversions use the timezone in Compilation scope.",
+            "request_arguments binds declared view request parameter refs to the same grounded menu. Supply only arguments needed for the question; automatic_request_parameters are already supplied by complete traversal; never bind them. Physical prerequisite enumeration and pagination belong to Fervis.",
+        )
+
     def instruction_sections(self, builder):
         return (
             builder.instruction_block(
                 "Relational answer contract",
                 (
+                    *self.sql_surface_instructions(),
                     "This invocation compiles only the assigned Requested answer. Other answer requests in the question are compiled separately and combined by Fervis. Use the complete question to interpret this assigned request and its scoped operands.",
-                    "Use DuckDB SQL over only the declared views. Quote identifiers when necessary. No files, network, external tables or database access.",
                     "A reference_argument menu symbol binds its declared relation field to a REST request parameter for each guarded identity; it is not a SQL placeholder. Use its declared view and column in SQL. A view with kind resolved_reference supplies the canonical identities for its input_ref. Its prerequisite query resolves the supplied reference and checks missing or ambiguous matches at execution. Consume that input by joining or selecting from this relation using its key components; do not resolve it again from raw text or require a scalar parameter for it. Other declared API views remain available for the requested properties and relationships.",
                     "Preserve the original question, requested row or group grain, relationships and conditions. Do not introduce filters absent from the requested meaning, change the requested measure or assume a single API invocation covers its whole parent population. A stored record and a qualifying business occurrence are not necessarily the same population: use source contracts and observed state or timestamps to preserve the question's population qualifiers, rather than treating a resource label as proof that every returned row qualifies.",
-                    "Copy SQL parameters from the menu sql_expression exactly. Use the menu key for request_arguments bindings. FROM and JOIN use the exact Declared API views keys; REST parameter references identify API arguments only. Do not invent values or inline grounded operands. SQL literals may express arithmetic constants and documented catalog enum values.",
                     "A literal menu value is the canonical scalar, not its original label. Use that value directly; numeric percentages have already been converted to ratios.",
                     "An aggregate can be computed from a complete row view. Missing inputs for a summary endpoint do not make the question unavailable when another declared view can supply the observations. Required parent traversal remains the compiler's responsibility.",
-                    "SQL calendar operations and date-to-timestamp conversions use the timezone in Compilation scope.",
                     "Temporal parameter metadata declares the boundary convention and scalar type. Inclusive calendar end dates include that whole date; do not treat an inclusive end as the first excluded date.",
-                    "request_arguments binds declared view request parameter refs to the same grounded menu. Supply only arguments needed for the question; automatic_request_parameters are already supplied by complete traversal; never bind them. Physical prerequisite enumeration and pagination belong to Fervis.",
                     self._input_usage_instruction(),
                     "Declare every returned SQL alias and its scalar type in columns. Separately declare exactly the requested public outputs. A value output selects one column. An identity output selects a declared candidate-key or entity-reference authority and maps all its key components to unchanged SQL key-column aliases. Keep grouping and ties based on identity and the requested ranking keys, not display labels. Unrequested ordering columns stay out of outputs.",
                     self._identity_display_instruction(),
@@ -558,7 +565,9 @@ class QueryAnswerPrompt(TurnPromptBase):
                 names = tuple(
                     name
                     for name, description in self.parameters.items()
-                    if compatible_argument(parameter, description)
+                    if compatible_argument(parameter, description, literal_lookup=(
+                        getattr(self.meaning, 'reference_kind', None) == 'literal' and
+                        description.get('input_ref') == getattr(self.meaning, 'reference_input_ref', None)))
                 )
                 if not names:
                     continue

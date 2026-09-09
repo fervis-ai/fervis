@@ -81,19 +81,17 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
         return "Return complete canonical key columns and, for literal references, the observed match_column. The matching column is internal, not a public output. Set display_column to null; the factual answer owns presentation."
 
     def instruction_sections(self, builder):
-        return (
-            builder.instruction_block(
-                "Assigned reference",
-                (
-                    "Resolve only reference_text from Compilation scope to candidate identities. For a collection member, resolve that member alone; the collection denotation and full question provide context, but other members belong to separate queries. The surrounding factual answer is compiled separately.",
-                    "Write reference_binding before the query and copy the fixed Requested answer.reference_kind. The frame owns the reference syntax; this query implements that meaning. Use literal for a supplied name or code; preserve that value as a data parameter. Declare description for a role or relational description and state how the API contract establishes it. A description can be expressed by selecting a source or relationship; its words need not be compared to a stored value. Fervis fixes that description for this compiled program.",
-                    "An explicitly named entity must satisfy the supplied name or code. A configured role is defined by the corresponding observed properties, not by assuming the role phrase is a stored name.",
-                    "Observed expressions may combine fields when the reference has multiple components. Preserve the whole supplied reference and its relationships; do not invent component values.",
-                    "Return all matching candidate keys. Apply only relations or extrema requested by the reference; preserve ties. Do not choose an arbitrary candidate or conceal ambiguity with LIMIT. The runtime checks whether exactly one complete identity is established.",
-                ),
-            ),
-            *super().instruction_sections(builder),
-        )
+        return (builder.instruction_block("Reference query contract", (
+            *self.sql_surface_instructions(),
+            "Resolve only reference_text from Compilation scope. Other collection members and the surrounding factual answer belong to separate queries.",
+            "Copy Requested answer.reference_kind into reference_binding. The frame has already fixed whether this is a literal name/code or a descriptive role; do not reinterpret that choice.",
+            self._input_usage_instruction(),
+            "Use one declared key or entity-reference authority. Project all its components unchanged from that authority's view and map their SQL aliases in outputs. Matching column names or UUID types do not make different identity domains interchangeable; use declared relationships when necessary.",
+            "Declare every selected SQL alias and its scalar type in columns. For a literal, match_column must name a selected alias, not an unselected source field. Return exactly one identity output, mode rows, ordering empty, interpretations empty.",
+            self._identity_display_instruction(),
+            "Preserve all candidate keys and ties. Do not choose an arbitrary candidate or use LIMIT/OFFSET. Fervis checks missing and ambiguous identities at execution.",
+            "Submit one submit_query_answer call, or report_query_unavailable if the declared views cannot establish this reference. Do not invent unavailable fields or change the requested identity.",
+        )),)
 
 
 def parse_reference_query(payload, *, prompt, menu):
@@ -181,6 +179,7 @@ def compile_reference_plan(
     compiled = compile_query_answer(
         question=meaning.return_request_basis,
         timezone=meaning.timezone,
+        lookup_input_ref=meaning.reference_input_ref if meaning.reference_kind == "literal" else "",
         query=authored.query,
         views=bound.views,
         output_types=authored.output_types,

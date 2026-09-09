@@ -49,7 +49,7 @@ def compile_query_answer(*, question: str, query: str, views: tuple[ApiView, ...
                          inputs: tuple[InputTerm, ...] = (), input_denotations: tuple[InputDenotation, ...] = (),
                          access: ReadAccessCatalog = ReadAccessCatalog(),
                          output_labels: Mapping[str,str] | None = None,
-                         fact_id: str = 'fact_1', namespace: str = '', timezone: str = 'UTC',
+                         fact_id: str = 'fact_1', namespace: str = '', timezone: str = 'UTC', lookup_input_ref: str = '',
                          selection_boundary: Expression | None = None,
                          meaning_inputs: tuple[ParameterRef, ...] = (),
                          public_outputs: tuple[QueryOutput, ...] | None = None,
@@ -57,6 +57,11 @@ def compile_query_answer(*, question: str, query: str, views: tuple[ApiView, ...
                          expected_input_refs: tuple[str, ...] | None = None,
                          prerequisites: RelationProgram | None = None,
                          relation_views: tuple[RelationView, ...] = ()) -> CompiledQueryAnswer:
+    if lookup_input_ref:
+        from fervis.lookup.question_contract.model import InputDenotationKind
+        if lookup_input_ref not in {item.input_ref for item in input_denotations
+                                    if item.kind is InputDenotationKind.IDENTITY_REFERENCE}:
+            raise QueryValidationError('Literal lookup requires an original identity-reference input')
     def identifier(value):
         return namespace + value
     all_views: tuple[ApiView | RelationView, ...]=(*views,*relation_views)
@@ -80,7 +85,7 @@ def compile_query_answer(*, question: str, query: str, views: tuple[ApiView, ...
         for view in relation_views if view.name in names)
     sql = Operation(identifier('answer_query'),SqlQuerySpec(query,sql_inputs,
         tuple(SqlOutputField(name,kind) for name,kind in output_types.items()),query_parameters,
-        scalar=result_contract.mode=='scalar',meaning_inputs=meaning_inputs,timezone=timezone,
+        scalar=result_contract.mode=='scalar',meaning_inputs=meaning_inputs,timezone=timezone,lookup_input_ref=lookup_input_ref,
         entity_keys=tuple(output.identity for output in (public_outputs or ()) if output.identity is not None)),output_relation=identifier('query_result'))
     operations = [*physical.operations,sql]
     result_relation = sql.output_relation

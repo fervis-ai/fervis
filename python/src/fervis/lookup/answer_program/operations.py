@@ -286,10 +286,13 @@ class SqlQuerySpec:
     entity_keys: tuple[EntityKeyProjection, ...] = ()
     reference_input_ref: str = ""
     reference_operand: str = ""
+    lookup_input_ref: str = ""
     timezone: str = "UTC"
     kind: OperationKind = field(default=OperationKind.SQL_QUERY, init=False)
 
     def __post_init__(self):
+        if not isinstance(self.lookup_input_ref, str) or (self.lookup_input_ref and not self.lookup_input_ref.strip()):
+            raise ValueError('Literal lookup input ref must be a nonempty string when present')
         if not isinstance(self.timezone, str) or not self.timezone.strip():
             raise ValueError("SQL timezone must be a nonempty name")
         if not isinstance(self.reference_input_ref,str) or (self.reference_input_ref and not self.reference_input_ref.strip()):

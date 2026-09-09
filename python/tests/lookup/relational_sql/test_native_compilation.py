@@ -75,7 +75,7 @@ def test_normal_compilation_authors_and_persists_sql_without_graph_turn(monkeypa
     assert port.calls==1
 
 
-@pytest.mark.parametrize('scenario',['empty_catalog','all_dropped','declared_unavailable'])
+@pytest.mark.parametrize('scenario',['empty_catalog','all_dropped','declared_unavailable','unrelated_discovery_failure'])
 def test_exhausted_sources_return_impossible_without_sql_authoring(monkeypatch,scenario):
     question='How many stores?'
     if scenario=='empty_catalog':
@@ -84,6 +84,9 @@ def test_exhausted_sources_return_impossible_without_sql_authoring(monkeypatch,s
         read=replace(_read('stores'),
             resource_names=('stores',))
         catalog=RelationCatalog(reads=(read,))
+        if scenario == 'unrelated_discovery_failure':
+            from fervis.lookup.relation_catalog import EndpointRead
+            catalog = replace(catalog, reads=(*catalog.reads, EndpointRead('unrelated', 'unrelated', resource_names=('stores',))))
     calls=[]
     def turn(purpose,*,prompt,parse,**kwargs):
         calls.append(purpose.value)
@@ -97,15 +100,17 @@ def test_exhausted_sources_return_impossible_without_sql_authoring(monkeypatch,s
         pytest.fail('Exhausted sources reached SQL authoring')
     def eligibility(eligibility_request,**kwargs):
         return SemanticReadEligibilityResult(tuple(ReadRequirementAssessment('fact_1',source.read_id,(source.id,),
-            source.read_id,() if scenario=='all_dropped' else tuple(field.field_ref for field in source.fields),
-            'The declared fixture source assessment.',SemanticReadDecision.DROP if scenario=='all_dropped' else SemanticReadDecision.RETAIN)
+            source.read_id,() if scenario in {'all_dropped', 'unrelated_discovery_failure'} else tuple(field.field_ref for field in source.fields),
+            'The declared fixture source assessment.',SemanticReadDecision.DROP if scenario in {'all_dropped', 'unrelated_discovery_failure'} else SemanticReadDecision.RETAIN)
             for source in eligibility_request.source_catalog.sources),())
     # The compilation request is a keyword to this seam, distinct from its first argument.
     def assessed(eligibility_request,**kwargs):return eligibility(eligibility_request)
     monkeypatch.setattr(compilation,'_turn',turn)
     monkeypatch.setattr(compilation,'_read_eligibility_turn',assessed)
     class NoRead:
-        def read(self,**kwargs):pytest.fail('No API read is needed for this declared source inventory')
+        def read(self,**kwargs):
+            assert scenario == 'unrelated_discovery_failure' and kwargs['endpoint_name'] == 'unrelated'
+            return {'responseStatus': 400, 'responseFormat': 'json', 'responseBody': {}}
     request=compilation.SemanticCompilationRequest('unavailable',question,QuestionContractRequest(
         current_question=question,conversation_context={}),catalog,(),NoRead(),None,'openai',1,10,None,{},HostPromptContext())
     result=compilation.compile_semantic_question(request)
@@ -380,3 +385,51 @@ def test_sql_calendar_uses_and_persists_the_question_timezone(monkeypatch,zone,i
         environment=ExecutionEnvironment(catalog=catalog),ports=RuntimePorts(Port(),LookupMemory()))
     assert result.issue is None
     assert next(iter(result.fact_result.outcome.projected_rows[0].values.values())) == date.fromisoformat(expected)
+
+
+@pytest.mark.parametrize('first_retained', [False, True])
+def test_normal_compilation_inspects_and_assesses_later_recalled_reads(monkeypatch, first_retained):
+    from fervis.lookup.relation_catalog import EndpointRead
+    question = 'How many stores?'
+    observed = []
+    assessed_reads = []
+    authored_reads = []
+    catalog = RelationCatalog(reads=tuple(EndpointRead(name, name, resource_names=('stores',)) for name in ('a', 'b')))
+    from fervis.lookup.relation_catalog.selection.model import CatalogSelectionResult, RequestedFactCatalogSelection
+    monkeypatch.setattr(compilation, 'select_semantic_relation_catalog', lambda request: CatalogSelectionResult(
+        RelationCatalog(reads=(catalog.read('a'),)),
+        (RequestedFactCatalogSelection('fact_1', ('stores',), (), ('a',), ('b',)),), ('a',)))
+    class Port:
+        def read(self, *, endpoint_name, args):
+            observed.append(endpoint_name)
+            return {'responseStatus': 200, 'responseFormat': 'json', 'responseBody': [{'name': endpoint_name}]}
+    def turn(purpose, *, prompt, parse, **kwargs):
+        if purpose.value == 'question_contract':
+            return SimpleNamespace(result=parse(_frame_payload()))
+        if purpose.value == 'query_enrichment':
+            return SimpleNamespace(result=SemanticQueryEnrichmentResult(tuple(
+                RecallBucketMatch(bucket.bucket_ref, ('stores',), ('stores',))
+                for bucket in prompt.request.recall_buckets), ()))
+        assert purpose.value == 'source_realization'
+        authored_reads.extend(definition["read_id"] for definition in prompt.tables.values())
+        table = next(name for name, definition in prompt.tables.items() if definition['read_id'] == 'b')
+        return SimpleNamespace(result=parse(payload(query=f'SELECT COUNT(*) AS total FROM "{table}"')))
+    def eligibility(eligibility_request, **kwargs):
+        (source,) = eligibility_request.source_catalog.sources
+        assessed_reads.append(source.read_id)
+        assert any(field.label == 'name' for field in source.fields)
+        keep = first_retained or source.read_id == 'b'
+        return SemanticReadEligibilityResult((ReadRequirementAssessment('fact_1', source.read_id,
+            (source.id,), source.read_id, tuple(f.field_ref for f in source.fields) if keep else (),
+            'The fixture explicitly assesses the candidate population.',
+            SemanticReadDecision.RETAIN if keep else SemanticReadDecision.DROP),), ())
+    monkeypatch.setattr(compilation, '_turn', turn)
+    monkeypatch.setattr(compilation, '_read_eligibility_turn', eligibility)
+    request = compilation.SemanticCompilationRequest('later-batch', question, QuestionContractRequest(
+        current_question=question, conversation_context={}), catalog, (), Port(), None, 'openai', 1, 1,
+        None, {}, HostPromptContext())
+    result = compilation.compile_semantic_question(request)
+    assert isinstance(result, compilation.SemanticCompilationSuccess)
+    assert observed == ['a', 'b']
+    assert assessed_reads == ['a', 'b']
+    assert set(authored_reads) == ({'a', 'b'} if first_retained else {'b'})

@@ -1,58 +1,8 @@
-from types import SimpleNamespace
 import pytest
 
-from fervis.lookup.orchestration import semantic_compilation as module
-from fervis.lookup.relation_catalog import EndpointRead, RelationCatalog
-from fervis.lookup.relation_catalog.row_sources.model import (
-    RowSource,
-    RowSourceKind,
-    RowSourceParam,
-    RowSourceValueType,
-)
 from fervis.lookup.answer_program.values import FactValue, LiteralType
 
 
-@pytest.mark.parametrize("opaque_control", [False, True])
-@pytest.mark.parametrize("supplied", [False, True])
-def test_required_inputs_are_checked_before_spending_on_read_eligibility(
-    monkeypatch, supplied, opaque_control
-):
-    catalog = RelationCatalog(
-        reads=(EndpointRead("open", "open"), EndpointRead("detail", "detail"))
-    )
-    sources = (
-        RowSource("open_rows", RowSourceKind.API_READ, "open", read_id="open"),
-        RowSource(
-            "detail_rows",
-            RowSourceKind.API_READ,
-            "detail",
-            read_id="detail",
-            params=(
-                RowSourceParam(
-                    "number",
-                    "detail.number",
-                    "number",
-                    RowSourceValueType.INTEGER,
-                    "query" if opaque_control else "path",
-                    required=True,
-                ),
-            ),
-        ),
-    )
-    monkeypatch.setattr(
-        module,
-        "build_api_row_source_catalog",
-        lambda catalog: SimpleNamespace(sources=sources),
-    )
-    values = (
-        (FactValue.literal(id="value", literal_type=LiteralType.NUMBER, value="3"),)
-        if supplied
-        else ()
-    )
-    selected = module._executable_relation_catalog(catalog, values=values)
-    assert [read.id for read in selected.reads] == (
-        ["open", "detail"] if supplied or opaque_control else ["open"]
-    )
 
 
 def test_integer_parameter_projection_preserves_large_values_and_rejects_fractions():

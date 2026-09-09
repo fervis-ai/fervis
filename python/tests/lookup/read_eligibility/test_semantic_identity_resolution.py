@@ -323,9 +323,7 @@ def test_eligibility_receives_the_established_enumeration_access():
     assert access.attrib == {'available': 'true'}
 
 
-def test_orchestrated_identity_evidence_records_each_tasks_response():
-    from types import SimpleNamespace
-    from fervis.lookup.orchestration.semantic_compilation import _resolve_identity_tasks
+def test_identity_executor_records_each_tasks_response():
     from fervis.lookup.lineage.source_read_buffer import buffered_source_read_lineage
     from fervis.lookup.relation_catalog import CatalogEndpointMetadata
     from fervis.lookup.source_reads.access_model import ReadAccessCatalog
@@ -344,16 +342,13 @@ def test_orchestrated_identity_evidence_records_each_tasks_response():
         case = _identity_case(name, catalog=catalog)
         task = replace(case.task, task_ref=f'task_{position}')
         selection = replace(case.selection, task_ref=task.task_ref)
-        result = _resolve_identity_tasks(
-            SimpleNamespace(canonical_values=(), parsed=SimpleNamespace(contract=None),
-                            grounding_result=SimpleNamespace(identity_tasks=(task,))),
-            eligibility=SimpleNamespace(identity_outcomes=(selection,)),
-            inputs={case.input_term.id: case.input_term},
-            request=SimpleNamespace(full_catalog=catalog,
-                data_access_port=_DataAccess({'data': [{'staff_id': f'staff_{position}', 'full_name': name}]}),
-                identity_read_lineage=lineage.scope, read_access=ReadAccessCatalog()),
+        result = execute_identity_selection(
+            task=task, selection=selection, input_term=case.input_term, full_catalog=catalog,
+            data_access_port=_DataAccess({'data': [{'staff_id': f'staff_{position}', 'full_name': name}]}),
+            source_read_key_prefix=f'identity:{task.task_ref}', source_read_lineage=lineage.scope,
+            read_access=ReadAccessCatalog(),
         )
-        values.extend(result)
+        values.append(result.canonical_value)
     assert len(lineage.source_reads) == 2
     read_ids = {read.source_read_id for read in lineage.source_reads}
     assert len(read_ids) == 2

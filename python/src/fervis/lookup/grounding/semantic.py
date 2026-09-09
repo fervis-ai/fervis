@@ -432,6 +432,11 @@ def _deterministic_scalar_value(
     value_type: ValueType,
     value_id: str,
 ) -> FactValue | None:
+    if isinstance(value_type, CollectionType) and isinstance(value_type.element_type, TextType):
+        if not isinstance(input_term.operand, tuple):
+            raise ValueError("collection grounding requires a collection operand")
+        return FactValue.string_set(id=value_id, values=input_term.operand, known_input_id=input_term.id,
+            proof_refs=(f"question_input:{input_term.id}",))
     if isinstance(value_type, (CollectionType, TemporalScopeType)):
         return None
     if not isinstance(input_term.operand, str):

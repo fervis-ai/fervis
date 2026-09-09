@@ -160,3 +160,51 @@ def test_only_equivalent_literal_predicates_are_canonicalized(predicate):
     with pytest.raises(QueryValidationError, match='predicates|observed'):
         literal_match_query('SELECT id, name AS matched_name FROM records WHERE id=1',
             column='matched_name', parameter='p1', tables=tables)
+
+
+@pytest.mark.parametrize('key_type', ['string', 'uuid'])
+@pytest.mark.parametrize('returned', ['ABC123', 'OTHER', None])
+def test_required_key_lookup_establishes_identity_from_observed_return_and_replays(returned, key_type):
+    from fervis.lookup.relation_catalog import CatalogParam, ParamSource, EntityKeyComponentTarget
+    from fervis.lookup.contract_codec import canonical_answer_program_json, decode_answer_program
+    from fervis.lookup.identity_types import IdentityExecutionFailureReason
+    literal = 'ABC123' if key_type == 'string' else '00000000-0000-0000-0000-000000000001'
+    actual = (literal if returned == 'ABC123' else '00000000-0000-0000-0000-000000000002' if key_type == 'uuid' and returned else returned)
+    read = _read('records', value_type=key_type, params=(CatalogParam('id', 'id', ParamSource.PATH,
+        key_type, required=True, entity_target=EntityKeyComponentTarget('records', 'primary', 'id')),))
+    catalog = RelationCatalog(reads=(read,))
+    views = build_query_view_catalog(catalog)
+    view = views.views[0]
+    value = FactValue.named(id='original', known_input_id='i1', text=literal, proof_refs=('question_input:i1',))
+    menu = query_parameter_menu((CanonicalInputValue(value.id, 'i1', ('fact_1:sql_input:i1',), value, value.proof_refs),))
+    origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, literal)
+    meaning = ReferenceMeaning('fact_1', 'i1', 'record', 'record ABC123', (origin,), ('i1',), reference_text=literal)
+    prompt = ReferenceQueryPrompt(question='Return record ABC123.', meaning=meaning, tables=views.tables, parameters=menu.descriptions)
+    payload = {'query': f'SELECT id FROM "{view.name}"', 'mode': 'rows',
+        'columns': [{'name': 'id', 'value_type': key_type}],
+        'outputs': [{'kind': 'identity', 'authority': view.name+':key:0', 'components': {'id': 'id'}, 'label': 'record', 'display_column': None}],
+        'ordering': [], 'interpretations': [], 'reference_binding': {'kind': 'literal', 'match_column': 'id'},
+        'request_arguments': [{'view': view.name, 'parameter_ref': 'id', 'binding': 'p1_1'}]}
+    validate(payload, prompt._schema())
+    authored = parse_reference_query(payload, prompt=prompt, menu=menu)
+    inputs = (InputTerm('i1', origin, literal, TextType()),)
+    denotations = (InputDenotation('d1', 'i1', 'record', 'Supplied record key', 'records', InputDenotationKind.IDENTITY_REFERENCE),)
+    reference = compile_reference_plan(authored, meaning=meaning, menu=menu, views=views.views, catalog=catalog,
+        inputs=inputs, input_denotations=denotations, access=ReadAccessCatalog())
+    final = compile_query_answer(question='Return its ID.', query=f'SELECT id AS value FROM "{reference.view.name}"',
+        views=(), relation_views=(reference.view,), prerequisites=reference.program, catalog=catalog,
+        bindings=reference.bindings, inputs=inputs, input_denotations=denotations, expected_input_refs=('i1',),
+        output_types={'value': key_type}, result_contract=ResultContract('scalar'))
+    class Port:
+        def read(self, *, endpoint_name, args):
+            assert endpoint_name == 'records' and args == {'id': literal}
+            return {'responseStatus': 200, 'responseBody': [] if returned is None else [{'id': actual}]}
+    program = decode_answer_program(canonical_answer_program_json(final.program))
+    for _ in range(2):
+        result = invoke_answer_program(program=program, bindings=final.bindings,
+            environment=ExecutionEnvironment(catalog=catalog), ports=RuntimePorts(Port(), LookupMemory()))
+        if returned == 'ABC123':
+            assert result.issue is None
+            assert str(next(iter(result.fact_result.outcome.projected_rows[0].values.values()))) == literal
+        else:
+            assert result.issue.reference.reason is IdentityExecutionFailureReason.NOT_FOUND

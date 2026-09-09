@@ -80,7 +80,7 @@ def _candidate_projection(statement, *, column, parameter, tables):
 def _observed_expression(node, *, table, columns):
     if isinstance(node, exp.Column):
         if node.name.casefold() not in {name.casefold() for name in columns} or node.table and node.table.casefold() != table.alias_or_name.casefold():
-            raise QueryValidationError('Literal matching requires an observed candidate field')
+            raise QueryValidationError(f'Literal matching requires an observed candidate field: {node.sql()} is not a column of {table.alias_or_name}. Declared columns: {sorted(columns)}')
         return node.copy()
     if isinstance(node, exp.Literal) and node.is_string and not any(char.isalnum() for char in node.this):
         return node.copy()

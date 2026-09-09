@@ -12,5 +12,5 @@ expect:
     same_program_id: true
     same_program: true
     programs:
-      - program_id: ap_d381b1b9693b1f3546be380b5d3f5d2e30e92032cf44345041f7649eb7740a91
-      - program_id: ap_d381b1b9693b1f3546be380b5d3f5d2e30e92032cf44345041f7649eb7740a91
+      - program_id: ap_215e8bf5401cfc1a1dabbb7d83f32740d9efa73d39a75de2f4b0b704e25dbe8b
+      - program_id: ap_215e8bf5401cfc1a1dabbb7d83f32740d9efa73d39a75de2f4b0b704e25dbe8b

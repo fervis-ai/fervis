@@ -198,7 +198,9 @@ def projection_description(value, component, item_index=None):
         "identity": identity,
         "projection": component,
         "value_type": kind,
-        **({"value": payload.value} if isinstance(payload, LiteralValuePayload) else {}),
+        **({"value": payload.value} if isinstance(payload, LiteralValuePayload) else
+           {"value": payload.text} if isinstance(payload, NamedValuePayload) else
+           {"value": payload.values[item_index]} if isinstance(payload, StringSetValuePayload) and item_index is not None else {}),
     }
 
 

@@ -1,5 +1,4 @@
 from fervis.lookup.source_reads.access_model import ReadAccessCatalog
-from dataclasses import replace
 import pytest
 from jsonschema import validate
 from tests.lookup.relational_engine.test_dependent_reads import _program
@@ -76,21 +75,11 @@ def test_candidate_failure_does_not_claim_a_complete_domain():
     assert not access.can_enumerate(child)
 
 
-def test_pending_dependent_read_is_assessed_before_executable_filtering(monkeypatch):
+def test_selected_dependent_read_discovers_complete_parent_traversal(monkeypatch):
     from types import SimpleNamespace
     from fervis.lookup.orchestration import semantic_compilation as compilation
-    from fervis.lookup.relation_catalog.selection.model import (
-        CatalogSelectionResult, RequestedFactCatalogSelection,
-    )
-    from fervis.lookup.relation_catalog.model import RelationCatalog
 
     _, _, catalog = _program()
-    selection = CatalogSelectionResult(
-        RelationCatalog(reads=(catalog.read("facilities"),)),
-        (RequestedFactCatalogSelection("fact_1", ("instruments",), (),
-                                       ("facilities",), ("instruments",)),),
-        ("facilities",),
-    )
     calls = []
 
     def model_turn(purpose, *, prompt, parse, **kwargs):
@@ -106,16 +95,13 @@ def test_pending_dependent_read_is_assessed_before_executable_filtering(monkeypa
         }}))
 
     monkeypatch.setattr(compilation, "_turn", model_turn)
-    access = compilation._discover_catalog_read_access(
-        selection, resolver_catalog=RelationCatalog(reads=()),
+    access = compilation._discover_read_access(
+        ("instruments",),
         request=SimpleNamespace(full_catalog=catalog, read_access=ReadAccessCatalog()),
         context=TurnPromptContext(current_question="How many instruments?"),
         on_turn=None,
     )
-    bounded = compilation._bound_recall_selection(
-        selection, full_catalog=catalog, values=(), read_access=access,
-    )
+    child = next(source for source in build_api_row_source_catalog(catalog).sources if source.read_id == "instruments")
     assert len(calls) == 1
-    assert bounded.requested_fact_selections[0].unselected_positive_read_ids == (
-        "instruments",
-    )
+    assert access.can_enumerate(child)
+

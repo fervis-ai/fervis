@@ -645,3 +645,13 @@ def test_explicit_date_interval_has_calendar_day_precision(shape):
         'March 1 through March 31, 2026' if shape=='range' else 'since March 1, 2026',
         '2026-09-05', intent, ('2026-03-01', '2026-03-31' if shape=='range' else '2026-09-05'),
     )
+
+
+def test_categorical_alternatives_cover_their_declared_input_uses():
+    from fervis.lookup.grounding.semantic import build_canonical_input_ledger
+    term = InputTerm('states', SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, 'queued or finished'),
+                     ('queued', 'finished'), CollectionType(TextType()))
+    values = deterministic_scalar_values((GroundingPartition('states', ('use:states',),
+        term.value_type, None, 'alternative states'),), inputs={'states': term})
+    ledger = build_canonical_input_ledger(values, required_use_refs=('use:states',))
+    assert set(ledger[0].typed_value.payload.values) == {'queued', 'finished'}

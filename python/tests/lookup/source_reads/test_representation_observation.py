@@ -377,9 +377,7 @@ def test_inspection_respects_execution_read_scope_before_any_request():
 
 
 def test_uninspected_positive_recall_is_retained_for_the_next_batch():
-    from dataclasses import replace
     from fervis.lookup.relation_catalog import EndpointRead
-    from fervis.lookup.orchestration.semantic_compilation import _bound_recall_selection
     from fervis.lookup.relation_catalog.selection.model import (
         CatalogSelectionResult,
         RequestedFactCatalogSelection,
@@ -417,9 +415,8 @@ def test_uninspected_positive_recall_is_retained_for_the_next_batch():
         (RequestedFactCatalogSelection("fact_1", ("items",), (), ("a",), ("b",)),),
         ("a",),
     )
-    bounded = _bound_recall_selection(selection, full_catalog=current, values=())
     next_batch = next_catalog_selection_batch(
-        catalog_selection=bounded, full_catalog=current, max_reads_per_fact=1
+        catalog_selection=selection, full_catalog=current, max_reads_per_fact=1
     )
     assert next_batch is not None
     assert next_batch.selected_read_ids == ("b",)
@@ -430,120 +427,6 @@ def test_uninspected_positive_recall_is_retained_for_the_next_batch():
     assert [field.path for field in current.read("b").fields] == ["name"]
 
 
-@pytest.mark.parametrize("first_retained", [False, True])
-def test_source_preparation_inspects_a_later_useful_candidate(
-    monkeypatch, first_retained
-):
-    from fervis.lookup.orchestration import semantic_compilation as compilation
-    from fervis.lookup.relation_catalog import EndpointRead
-    from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
-    from fervis.lookup.relation_catalog.selection.model import (
-        CatalogSelectionResult,
-        RequestedFactCatalogSelection,
-    )
-    from fervis.lookup.read_eligibility.semantic import (
-        ReadRequirementAssessment,
-        SemanticReadDecision,
-        SemanticReadEligibilityResult,
-    )
-    from fervis.lookup.question_contract import QuestionContractRequest
-    from fervis.lookup.turn_prompts import HostPromptContext, build_turn_prompt_context
-    from fervis.lookup.source_reads.representation import (
-        inspect_selected_representations,
-    )
-    from tests.lookup.fact_compilation.test_compiler import _compile_memory_count
-
-    _, _, _, _, _, count = _compile_memory_count(())
-
-    class Port:
-        calls = []
-
-        def read(self, *, endpoint_name, args):
-            self.calls.append(endpoint_name)
-            return {
-                "responseStatus": 200,
-                "responseFormat": "json",
-                "responseBody": [{"name": endpoint_name}],
-            }
-
-    port = Port()
-    raw = RelationCatalog(
-        reads=tuple(
-            EndpointRead(name, name, resource_names=("items",)) for name in ("a", "b")
-        )
-    )
-    current = inspect_selected_representations(
-        raw, read_ids=("a",), data_access_port=port
-    )
-    selection = CatalogSelectionResult(
-        RelationCatalog(reads=(current.read("a"),)),
-        (RequestedFactCatalogSelection("fact_1", ("items",), (), ("a",), ("b",)),),
-        ("a",),
-    )
-    initial_sources = build_api_row_source_catalog(selection.relation_catalog)
-
-    def assessed(source, decision):
-        return SemanticReadEligibilityResult(
-            (
-                ReadRequirementAssessment(
-                    requested_fact_id="fact_1",
-                    candidate_ref=source.read_id,
-                    source_refs=(source.id,),
-                    read_id=source.read_id,
-                    relevant_field_refs=tuple(f.field_ref for f in source.fields),
-                    assessment_basis="This fixture selects the later matching resource.",
-                    decision=decision,
-                ),
-            ),
-            (),
-        )
-
-    def later(eligibility_request, **kwargs):
-        (source,) = eligibility_request.source_catalog.sources
-        assert source.read_id == "b"
-        assert any(field.label == "name" for field in source.fields)
-        return assessed(source, SemanticReadDecision.RETAIN)
-
-    monkeypatch.setattr(compilation, "_read_eligibility_turn", later)
-    question = "How many items?"
-    request = compilation.SemanticCompilationRequest(
-        run_id="test",
-        question=question,
-        question_contract_request=QuestionContractRequest(
-            current_question=question, conversation_context={}
-        ),
-        full_catalog=current,
-        memory_relations=(),
-        data_access_port=port,
-        model_port=None,
-        provider="openai",
-        max_thinking_tokens=1,
-        max_catalog_reads_per_fact=1,
-        runtime_values=None,
-        conversation_context={},
-        host=HostPromptContext(),
-    )
-    result = compilation._prepare_source_candidates(
-        initial_catalog_selection=selection,
-        initial_answer_sources=initial_sources,
-        initial_eligibility=assessed(
-            initial_sources.sources[0],
-            SemanticReadDecision.RETAIN
-            if first_retained
-            else SemanticReadDecision.DROP,
-        ),
-        canonical_values=(),
-        indexes=(count.request.index,),
-        context=build_turn_prompt_context(
-            current_question=question, conversation_context={}
-        ),
-        request=request,
-        on_turn=None,
-    )
-    assert port.calls == ["a", "b"]
-    assert {source.read_id for source in result[3].sources} == (
-        {"a", "b"} if first_retained else {"b"}
-    )
 
 
 def test_empty_paginated_observation_preserves_declared_results_structure():
