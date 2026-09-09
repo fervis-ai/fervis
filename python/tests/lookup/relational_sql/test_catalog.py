@@ -1,3 +1,4 @@
+from tests.lookup.relational_sql.test_authoring import payload as query_payload
 from fervis.lookup.relational_sql.catalog import build_query_view_catalog
 from fervis.lookup.relational_sql.compiler import compile_query_answer
 from fervis.lookup.answer_program.invocation import invoke_answer_program,RuntimePorts
@@ -83,7 +84,8 @@ def test_sql_catalog_exposes_actual_uuid_and_decimal_representations():
     payload={'query':f'SELECT id FROM "{view.name}"','mode':'rows',
         'columns':[{'name':'id','value_type':'uuid'}],
         'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':None}],
-        'ordering':[],'request_arguments':[],'interpretations':[]}
+        'ordering':[],'api_bindings':[],'interpretations':[]}
+    payload = query_payload(**payload)
     parse_query_answer(payload,table_names=set(views.tables),parameter_names=set(),tables=views.tables)
     erased = {**payload, 'columns': [{'name': 'id', 'value_type': 'string'}]}
     with pytest.raises(QueryValidationError, match='source key type'):

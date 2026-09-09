@@ -1,3 +1,4 @@
+from tests.lookup.relational_sql.test_authoring import payload as query_payload
 from dataclasses import replace
 import pytest
 from jsonschema import validate
@@ -26,8 +27,8 @@ def _record_demand():
     from fervis.lookup.orchestration.reference_slots import ReferenceSlot
     from fervis.lookup.relational_sql.acquisition import RelationView
     name = 'fact_1__reference_i1'
-    return {'i1': ReferenceSlot(RelationView(name, name+'.rows', {'id':'id'}),
-        {'candidate_keys':[{'entity_kind':'records','key_id':'primary','components':{'id':'id'}}]}, ('i1',))}
+    return {'i1': ReferenceSlot(RelationView('i1', name+'.rows', {'id':'id'}),
+        {'candidate_keys':[{'entity_kind':'records','key_id':'primary','components':{'id':'id'}}]}, ('i1',), name)}
 
 
 @pytest.mark.parametrize(('case','text','expected'),[
@@ -53,7 +54,7 @@ def test_normal_reference_planner_compiles_live_reference_relations(case,text,ex
         source_catalog=available,source_refs={source.id})
     origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,text)
     meaning=ReferenceMeaning('fact_1','i1','record',f'Identify {text}.',(origin,),('i1',),reference_text=text,reference_kind="description" if case == "role" else "literal")
-    prompt=ReferenceQueryPrompt(question=f'Return the ID for {text}.',meaning=meaning,tables=view_catalog.tables,parameters=menu.descriptions)
+    prompt=ReferenceQueryPrompt(meaning=meaning,tables=view_catalog.tables,parameters=menu.descriptions)
     interpretations=[]
     if case=='role':
         choice=next(name for name,desc in menu.descriptions.items() if desc.get('kind')=='catalog_choice' and desc['value']=='true')
@@ -65,8 +66,9 @@ def test_normal_reference_planner_compiles_live_reference_relations(case,text,ex
     payload={'query':f'SELECT id AS record_id{extra} FROM "{view.name}" WHERE {predicate}',
         'mode':'rows','columns':[{'name':'record_id','value_type':'integer'}, *([{'name':'matched_name','value_type':'string'}] if case != 'role' else [])],
         'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'record_id'},'label':'record','display_column':None}],
-        'ordering':[],'request_arguments':[],'interpretations':[],
+        'ordering':[],'api_bindings':[],'interpretations':[],
         'reference_binding':{'kind':'description','basis':'The primary property defines the role.'} if case=='role' else {'kind':'literal','match_column':'matched_name'}}
+    payload = query_payload(**payload)
     if case != "role": payload["query"] = payload["query"].split(" WHERE ")[0]
     validate(payload,prompt._schema())
     authored=parse_reference_query(payload,prompt=prompt,menu=menu)
@@ -83,10 +85,11 @@ def test_normal_reference_planner_compiles_live_reference_relations(case,text,ex
         if case=='role':
             symbol=next(name for name,desc in prompt.parameters.items() if desc.get('kind')=='catalog_choice' and desc['value']=='true')
             submitted={**payload,'query':payload['query'].replace('$'+choice,'$'+symbol)}
+            submitted = query_payload(**submitted)
         return parse(submitted)
     reference,=plan_fact_references(selected_slots=_record_demand(),fact=meaning,inputs={'i1':inputs[0]},
         denotations={'i1':denotations[0]},values=values,catalog=catalog,access=ReadAccessCatalog(),
-        question=prompt.question,responses=(),turn=turn)
+        responses=(),turn=turn)
     assert len(turns)==1
     if dependent_api:
         from fervis.lookup.relational_sql.parameters import with_reference_arguments
@@ -97,11 +100,11 @@ def test_normal_reference_planner_compiles_live_reference_relations(case,text,ex
         final_menu=with_reference_arguments(query_parameter_menu(()),(reference,))
         final_meaning=replace(meaning,result_kind='scalar',output_kinds=('value',))
         final_tables={final_view.name:view_catalog.tables[final_view.name],reference.view.name:reference.table}
-        authored=parse_query_answer({'query':f'SELECT COUNT(*) AS value FROM "{final_view.name}"',
+        authored=parse_query_answer(query_payload(**{'query':f'SELECT COUNT(*) AS value FROM "{final_view.name}"',
             'mode':'scalar','columns':[{'name':'value','value_type':'integer'}],
             'outputs':[{'kind':'value','column':'value','label':'count'}], 'ordering':[],
-            'request_arguments':[{'view':final_view.name,'parameter_ref':view_catalog.tables[final_view.name]['request_parameters'][0]['param_ref'],'binding':'r1_1'}],
-            'interpretations':[]},table_names=set(final_tables),parameter_names=set(final_menu.expressions),
+            'api_bindings':[{'view':final_view.name,'parameter_ref':view_catalog.tables[final_view.name]['request_parameters'][0]['param_ref'],'binding':'r1_1'}],
+            'interpretations':[]}),table_names=set(final_tables),parameter_names=set(final_menu.expressions),
             meaning=final_meaning,parameter_descriptions=final_menu.descriptions,tables=final_tables,expected_input_refs=('i1',))
         bound=bind_query_answer(authored,final_menu,(final_view,))
         prerequisites,bindings=reference_prerequisites((reference,),bound.bindings,argument_operations=bound.argument_operations)
@@ -159,13 +162,13 @@ def test_interpreted_collection_member_keeps_the_original_collection_binding():
         else:
             condition='name=$p1_1'
         suffix = f' WHERE {condition}' if interpretations else ''
-        return parse({'query':f'SELECT id, name AS matched_name FROM "{view}"{suffix}','mode':'rows',
+        return parse(query_payload(**{'query':f'SELECT id, name AS matched_name FROM "{view}"{suffix}','mode':'rows',
             'columns':[{'name':'id','value_type':'integer'},{'name':'matched_name','value_type':'string'}],
             'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':None}],
-            'ordering':[],'request_arguments':[],'interpretations':[],
-            'reference_binding':{'kind':'description','basis':'The primary flag defines this member.'} if interpretations else {'kind':'literal','match_column':'matched_name'}})
+            'ordering':[],'api_bindings':[],'interpretations':[],
+            'reference_binding':{'kind':'description','basis':'The primary flag defines this member.'} if interpretations else {'kind':'literal','match_column':'matched_name'}}))
     reference,=plan_fact_references(selected_slots=_record_demand(),fact=meaning,inputs={'i1':term},denotations={'i1':denotation},
-        values=values,catalog=catalog,access=ReadAccessCatalog(),question="Count Alpha and the primary record",responses=(),turn=turn)
+        values=values,catalog=catalog,access=ReadAccessCatalog(),responses=(),turn=turn)
     final=compile_query_answer(question='Count selected records.',query=f'SELECT COUNT(*) AS total FROM "{reference.view.name}"',
         views=(),relation_views=(reference.view,),prerequisites=reference.program,bindings=reference.bindings,catalog=catalog,
         inputs=(term,),input_denotations=(denotation,),expected_input_refs=('i1',),
@@ -214,14 +217,14 @@ def test_reference_compilation_retains_prerequisites_outside_its_recalled_views(
         return access
     def turn(purpose,prompt,parse):
         view,=prompt.tables
-        return parse({'query':f'SELECT id, name AS matched_name FROM "{view}"','mode':'rows',
+        return parse(query_payload(**{'query':f'SELECT id, name AS matched_name FROM "{view}"','mode':'rows',
             'columns':[{'name':'id','value_type':'integer'},{'name':'matched_name','value_type':'string'}],
             'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':None}],
-            'ordering':[],'request_arguments':[],'interpretations':[],'reference_binding':{'kind':'literal','match_column':'matched_name'}})
+            'ordering':[],'api_bindings':[],'interpretations':[],'reference_binding':{'kind':'literal','match_column':'matched_name'}}))
     reference,=plan_fact_references(selected_slots=_record_demand(),fact=ReferenceMeaning('fact_1','i1','records','Identify Alpha.',(origin,),('i1',),reference_text='Alpha'),
         inputs={'i1':term},denotations={'i1':denotation},values=values,catalog=catalog,
         reference_catalog=RelationCatalog(reads=(child,)),access=ReadAccessCatalog(),
-        question='Identify Alpha.',responses=(),turn=turn,discover_access=discover)
+        responses=(),turn=turn,discover_access=discover)
     assert discovery==[('records',)]
     final=compile_query_answer(question='Return the reference key.',query=f'SELECT id AS value FROM "{reference.view.name}"',
         views=(),relation_views=(reference.view,),prerequisites=reference.program,bindings=reference.bindings,catalog=catalog,
@@ -262,15 +265,16 @@ def test_configured_reference_can_use_a_keyless_settings_relation(monkeypatch):
         payload={'query':f'SELECT default_record_id AS id FROM "{view}"','mode':'rows',
             'columns':[{'name':'id','value_type':'integer'}],
             'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'default record','display_column':None}],
-            'ordering':[],'request_arguments':[],'interpretations':[],
+            'ordering':[],'api_bindings':[],'interpretations':[],
             'reference_binding':{'kind':'description','basis':'The settings relation exposes the configured default record identity.'}}
+        payload = query_payload(**payload)
         validate(payload,prompt._schema())
         with pytest.raises(QueryValidationError,match='syntax'):
             parse({**payload,'reference_binding':{'kind':'literal','match_column':'matched_name'}})
         return parse(payload)
     reference,=plan_fact_references(selected_slots=_record_demand(),fact=ReferenceMeaning('fact_1','i1','records','Identify the default record.',(origin,),('i1',),reference_text=term.operand),
         inputs={'i1':term},denotations={'i1':denotation},values=values,catalog=catalog,
-        reference_catalog=RelationCatalog(reads=recalled),access=ReadAccessCatalog(),question=origin.meaning,responses=(),turn=turn)
+        reference_catalog=RelationCatalog(reads=recalled),access=ReadAccessCatalog(),responses=(),turn=turn)
     final=compile_query_answer(question='Return the configured identity.',query=f'SELECT id AS value FROM "{reference.view.name}"',
         views=(),relation_views=(reference.view,),prerequisites=reference.program,bindings=reference.bindings,catalog=catalog,
         inputs=(term,),input_denotations=(denotation,),expected_input_refs=('i1',),output_types={'value':'integer'},result_contract=ResultContract('scalar'))

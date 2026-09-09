@@ -27,11 +27,17 @@ class FactualQueryPrompt(QueryAnswerPrompt):
         super().__init__(**kwargs)
         self.inputs, self.denotations, self.reference_tables = inputs, denotations, reference_tables
         self.reference_inputs = {
-            ref: {'relation': f'{self.meaning.requested_fact_id}__reference_{ref}',
+            ref: {'relation': ref,
                   'supplied_reference': inputs[ref].operand,
                   'meaning': denotations[ref].operand_meaning,
-                  'allows_literal_address': not denotations[ref].reference_descriptions and isinstance(inputs[ref].operand, str)}
+                  'allows_literal_address': not denotations[ref].reference_descriptions and isinstance(inputs[ref].operand, str) and self._has_literal_address(ref)}
             for ref in self.meaning.input_refs if denotations[ref].kind is InputDenotationKind.IDENTITY_REFERENCE}
+
+    def _has_literal_address(self, input_ref):
+        return any(description.get('input_ref') == input_ref and compatible_argument(parameter, description)
+                   for description in self.parameters.values()
+                   for table in self.tables.values()
+                   for parameter in table.get('request_parameters', ()))
 
     def output_identity_authorities(self):
         return {**identity_authorities(self.reference_tables), **super().output_identity_authorities()}
@@ -66,7 +72,8 @@ class FactualQueryPrompt(QueryAnswerPrompt):
                     'authority': {'type': ['string', 'null'] if description['allows_literal_address'] else 'string', 'enum': authorities}}))
             schema['properties']['reference_demands'] = {**_array({'anyOf': variants} if variants else _object({})),
                 'minItems': len(self.reference_inputs), 'maxItems': len(self.reference_inputs)}
-            schema['required'].append('reference_demands')
+            schema['properties'] = {'reference_demands':schema['properties'].pop('reference_demands'), **schema['properties']}
+            schema['required'].insert(0, 'reference_demands')
         return schema
 
     def reference_argument_schema(self, parameter):
@@ -108,32 +115,35 @@ def parse_factual_query(payload, *, prompt, menu, selection_limit):
         if demand.authority is None and not prompt.reference_inputs[demand.input_ref]['allows_literal_address']:
             raise QueryValidationError('This supplied reference requires resolved identity authority')
     slots, tables, lowered_menu = reference_contracts(prompt, demands, menu)
-    arguments = []
-    for argument in payload['request_arguments']:
-        binding = argument['binding']
-        if isinstance(binding, dict):
-            if 'reference_input' not in binding or set(binding) - {'reference_input', 'component_id'}:
-                raise QueryValidationError('Reference REST binding requires one supplied input and an optional key component')
-            parameter = next((item for item in prompt.tables.get(argument['view'], {}).get('request_parameters', ())
-                if item['param_ref'] == argument['parameter_ref']), None)
-            names = [name for name, description in lowered_menu.descriptions.items()
-                     if description.get('kind') == 'reference_argument' and description.get('input_ref') == binding['reference_input']
-                     and (binding.get('component_id') is None or description.get('projection') == 'key_component:'+str(binding['component_id']))
-                     and parameter is not None and compatible_argument(parameter, description)]
-            if len(names) != 1:
-                ref = binding['reference_input']
-                demand = next((item for item in demands if item.input_ref == ref), None)
-                available = {description['projection']:description['value_type'] for description in lowered_menu.descriptions.values()
-                             if description.get('kind') == 'reference_argument' and description.get('input_ref') == ref}
-                if demand is not None and demand.authority is None:
-                    raise QueryValidationError(f'Reference input {ref} declares literal-address mode and has no resolved key. A reference_input binding requires a resolved authority; original address values use parameter-menu bindings.')
-                raise QueryValidationError(f'Reference binding for {ref} does not supply exactly one compatible component to {argument["parameter_ref"]}. '
-                    f'Parameter type/authority: {parameter}. Available key components: {available}. '
-                    f'Use a compatible identifier parameter or consume {prompt.reference_inputs.get(ref, {}).get("relation")} directly in SQL.')
-            argument = {**argument, 'binding': names[0]}
-        arguments.append(argument)
+    invocations = []
+    for invocation in payload['api_invocations']:
+        arguments = []
+        for argument in invocation['arguments']:
+            binding = argument['binding']
+            if isinstance(binding, dict):
+                if 'reference_input' not in binding or set(binding) - {'reference_input', 'component_id'}:
+                    raise QueryValidationError('Reference REST binding requires one supplied input and an optional key component')
+                parameter = next((item for item in prompt.tables.get(invocation['view'], {}).get('request_parameters', ())
+                    if item['param_ref'] == argument['parameter_ref']), None)
+                names = [name for name, description in lowered_menu.descriptions.items()
+                         if description.get('kind') == 'reference_argument' and description.get('input_ref') == binding['reference_input']
+                         and (binding.get('component_id') is None or description.get('projection') == 'key_component:'+str(binding['component_id']))
+                         and parameter is not None and compatible_argument(parameter, description)]
+                if len(names) != 1:
+                    ref = binding['reference_input']
+                    demand = next((item for item in demands if item.input_ref == ref), None)
+                    available = {description['projection']:description['value_type'] for description in lowered_menu.descriptions.values()
+                                 if description.get('kind') == 'reference_argument' and description.get('input_ref') == ref}
+                    if demand is not None and demand.authority is None:
+                        raise QueryValidationError(f'Reference input {ref} declares literal-address mode and has no resolved key. A reference_input binding requires a resolved authority; original address values use parameter-menu bindings.')
+                    raise QueryValidationError(f'Reference binding for {ref} does not supply exactly one compatible component to {argument["parameter_ref"]}. '
+                        f'Parameter type/authority: {parameter}. Available key components: {available}. '
+                        f'Use a compatible identifier parameter or consume {prompt.reference_inputs.get(ref, {}).get("relation")} directly in SQL.')
+                argument = {**argument, 'binding': names[0]}
+            arguments.append(argument)
+        invocations.append({**invocation, 'arguments':arguments})
     body = {key:value for key,value in payload.items() if key != 'reference_demands'}
-    body['request_arguments'] = arguments
+    body['api_invocations'] = invocations
     authored = parse_query_answer(body, table_names=set(tables), parameter_names=set(lowered_menu.expressions),
         meaning=prompt.meaning, selection_limit=selection_limit, expected_input_refs=prompt.meaning.input_refs,
         parameter_descriptions=lowered_menu.descriptions, tables=tables,

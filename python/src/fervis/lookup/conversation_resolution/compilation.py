@@ -20,6 +20,7 @@ from fervis.lookup.clarification.context import (
 )
 from .model import (
     ContextAnchorSource,
+    CurrentSpanSource,
     ConversationFrameCall,
     ConversationResolution,
     FramePartSource,
@@ -471,10 +472,18 @@ def _compile_input(
     if len(input_kinds) > 1:
         raise ValueError("resolved value has conflicting input meanings")
     source_kind = next(iter(input_kinds), "")
+    literal_text = value.resolved_text
+    occurrence = 1
+    if value.value_type in {"named", "string"} and len(value.sources) == 1 and isinstance(value.sources[0], CurrentSpanSource):
+        # A cited current span supplies literal data; resolved_text is the
+        # model's semantic rendering and may include descriptive scaffolding.
+        literal_text = value.sources[0].text
+        occurrence = value.sources[0].occurrence
     return ResolvedLiteralQuestionInput(
         input_ref=_input_ref(value.value_id),
-        value_source_text=value.resolved_text,
-        resolved_value_text=value.resolved_text,
+        value_source_text=literal_text,
+        resolved_value_text=literal_text,
+        occurrence=occurrence,
         value_type=value.value_type or _memory_value_type(source_kind),
         evidence_refs=memory_ids,
         canonical_identity=_canonical_identity(

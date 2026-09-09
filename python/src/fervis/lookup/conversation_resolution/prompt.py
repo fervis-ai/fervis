@@ -207,8 +207,8 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "A current_span source copies one exact occurrence from the current "
                     "clause. A context_anchor source copies one shown typed anchor. A "
                     "frame_part source carries one shown part of a prior question.",
-                    "Do not emit a resolved value established only by current_span; "
-                    "later interpretation already receives the current clause.",
+                    "Do not emit a resolved value established only by current_span unless it supplies a shown callable parameter; "
+                    "otherwise later interpretation already receives the current clause.",
                     "Do not emit a resolved value for prior meaning that explicit "
                     "current wording replaces. When only part of a prior frame part "
                     "remains relevant, resolved_text states only that retained meaning.",
@@ -232,6 +232,7 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "For each resolved value, set frame_parameter to the shown callable "
                     "parameter that the value supplies, or none when it supplies no "
                     "shown parameter.",
+                    "When a named or string callable parameter is supplied by one current_span, copy just its literal argument value in that span. Execution binds that copied text; resolved_text may describe its meaning but does not replace the literal data.",
                     "Represent unchanged callable values as resolved values too, using "
                     "their visible prior sources and parameter references.",
                     "Do not decide whether to call a prior frame. The backend derives "

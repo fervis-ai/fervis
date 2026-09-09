@@ -713,7 +713,7 @@ def compile_semantic_question(request, *, on_turn=None):
         planned_references=plan_fact_references(fact=fact,inputs=inputs,
             denotations={item.input_ref:item for item in meaning.input_denotations},values=local_values,
             catalog=request.full_catalog,reference_catalog=reference_catalog,consumer_catalog=consumer_catalog,
-            access=access,question=request.question,selected_slots=selected_slots,
+            access=access,selected_slots=selected_slots,
             responses=request.clarification_responses,turn=turn,discover_access=discover_access,timezone=timezone)
         if isinstance(planned_references,QueryUnavailable):
             return SemanticCompilationImpossible(question_contract=intent,canonical_values=canonical,

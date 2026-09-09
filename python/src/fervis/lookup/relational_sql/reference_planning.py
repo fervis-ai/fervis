@@ -1,6 +1,6 @@
 """Model-facing reference queries use the canonical relational authoring path."""
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 
 from fervis.lookup.semantic_types import SourceOrigin
 from .authoring import QueryAnswerPrompt, QueryUnavailable, parse_query_answer, invocation_tables
@@ -36,13 +36,21 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
     turn_name = "reference query"
     turn_task = "author a runtime query that resolves the assigned reference"
 
-    def __init__(self, *, question, meaning, tables, parameters, consumer_context=None, expected_key=None):
+    def __init__(self, *, meaning, tables, parameters, consumer_view_refs=None, expected_key=None):
         self.expected_key = expected_key
-        self.consumer_context = consumer_context
-        super().__init__(question=question, meaning=meaning, tables=tables, timezone=meaning.timezone,
+        self.consumer_view_refs = consumer_view_refs
+        super().__init__(question=meaning.reference_text, meaning=meaning, tables=tables, timezone=meaning.timezone,
             parameters={name:{**{key:value for key,value in description.items() if key != 'may_interpret'},
                               **({'kind':'definition' if meaning.reference_kind == 'description' else 'input'} if description.get('input_ref') else {})}
                         for name,description in parameters.items()})
+
+    def to_model_payload(self, context):
+        return super().to_model_payload(replace(context, current_question=self.meaning.reference_text))
+
+    def requested_answer_context(self):
+        return asdict(replace(self.meaning, return_request_basis=self.meaning.reference_text,
+            output_origins=tuple(replace(origin, meaning=self.meaning.reference_text)
+                                 for origin in self.meaning.output_origins)))
 
     def compilation_scope(self):
         return {
@@ -93,7 +101,7 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
 
     def data_sections(self, builder):
         return (*super().data_sections(builder), *((builder.json_section('Consuming answer and API identity contracts:',
-            self.consumer_context, indent=None),) if self.consumer_context is not None else ()))
+            {'view_refs':self.consumer_view_refs}, indent=None),) if self.consumer_view_refs is not None else ()))
 
     def _interpretation_schema(self):
         return {'type':'array','maxItems':0,'items':{'type':'object','properties':{},'required':[],'additionalProperties':False}}
@@ -109,7 +117,7 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
             *self.sql_surface_instructions(),
             "Satisfy Compilation scope.required_identity exactly. It is the identity authority already selected by the consuming factual query. Do not substitute a different namespace or key. Resolve only reference_text from Compilation scope. Other collection members and the surrounding factual answer belong to separate queries.",
             "Copy Requested answer.reference_kind into reference_binding. The frame has already fixed whether this is a literal name/code or a descriptive role; do not reinterpret that choice.",
-            "Use the consuming answer and its view_refs in Declared API views to disambiguate the API domain of the reference. The question's instance-kind wording is not an API namespace. Do not transfer the factual answer's filters or measures into reference resolution.",
+            "Use the consuming view_refs in Declared API views to disambiguate the API domain of the reference. The question's instance-kind wording is not an API namespace. Do not transfer the factual answer's filters or measures into reference resolution.",
             self._input_usage_instruction(),
             "Use the required logical identity authority. Project all its components unchanged from declared key or entity-reference fields in the selected views and map their SQL aliases in outputs. Matching column names or UUID types do not make different identity domains interchangeable; use declared relationships when necessary.",
             "Declare every selected SQL alias and its scalar type in columns. For a literal, match_column must name a selected alias, not an unselected source field. Return exactly one identity output, mode rows, ordering empty, interpretations empty.",
@@ -166,7 +174,7 @@ def parse_reference_query(payload, *, prompt, menu):
         if binding['match_column'] not in authored.output_types:
             raise QueryValidationError('Literal matching requires a declared observed column')
         body['query'] = literal_match_query(authored.query, column=binding['match_column'],
-            parameter=names[0], tables=invocation_tables(authored.request_arguments, prompt.tables))
+            parameter=names[0], tables=invocation_tables(authored.api_invocations, prompt.tables))
         authored = parse_query_answer(body, table_names=set(prompt.tables),
             parameter_names=set(menu.expressions), meaning=prompt.meaning,
             expected_input_refs=prompt.meaning.input_refs, tables=prompt.tables,

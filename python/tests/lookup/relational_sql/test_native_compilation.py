@@ -1,3 +1,4 @@
+from tests.lookup.relational_sql.test_authoring import payload as query_payload
 import pytest
 from types import SimpleNamespace
 from dataclasses import replace
@@ -270,24 +271,23 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
             foreign_view = next(name for name, table in prompt.tables.items() if table.get('read_id') == 'foreign_areas')
             from fervis.lookup.relational_sql.execution import QueryValidationError
             with pytest.raises(QueryValidationError, match='consuming identity demand'):
-                parse({'query':f'SELECT id FROM "{foreign_view}"', 'mode':'rows',
+                parse(query_payload(**{'query':f'SELECT id FROM "{foreign_view}"', 'mode':'rows',
                     'columns':[{'name':'id','value_type':key_type}],
                     'outputs':[{'kind':'identity','authority':'foreign_areas/primary(id)','components':{'id':'id'},'label':'area','display_column':None}],
-                    'ordering':[], 'request_arguments':[], 'interpretations':[],
-                    'reference_binding':{'kind':'description','basis':'The fixture tries the other namespace.'}})
-            consumer = prompt.consumer_context
-            assert consumer['requested_answer']['requested_fact_id'] in {'fact_1', 'fact_2'}
+                    'ordering':[], 'api_bindings':[], 'interpretations':[],
+                    'reference_binding':{'kind':'description','basis':'The fixture tries the other namespace.'}}))
+            assert prompt.meaning.requested_fact_id in {'fact_1', 'fact_2'}
             assert any(parameter.get('entity_target', {}).get('entity_kind') == 'areas'
-                       for view in consumer['view_refs'] for parameter in prompt.tables[view]['request_parameters'] if parameter.get('entity_target')) is (not opaque_consumer)
+                       for view in prompt.consumer_view_refs for parameter in prompt.tables[view]['request_parameters'] if parameter.get('entity_target')) is (not opaque_consumer)
             assert any(table.get('read_id') == 'stores' for table in prompt.tables.values())
             view=next(name for name, table in prompt.tables.items() if table.get('read_id') == 'areas')
             choice=next(name for name,desc in prompt.parameters.items() if desc.get('kind')=='catalog_choice' and desc['value']=='true')
             assert {desc['value'] for desc in prompt.parameters.values() if desc.get('kind')=='catalog_choice'}=={'false','true'}
-            result=parse({'query':f'SELECT id FROM "{view}" WHERE is_primary=${choice}','mode':'rows',
+            result=parse(query_payload(**{'query':f'SELECT id FROM "{view}" WHERE is_primary=${choice}','mode':'rows',
                 'columns':[{'name':'id','value_type':key_type}],
                 'outputs':[{'kind':'identity','authority':'areas/primary(id)','components':{'id':'id'},'label':'area','display_column':None}],
-                'ordering':[],'request_arguments':[],
-                'interpretations':[],'reference_binding':{'kind':'description','basis':'The primary flag defines the configured primary area.'}})
+                'ordering':[],'api_bindings':[],
+                'interpretations':[],'reference_binding':{'kind':'description','basis':'The primary flag defines the configured primary area.'}}))
         elif purpose.value=='source_realization':
             view=next(name for name,table in prompt.tables.items() if table.get('read_id')=='stores')
             assert set(prompt.reference_inputs) == {'i1'}
@@ -295,7 +295,7 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
             assert not any(description.get('kind') == 'reference_argument' for description in prompt.parameters.values())
             submitted=payload(query='SELECT COUNT(*) AS total FROM selected_items',
                 reference_demands=[{'input_ref':'i1','authority':'areas/primary(id)'}],
-                request_arguments=[{'view':view,'instance':'selected_items','parameter_ref':prompt.tables[view]['request_parameters'][0]['param_ref'],'binding':{'reference_input':'i1', **({'component_id':None} if opaque_consumer else {})}}])
+                api_bindings=[{'view':view,'name':'selected_items','parameter_ref':prompt.tables[view]['request_parameters'][0]['param_ref'],'binding':{'reference_input':'i1', **({'component_id':None} if opaque_consumer else {})}}])
             from jsonschema import validate
             validate(submitted, prompt._schema())
             result=parse(submitted)
@@ -496,7 +496,7 @@ def test_literal_resource_address_does_not_require_an_invented_identity_namespac
         symbol = next(name for name, description in prompt.parameters.items() if description.get('kind') == 'reference_literal')
         return SimpleNamespace(result=parse(payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
             reference_demands=[{'input_ref':'i1','authority':None}],
-            request_arguments=[{'view':view,'parameter_ref':'channel_id','binding':symbol}])))
+            api_bindings=[{'view':view,'parameter_ref':'channel_id','binding':symbol}])))
     monkeypatch.setattr(compilation, '_turn', turn)
     monkeypatch.setattr(compilation, '_read_eligibility_turn', lambda eligibility_request, **kwargs: SemanticReadEligibilityResult(
         tuple(ReadRequirementAssessment('fact_1',source.read_id,(source.id,),source.read_id,

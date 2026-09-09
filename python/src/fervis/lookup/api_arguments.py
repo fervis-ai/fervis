@@ -22,16 +22,23 @@ def compatible_argument(parameter, description, *, literal_lookup=False):
             "key_component:" + target["component_id"],
         ):
             return False
+    if parameter.get('choices') and 'value' in description:
+        from fervis.lookup.relation_catalog.parameter_values import require_catalog_parameter_choice
+        try:
+            require_catalog_parameter_choice(description['value'], type_name=str(parameter.get('type') or 'unknown'),
+                                             choices=tuple(parameter['choices']))
+        except ValueError:
+            return False
     if identity and '_projected_values' in description:
         from fervis.lookup.relation_catalog.parameter_values import catalog_parameter_wire_value, parse_catalog_parameter_value
         kind = str(parameter.get('type') or 'unknown')
         values = description['_projected_values']
         try:
             if kind in {'array', 'list'}:
-                parse_catalog_parameter_value(tuple(catalog_parameter_wire_value(value) for value in values), type_name=kind)
+                parse_catalog_parameter_value(tuple(catalog_parameter_wire_value(value) for value in values), type_name=kind, choices=tuple(parameter.get('choices', ())))
             else:
                 for value in values:
-                    parse_catalog_parameter_value(catalog_parameter_wire_value(value, type_name=kind), type_name=kind)
+                    parse_catalog_parameter_value(catalog_parameter_wire_value(value, type_name=kind), type_name=kind, choices=tuple(parameter.get('choices', ())))
         except (ValueError, TypeError):
             return False
         return True

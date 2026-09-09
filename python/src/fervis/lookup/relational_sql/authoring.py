@@ -28,11 +28,26 @@ class QueryArgument:
     view: str
     parameter_ref: str
     binding: str
-    instance: str | None = None
+    sql_view: str
 
-    @property
-    def sql_view(self) -> str:
-        return self.instance if self.instance is not None else self.view
+
+@dataclass(frozen=True)
+class InvocationArgument:
+    parameter_ref: str
+    binding: str
+
+
+@dataclass(frozen=True)
+class ApiInvocation:
+    view: str
+    name: str
+    arguments: tuple[InvocationArgument, ...] = ()
+
+
+def invocation_arguments(invocations):
+    """Project bindings from their single owning API invocation."""
+    return tuple(QueryArgument(invocation.view, argument.parameter_ref, argument.binding, invocation.name)
+                 for invocation in invocations for argument in invocation.arguments)
 
 
 @dataclass(frozen=True)
@@ -48,41 +63,39 @@ class AuthoredQueryAnswer:
     output_types: Mapping[str, str]
     output_labels: Mapping[str, str]
     result: ResultContract
-    request_arguments: tuple[QueryArgument, ...]
+    api_invocations: tuple[ApiInvocation, ...]
     parameter_names: tuple[str, ...]
     referenced_views: tuple[str, ...]
     interpretations: tuple[QueryInterpretation, ...] = ()
     outputs: tuple[QueryOutput, ...] = ()
     definition_inputs: tuple[str, ...] = ()
 
+    @property
+    def request_arguments(self) -> tuple[QueryArgument, ...]:
+        return invocation_arguments(self.api_invocations)
 
-def query_instances(arguments, table_names):
-    """Validate named invocations once before expanding their declared contracts."""
-    registered = {name.casefold() for name in table_names}
+
+def query_instances(invocations, table_names):
+    """Register explicit SQL names independently of API definition identifiers."""
+    import re
     instances = {}
-    folded = {}
-    for argument in arguments:
-        if argument.view not in table_names:
-            raise QueryValidationError('Request argument references an undeclared API view')
-        if argument.instance is None:
-            continue
-        name = argument.instance
-        if not isinstance(name, str) or not name or not name.isidentifier():
-            raise QueryValidationError('API invocation instance must be a nonempty SQL identifier')
-        if name.casefold() in registered:
-            raise QueryValidationError('API invocation instance shadows a registered view')
-        if name.casefold() in folded and folded[name.casefold()] != name:
-            raise QueryValidationError('API invocation instance names must be unique ignoring case')
-        if name in instances and instances[name] != argument.view:
-            raise QueryValidationError('API invocation instance mixes API definitions')
-        folded[name.casefold()] = name
-        instances[name] = argument.view
+    reserved = {name for name, table in table_names.items()
+                if table.get('kind') in {'reference_slot', 'resolved_reference'}} if isinstance(table_names, Mapping) else set()
+    for invocation in invocations:
+        if invocation.view not in table_names or invocation.view in reserved:
+            raise QueryValidationError('API invocation references an undeclared API definition')
+        if not isinstance(invocation.name, str) or not re.fullmatch(r'[a-z_][a-z0-9_]*', invocation.name):
+            raise QueryValidationError('API invocation name must be a lowercase SQL identifier')
+        if invocation.name in instances or invocation.name in reserved:
+            raise QueryValidationError('API invocation SQL names must be unique and cannot shadow reference relations')
+        instances[invocation.name] = invocation.view
     return instances
 
 
-def invocation_tables(arguments, tables):
-    instances = query_instances(arguments, tables)
-    return {**tables, **{name: tables[source] for name, source in instances.items()}}
+def invocation_tables(invocations, tables):
+    instances = query_instances(invocations, tables)
+    relations = {name:table for name,table in tables.items() if table.get('kind') in {'reference_slot', 'resolved_reference'}}
+    return {**relations, **{name:tables[source] for name,source in instances.items()}}
 
 
 def query_output_roles(meaning):
@@ -113,25 +126,21 @@ def parse_query_answer(
                 "Unavailable query outcome requires one explicit reason"
             )
         return QueryUnavailable(str(payload["reason"]).strip())
-    arguments = tuple(QueryArgument(**item) for item in payload["request_arguments"])
-    instances = query_instances(arguments, table_names)
-    table_names = set(table_names) | set(instances)
+    if 'request_arguments' in payload or 'api_invocations' not in payload:
+        raise QueryValidationError('Declare API sources and their bindings together in api_invocations')
+    api_invocations = tuple(ApiInvocation(item['view'], item['name'],
+        tuple(InvocationArgument(**argument) for argument in item['arguments'])) for item in payload['api_invocations'])
+    definition_tables = tables
+    instances = query_instances(api_invocations, tables if tables is not None else table_names)
+    relation_names = {name for name, table in (tables or {}).items()
+                      if table.get('kind') in {'reference_slot', 'resolved_reference'}}
     if tables is not None:
-        tables = invocation_tables(arguments, tables)
-    statement, referenced_views = _validate(
-        payload["query"], {name: SqlTable({}, ()) for name in table_names}
-    )
-    if instances:
-        from sqlglot.optimizer.scope import traverse_scope
-        changed = False
-        for scope in traverse_scope(statement):
-            for _, source in scope.selected_sources.values():
-                if isinstance(source, exp.Table) and instances.get(source.alias) == source.name:
-                    source.set('this', exp.to_identifier(source.alias, quoted=True))
-                    changed = True
-        if changed:
-            payload = {**payload, 'query': statement.sql(dialect='duckdb')}
-            statement, referenced_views = _validate(payload['query'], {name: SqlTable({}, ()) for name in table_names})
+        tables = invocation_tables(api_invocations, tables)
+    statement, referenced_views = _validate(payload['query'],
+        {name:SqlTable({}, ()) for name in set(instances) | relation_names})
+    if set(instances) - set(referenced_views):
+        raise QueryValidationError('API invocation is not used by the SQL query')
+    arguments = invocation_arguments(api_invocations)
     names = tuple(sorted({node.name for node in statement.find_all(exp.Placeholder)}))
     if not set(names) <= parameter_names:
         raise QueryValidationError("Query references an undeclared grounded parameter")
@@ -329,13 +338,15 @@ def parse_query_answer(
         parameter = next(
             (
                 p
-                for p in (tables or {})
+                for p in (definition_tables or {})
                 .get(argument.view, {})
                 .get("request_parameters", ())
                 if p["param_ref"] == argument.parameter_ref
             ),
             None,
         )
+        if parameter is None and 'request_parameters' in (definition_tables or {}).get(argument.view, {}):
+            raise QueryValidationError('Request argument is not declared by its API definition')
         if parameter is not None and not compatible_argument(
             parameter, descriptions.get(argument.binding, {}), literal_lookup=(
                 getattr(meaning, 'reference_kind', None) == 'literal' and
@@ -350,7 +361,9 @@ def parse_query_answer(
         output_types,
         {output.column: output.label for output in outputs if output.column},
         result,
-        arguments,
+        tuple(replace(invocation, arguments=tuple(replace(argument,
+            binding=next(item.binding for item in arguments if item.sql_view == invocation.name and item.parameter_ref == argument.parameter_ref))
+            for argument in invocation.arguments)) for invocation in api_invocations),
         names,
         referenced_views,
         interpretations,
@@ -422,6 +435,9 @@ class QueryAnswerPrompt(TurnPromptBase):
             else None,
         }
 
+    def requested_answer_context(self):
+        return asdict(self.meaning)
+
     def data_sections(self, builder):
         return (
             builder.json_section(
@@ -429,7 +445,7 @@ class QueryAnswerPrompt(TurnPromptBase):
                 self.compilation_scope(),
             ),
             builder.text_section("Question:", self.question),
-            builder.json_section("Requested answer:", asdict(self.meaning), indent=None),
+            builder.json_section("Requested answer:", self.requested_answer_context(), indent=None),
             builder.json_section("View invocation requirements:", {
                 name: {"required_parameters": [parameter["param_ref"] for parameter in table.get("request_parameters", ()) if parameter.get("required")],
                        "has_no_required_parameters": not any(parameter.get("required") for parameter in table.get("request_parameters", ()))}
@@ -448,7 +464,7 @@ class QueryAnswerPrompt(TurnPromptBase):
                 "Grounded parameter menu:", {
                     name: {**{key:value for key,value in description.items() if not key.startswith("_")}, **({"sql_expression": "$" + name}
                         if description.get("kind") not in {"reference_argument", "reference_literal", "definition"} else {})}
-                    for name, description in self.parameters.items()
+                    for name, description in self.parameters.items() if description.get("kind") != "definition"
                 }, indent=None
             ),
         )
@@ -457,10 +473,10 @@ class QueryAnswerPrompt(TurnPromptBase):
         return (
             "Author an executable query, not evaluated rows or a known identity value. Fervis reads the declared API views and evaluates SQL after compilation. A value read from another view can be joined or queried at execution; its absence from this prompt does not make the query unavailable.",
             "Use DuckDB SQL over only the declared views. Quote identifiers when necessary. No files, network, external tables or database access.",
-            "Copy SQL parameters from the menu sql_expression exactly. Use the menu key for request_arguments bindings. FROM and JOIN use declared API view keys or declared reference relation names as SQL tables, never endpoint paths or resource labels. These views are not SQL functions: do not put parentheses or request parameters after a view name. REST arguments belong exclusively in request_arguments. Do not invent values or inline grounded operands. SQL literals may express arithmetic constants and documented catalog enum values.",
+            "Copy SQL parameters from the menu sql_expression exactly. Declare each API source in api_invocations: view selects its catalog definition, name gives its short SQL table name, and arguments binds parameter refs to menu keys. FROM and JOIN use invocation names or declared reference relation names, never catalog definition identifiers, endpoint paths, or resource labels. API sources are not SQL functions. Do not invent values or inline grounded operands. SQL literals may express arithmetic constants and documented catalog enum values.",
             "An API-view column's identity_roles lists the declared identity components it can carry. API columns without identity_roles are ordinary scalar values, even when they contain identifiers. Declared reference relations carry their selected key components by definition. Such a value can match an identity-bearing column in a join or subquery; return the identity-bearing column for an identity output. Keep complete composite components from the same record.",
             "SQL calendar operations and date-to-timestamp conversions use the timezone in Compilation scope.",
-            "request_arguments binds declared view request parameter refs to the same grounded menu. Supply only arguments needed for the question; automatic_request_parameters are already supplied by complete traversal; never bind them. To invoke the same API view with different bindings in one query, assign a distinct instance name to each invocation. Use FROM declared_view AS instance, or refer to the named invocation directly as a SQL table. All arguments sharing an instance must name the same declared view. Use instance=null for the default view. Physical prerequisite enumeration and pagination belong to Fervis.",
+            "Declare one api_invocations entry for each API invocation used by SQL, including argument-free reads. Its name and all arguments belong to that one declaration. Multiple calls to one API definition use distinct names and independent argument lists. SQL range aliases such as FROM sites AS s do not change the invocation named sites. Supply only arguments needed for the question; automatic_request_parameters already belong to complete traversal. Physical prerequisite enumeration and pagination belong to Fervis.",
         )
 
     def instruction_sections(self, builder):
@@ -491,9 +507,10 @@ class QueryAnswerPrompt(TurnPromptBase):
     def _schema(self):
         string = {"type": "string"}
         binding_groups = {}
-        argument_schema = self._argument_schema(binding_groups)
+        argument_schema = self._invocation_schema(binding_groups)
         schema = _object(
             {
+                "api_invocations": argument_schema,
                 "query": string,
                 "mode": {"type": "string", "enum": self._result_modes()},
                 "columns": _array(
@@ -519,7 +536,6 @@ class QueryAnswerPrompt(TurnPromptBase):
                     if self.meaning is not None
                     else 0,
                 },
-                "request_arguments": argument_schema,
                 "interpretations": self._interpretation_schema(),
             }
         )
@@ -631,17 +647,17 @@ class QueryAnswerPrompt(TurnPromptBase):
             )
         )
 
-    def _argument_schema(self, binding_groups):
+    def _invocation_schema(self, binding_groups):
         variants = []
         for view, table in self.tables.items():
+            if table.get('kind') in {'reference_slot', 'resolved_reference'}:
+                continue
+            argument_variants = []
             for parameter in table.get("request_parameters", ()):
-                names = tuple(
-                    name
-                    for name, description in self.parameters.items()
+                names = tuple(name for name, description in self.parameters.items()
                     if compatible_argument(parameter, description, literal_lookup=(
                         getattr(self.meaning, 'reference_kind', None) == 'literal' and
-                        description.get('input_ref') == getattr(self.meaning, 'reference_input_ref', None)))
-                )
+                        description.get('input_ref') == getattr(self.meaning, 'reference_input_ref', None))))
                 binding_options = []
                 if names:
                     group = binding_groups.setdefault(names, "bound_value_" + str(len(binding_groups) + 1))
@@ -651,22 +667,15 @@ class QueryAnswerPrompt(TurnPromptBase):
                 if not binding_options:
                     continue
                 binding_schema = binding_options[0] if len(binding_options) == 1 else {"anyOf": binding_options}
-                variants.append(
-                    _object(
-                        {
-                            "view": {"type": "string", "enum": [view]},
-                            "instance": {"type": ["string", "null"], "minLength": 1},
-                            "parameter_ref": {
-                                "type": "string",
-                                "enum": [parameter["param_ref"]],
-                            },
-                            "binding": binding_schema,
-                        }
-                    )
-                )
-        if not variants:
-            return {"type": "array", "maxItems": 0, "items": _object({})}
-        return _array(variants[0] if len(variants) == 1 else {"anyOf": variants})
+                argument_variants.append(_object({
+                    "parameter_ref": {"type":"string", "enum":[parameter['param_ref']]},
+                    "binding": binding_schema}))
+            arguments = (_array(argument_variants[0] if len(argument_variants) == 1 else {'anyOf':argument_variants})
+                         if argument_variants else {'type':'array','maxItems':0,'items':_object({})})
+            variants.append(_object({'view':{'type':'string','enum':[view]},
+                'name':{'type':'string','pattern':'^[a-z_][a-z0-9_]*$'}, 'arguments':arguments}))
+        return (_array(variants[0] if len(variants) == 1 else {'anyOf':variants}) if variants
+                else {'type':'array','maxItems':0,'items':_object({})})
 
     def reference_argument_schema(self, parameter):
         return None

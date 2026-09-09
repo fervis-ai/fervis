@@ -54,14 +54,14 @@ def test_unrelated_authorities_do_not_multiply_reference_relations_or_argument_s
         assert sum(description.get('kind') == 'reference_argument' for description in lowered.descriptions.values()) == 1
         selections.append(slots[0])
     assert selections[0] == selections[1]
-    assert selections[0].view.name == 'fact_1__reference_i1'
+    assert selections[0].view.name == 'i1'
 
 
 def test_composite_rest_binding_projects_each_declared_parameter_component():
     prompt, menu, view = context(composite=True)
     body = payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
         reference_demands=[{'input_ref':'i1', 'authority':'records/primary(country,id)'}],
-        request_arguments=[{'view':view, 'parameter_ref':parameter, 'binding':{'reference_input':'i1'}}
+        api_bindings=[{'view':view, 'parameter_ref':parameter, 'binding':{'reference_input':'i1'}}
             for parameter in ('record_id', 'country')])
     validate(body, prompt._schema())
     declared = parse_factual_query(body, prompt=prompt, menu=menu, selection_limit=None)
@@ -85,7 +85,7 @@ def test_mixed_mode_error_is_owned_by_parser_and_corrected_declaration_succeeds(
     symbol = next(iter(menu.expressions))
     body = payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
         reference_demands=[{'input_ref':'i1','authority':'records/primary(id)'}],
-        request_arguments=[{'view':view,'parameter_ref':'record_id','binding':symbol}])
+        api_bindings=[{'view':view,'parameter_ref':'record_id','binding':symbol}])
     with pytest.raises(QueryValidationError, match='declared resolution mode'):
         parse_factual_query(body, prompt=prompt, menu=menu, selection_limit=None)
     corrected = {**body, 'reference_demands':[{'input_ref':'i1','authority':None}]}
@@ -99,7 +99,7 @@ def test_schema_does_not_offer_reference_keys_to_incompatible_scalar_parameters(
     prompt.tables[view]['request_parameters'].append({'param_ref':'name', 'name':'name', 'type':'string', 'source':'query'})
     bad = payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
         reference_demands=[{'input_ref':'i1','authority':'records/primary(id)'}],
-        request_arguments=[{'view':view,'parameter_ref':'name','binding':{'reference_input':'i1','component_id':'id'}}])
+        api_bindings=[{'view':view,'parameter_ref':'name','binding':{'reference_input':'i1','component_id':'id'}}])
     with pytest.raises(ValidationError):
         validate(bad, prompt._schema())
 
@@ -109,8 +109,36 @@ def test_opaque_parameter_schema_offers_only_type_compatible_key_components():
     prompt, _, view = context(composite=True, opaque=True)
     body = payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
         reference_demands=[{'input_ref':'i1','authority':'records/primary(country,id)'}],
-        request_arguments=[{'view':view,'parameter_ref':'record_id','binding':{'reference_input':'i1','component_id':'id'}}])
+        api_bindings=[{'view':view,'parameter_ref':'record_id','binding':{'reference_input':'i1','component_id':'id'}}])
     validate(body, prompt._schema())
-    body['request_arguments'][0]['binding']['component_id'] = 'country'
+    body['api_invocations'][0]['arguments'][0]['binding']['component_id'] = 'country'
     with pytest.raises(ValidationError):
         validate(body, prompt._schema())
+
+
+@pytest.mark.parametrize(('value','source','kind','allowed'), [
+    ('42','path','integer',True), ('Alpha','path','integer',False),
+    ('Alpha','path','string',True), ('Alpha','query','string',False),
+    ('Alpha','query','uuid',False), ('00000000-0000-0000-0000-000000000001','query','uuid',True),
+])
+def test_literal_address_mode_requires_an_available_compatible_api_argument(value,source,kind,allowed):
+    original, menu, view = context(opaque=True)
+    parameter = {**original.tables[view]['request_parameters'][0], 'type':kind, 'source':source}
+    tables = {view:{**original.tables[view],'request_parameters':[parameter]}}
+    descriptions = {name:{**item,'value':value,'label':value} for name,item in menu.descriptions.items()}
+    prompt = FactualQueryPrompt(question='Read the supplied record.',meaning=original.meaning,tables=tables,
+        parameters=descriptions,inputs={'i1':replace(original.inputs['i1'],operand=value)},
+        denotations=original.denotations,reference_tables=original.reference_tables)
+    assert prompt.reference_inputs['i1']['allows_literal_address'] is allowed
+    variant = prompt._schema()['properties']['reference_demands']['items']['anyOf'][0]
+    assert (None in variant['properties']['authority']['enum']) is allowed
+
+
+def test_reference_sql_names_are_local_while_program_identifiers_remain_disjoint():
+    prompt, menu, _ = context()
+    first, _, _ = reference_contracts(prompt,(ReferenceDemand('i1','records/primary(id)'),),menu)
+    prompt.meaning = SimpleNamespace(**{**vars(prompt.meaning),'requested_fact_id':'fact_2'})
+    second, _, _ = reference_contracts(prompt,(ReferenceDemand('i1','records/primary(id)'),),menu)
+    assert first[0].view.name == second[0].view.name == 'i1'
+    assert first[0].view.relation_id != second[0].view.relation_id
+    assert first[0].reference_id != second[0].reference_id

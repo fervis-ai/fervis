@@ -1,3 +1,4 @@
+from tests.lookup.relational_sql.test_authoring import payload as query_payload
 from dataclasses import replace
 import pytest
 from jsonschema import validate
@@ -45,7 +46,7 @@ def test_reference_authoring_supports_observed_expressions_without_backend_name_
         source_catalog=available,source_refs={source.id})
     origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,text)
     meaning=ReferenceMeaning('fact_1','i1','record',f'Identify {text}.',(origin,),('i1',),reference_text=text,reference_kind="description" if case == "role" else "literal")
-    prompt=ReferenceQueryPrompt(question=f'Return the ID for {text}.',meaning=meaning,tables=view_catalog.tables,parameters=menu.descriptions)
+    prompt=ReferenceQueryPrompt(meaning=meaning,tables=view_catalog.tables,parameters=menu.descriptions)
     interpretations=[]
     if case=='role':
         choice=next(name for name,desc in menu.descriptions.items() if desc.get('kind')=='catalog_choice' and desc['value']=='true')
@@ -59,8 +60,9 @@ def test_reference_authoring_supports_observed_expressions_without_backend_name_
     payload={'query':f'SELECT id AS record_id{extra} FROM "{view.name}" WHERE {predicate}',
         'mode':'rows','columns':[{'name':'record_id','value_type':'integer'}, *([{'name':'matched_name','value_type':'string'}] if case != 'role' else [])],
         'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'record_id'},'label':'record','display_column':None}],
-        'ordering':[],'request_arguments':[],'interpretations':[],
+        'ordering':[],'api_bindings':[],'interpretations':[],
         'reference_binding':{'kind':'description','basis':'The primary property defines the role.'} if case=='role' else {'kind':'literal','match_column':'matched_name'}}
+    payload = query_payload(**payload)
     if case != "role": payload["query"] = payload["query"].split(" WHERE ")[0]
     validate(payload,prompt._schema())
     authored=parse_reference_query(payload,prompt=prompt,menu=menu)
@@ -70,7 +72,7 @@ def test_reference_authoring_supports_observed_expressions_without_backend_name_
         from fervis.lookup.relational_sql.execution import QueryValidationError
         assert prompt.parameters['p1_1']['kind'] == 'definition'
         bad = deepcopy(payload)
-        bad['request_arguments'] = [{'view': view.name, 'parameter_ref': 'name', 'binding': 'p1_1'}]
+        bad['api_invocations'] = [{'view':view.name,'name':view.name,'arguments':[{'parameter_ref':'name','binding':'p1_1'}]}]
         with pytest.raises(ValidationError):
             validate(bad, prompt._schema())
         with pytest.raises(QueryValidationError):
@@ -113,11 +115,12 @@ def test_reference_output_contract_does_not_request_unused_presentation_fields(m
     meaning=ReferenceMeaning('fact_1','i1','records','Identify the record.',(origin,),('i1',),reference_text='Alpha')
     value=FactValue.literal(id='name',known_input_id='i1',literal_type=LiteralType.STRING,value='Alpha',proof_refs=('question_input:i1',))
     menu=query_parameter_menu((CanonicalInputValue(value.id,'i1',('fact_1:sql_input:i1',),value,value.proof_refs),))
-    prompt=ReferenceQueryPrompt(question='Identify the record.',meaning=meaning,tables=views.tables,parameters=menu.descriptions)
+    prompt=ReferenceQueryPrompt(meaning=meaning,tables=views.tables,parameters=menu.descriptions)
     payload={'query':f'SELECT id, {match_expression} AS display_name FROM "{view.name}"','mode':'rows',
         'columns':[{'name':'id','value_type':'integer'},{'name':'display_name','value_type':'string'}],
         'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':'display_name'}],
-        'ordering':[],'request_arguments':[],'interpretations':[],'reference_binding':{'kind':'literal','match_column':'display_name'}}
+        'ordering':[],'api_bindings':[],'interpretations':[],'reference_binding':{'kind':'literal','match_column':'display_name'}}
+    payload = query_payload(**payload)
     with pytest.raises(ValidationError):validate(payload,prompt._schema())
     with pytest.raises(QueryValidationError,match='display projection'):
         parse_reference_query(payload,prompt=prompt,menu=menu)
@@ -184,15 +187,16 @@ def test_required_key_lookup_establishes_identity_from_observed_return_and_repla
     menu = query_parameter_menu((CanonicalInputValue(value.id, 'i1', ('fact_1:sql_input:i1',), value, value.proof_refs),))
     origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, literal)
     meaning = ReferenceMeaning('fact_1', 'i1', 'record', 'record ABC123', (origin,), ('i1',), reference_text=literal)
-    prompt = ReferenceQueryPrompt(question='Return record ABC123.', meaning=meaning, tables=views.tables, parameters=menu.descriptions)
+    prompt = ReferenceQueryPrompt(meaning=meaning, tables=views.tables, parameters=menu.descriptions)
     payload = {'query': f'SELECT id FROM "{view.name}"', 'mode': 'rows',
         'columns': [{'name': 'id', 'value_type': key_type}],
         'outputs': [{'kind': 'identity', 'authority': 'records/primary(id)', 'components': {'id': 'id'}, 'label': 'record', 'display_column': None}],
         'ordering': [], 'interpretations': [], 'reference_binding': {'kind': 'literal', 'match_column': 'id'},
-        'request_arguments': [{'instance': None, 'view': view.name, 'parameter_ref': 'id', 'binding': 'p1_1'}]}
+        'api_bindings': [{'name': None, 'view': view.name, 'parameter_ref': 'id', 'binding': 'p1_1'}]}
+    payload = query_payload(**payload)
     if named_invocation:
         payload['query'] = payload['query'].replace(view.name, 'selected_record')
-        payload['request_arguments'][0]['instance'] = 'selected_record'
+        payload['api_invocations'][0]['name'] = 'selected_record'
     validate(payload, prompt._schema())
     authored = parse_reference_query(payload, prompt=prompt, menu=menu)
     inputs = (InputTerm('i1', origin, literal, TextType()),)
@@ -221,7 +225,7 @@ def test_required_key_lookup_establishes_identity_from_observed_return_and_repla
 def _assert_literal_reference_continuation(compiled, catalog, monkeypatch):
     from fervis.lookup.answer_program.persistence import ProgramInvocation, StoredProgramInvocation
     from fervis.lookup.answer_program.rerun import RerunnableProgramInvocation
-    from fervis.lookup.conversation_resolution.callable_frames import CallableFrameProgram, CallableFrameArgument, callable_frame_bindings
+    from fervis.lookup.conversation_resolution.callable_frames import CallableFrameProgram, _callable_argument, callable_frame_bindings
     from fervis.lookup.contract_codec import answer_program_id, canonical_answer_program_json, decode_answer_program
     from fervis.lineage.enums import ProgramInvocationKind
     from fervis.memory.conversation_context.semantic_frames import _semantic_frame_projection
@@ -234,8 +238,16 @@ def _assert_literal_reference_continuation(compiled, catalog, monkeypatch):
         compiled.bindings,ProgramInvocationKind.COMPILED_QUESTION),program)
     signature = _semantic_frame_projection(program.fact_template[0], stored=stored).callable
     parameter = next(p for p in program.parameters if p.input_ref == 'i1')
-    frame = CallableFrameProgram(RerunnableProgramInvocation.parse(stored), signature,
-        (CallableFrameArgument(parameter.id,'i1',parameter.input_use_refs,'And Cedar?','Cedar',None),))
+    from fervis.lookup.conversation_resolution.compilation import CompiledResolvedValue, _compile_input
+    from fervis.lookup.conversation_resolution.model import CurrentSpanSource
+    from fervis.memory.conversation_context import ConversationMemoryCardProjection
+    copied = _compile_input(CompiledResolvedValue('changed','site named Cedar',(),
+        (CurrentSpanSource('Cedar',1),),value_type=parameter.value_type.value),
+        memory_projection=ConversationMemoryCardProjection())
+    base = RerunnableProgramInvocation.parse(stored)
+    argument = _callable_argument(base,parameter_id=parameter.id,resolved_value_ref=copied.input_ref,
+        inputs_by_ref={copied.input_ref:copied})
+    frame = CallableFrameProgram(base, signature, (argument,))
     def forbidden(*args, **kwargs):
         raise AssertionError('A saved literal-reference program must replay its guard without rediscovering identity routes')
     monkeypatch.setattr(compilation, '_turn', forbidden)

@@ -1,3 +1,4 @@
+from tests.lookup.relational_sql.test_authoring import payload as query_payload
 from dataclasses import replace
 import pytest
 
@@ -232,7 +233,8 @@ def test_question_identity_roles_produce_a_required_sql_identity_output(role):
     payload={'query':f'SELECT id FROM "{view.name}"','mode':'rows',
         'columns':[{'name':'id','value_type':'integer'}],
         'outputs':[{'kind':'identity','authority':'locations/primary(id)','components':{'id':'id'},'label':'work location','display_column':None}],
-        'ordering':[],'request_arguments':[],'interpretations':[]}
+        'ordering':[],'api_bindings':[],'interpretations':[]}
+    payload = query_payload(**payload)
     validate(payload,prompt._schema())
     authored=parse_query_answer(payload,table_names=set(views.tables),parameter_names=set(),meaning=meaning,tables=views.tables)
     assert authored.outputs[0].identity.entity_kind=='locations'
@@ -259,7 +261,8 @@ def test_each_union_branch_preserves_a_complete_observed_identity(operator,wrapp
     projection=EntityKeyProjection('district','pk',(EntityKeyProjectionComponent('country','country'),EntityKeyProjectionComponent('id','id')))
     payload={'query':query,'mode':'rows','columns':[{'name':'country','value_type':'string'},{'name':'id','value_type':'integer'}],
         'outputs':[{'kind':'identity','authority':'district/pk(country,id)','components':{'country':'country','id':'id'},'label':'district','display_column':None}],
-        'ordering':[],'request_arguments':[],'interpretations':[]}
+        'ordering':[],'api_bindings':[],'interpretations':[]}
+    payload = query_payload(**payload)
     def author():return parse_query_answer(payload,table_names=set(views.tables),parameter_names=set(),tables=views.tables)
     def compile():return compile_query_answer(question='Which districts?',query=query,views=views.views,catalog=catalog,
         output_types={'country':'string','id':'integer'},result_contract=ResultContract('rows',('country','id')),

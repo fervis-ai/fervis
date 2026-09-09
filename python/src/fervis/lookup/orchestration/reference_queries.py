@@ -1,5 +1,5 @@
 """Compile fact-owned reference inputs into live, guarded query relations."""
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 from fervis.lookup.answer_program.model import RelationProgram
 from fervis.lookup.answer_program.values import BindingSet, FactValue
@@ -36,7 +36,7 @@ def reference_input_values(partitions, *, inputs):
 
 
 def plan_fact_references(*, fact, inputs, denotations, values, catalog, access, selected_slots,
-                         question, responses, turn, reference_catalog=None, consumer_catalog=None, discover_access=None, timezone="UTC"):
+                         responses, turn, reference_catalog=None, consumer_catalog=None, discover_access=None, timezone="UTC"):
     query_catalog = catalog if reference_catalog is None else reference_catalog
     if consumer_catalog is not None:
         from fervis.lookup.relation_catalog import RelationCatalog
@@ -44,8 +44,8 @@ def plan_fact_references(*, fact, inputs, denotations, values, catalog, access, 
         query_catalog = RelationCatalog(reads=tuple(reads.values()))
     views = build_query_view_catalog(query_catalog, access=access)
     consumer_ids = {read.id for read in consumer_catalog.reads} if consumer_catalog is not None else set()
-    consumer_context = {'requested_answer': asdict(fact), 'view_refs': [
-        name for name, table in views.tables.items() if table.get('read_id') in consumer_ids]}
+    consumer_view_refs = tuple(name for name, table in views.tables.items()
+                               if table.get('read_id') in consumer_ids)
     sources = snapshot_source_catalog(build_api_row_source_catalog(query_catalog).sources, read_access=access)
     results = []
     for value in values:
@@ -70,15 +70,15 @@ def plan_fact_references(*, fact, inputs, denotations, values, catalog, access, 
                                               'label':operand, 'may_interpret':True}
                 member_menu = replace(menu, expressions=expressions, descriptions=descriptions)
             slot = selected_slots[term.id]
-            reference_id = slot.view.name
+            reference_id = slot.reference_id
             meaning = ReferenceMeaning(fact.requested_fact_id, term.id,
                 denotation.denoted_instance_kind or '',
                 f'{denotation.operand_meaning}: {operand or term.operand}',
                 (term.origin,), (term.id,), reference_text=operand or term.operand,
                 reference_is_collection_member=collection, timezone=timezone,
                 reference_kind="description" if (operand or term.operand) in denotation.reference_descriptions else "literal")
-            prompt = ReferenceQueryPrompt(question=question, meaning=meaning,
-                                          tables=views.tables, parameters=member_menu.descriptions, consumer_context=consumer_context, expected_key=slot.key)
+            prompt = ReferenceQueryPrompt(meaning=meaning,
+                                          tables=views.tables, parameters=member_menu.descriptions, consumer_view_refs=consumer_view_refs, expected_key=slot.key)
             authored = turn(ModelTurnPurpose.GROUNDING, prompt,
                             lambda payload:parse_reference_query(payload, prompt=prompt, menu=member_menu))
             if isinstance(authored, QueryUnavailable):
@@ -104,7 +104,7 @@ def plan_fact_references(*, fact, inputs, denotations, values, catalog, access, 
                 selection_proof_ref=clarification_response_ref(choice.response_id) if choice else ''))
         reference = (combine_reference_members(term, tuple(members), reference_id=reference_id)
                      if collection else members[0])
-        results.append(replace(reference, table={**reference.table,
+        results.append(replace(reference, view=replace(reference.view, name=slot.view.name), table={**reference.table,
             'supplied_reference':term.operand, 'operand_meaning':denotation.operand_meaning}))
     return tuple(results)
 

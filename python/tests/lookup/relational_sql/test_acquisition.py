@@ -72,17 +72,19 @@ def test_request_arguments_carry_existing_grounding_instead_of_fabricated_proof(
 
 
 def test_access_discovery_uses_only_unbound_requirements_of_selected_queries():
-    from types import SimpleNamespace
-    from fervis.lookup.relational_sql.authoring import QueryArgument
+    from dataclasses import replace
+    from fervis.lookup.relational_sql.authoring import ApiInvocation, InvocationArgument, AuthoredQueryAnswer
+    from fervis.lookup.relational_sql.results import ResultContract
     from fervis.lookup.relational_sql.catalog import build_query_view_catalog
     from fervis.lookup.relational_sql.binding import reads_requiring_access_discovery
     _,_,catalog=_program()
     views=build_query_view_catalog(catalog)
     child=next(view for view in views.views if views.tables[view.name]['read_id']=='instruments')
     parent=next(view for view in views.views if views.tables[view.name]['read_id']=='facilities')
-    authored=SimpleNamespace(referenced_views=(parent.name,),request_arguments=())
+    authored=AuthoredQueryAnswer('',{}, {},ResultContract('scalar'),
+        (ApiInvocation(parent.name,parent.name),),(),(parent.name,),())
     assert reads_requiring_access_discovery(authored,views.views,catalog=catalog)==()
-    authored=SimpleNamespace(referenced_views=(child.name,),request_arguments=())
+    authored=replace(authored, referenced_views=(child.name,),api_invocations=(ApiInvocation(child.name,child.name),))
     assert reads_requiring_access_discovery(authored,views.views,catalog=catalog)==('instruments',)
-    authored.request_arguments=(QueryArgument(child.name,'facility_id','reference_key'),)
+    authored=replace(authored,api_invocations=(ApiInvocation(child.name,child.name,(InvocationArgument('facility_id','reference_key'),)),))
     assert reads_requiring_access_discovery(authored,views.views,catalog=catalog)==()

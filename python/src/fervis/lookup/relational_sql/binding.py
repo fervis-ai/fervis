@@ -115,5 +115,5 @@ def reads_requiring_access_discovery(authored, views, *, catalog):
 def invocation_views(authored, views):
     from .authoring import query_instances
     by_name = {view.name: view for view in views}
-    instances = query_instances(authored.request_arguments, by_name)
-    return (*views, *(replace(by_name[source], name=name) for name, source in instances.items()))
+    instances = query_instances(authored.api_invocations, set(by_name))
+    return tuple(replace(by_name[source], name=name) for name, source in instances.items())

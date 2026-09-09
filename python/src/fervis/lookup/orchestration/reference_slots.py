@@ -13,6 +13,7 @@ class ReferenceSlot:
     view: RelationView
     table: dict
     input_refs: tuple[str, ...]
+    reference_id: str
 
     @property
     def key(self):
@@ -46,14 +47,14 @@ def reference_slots(*, fact, inputs, denotations, tables, selected_authorities):
         name = f'{fact.requested_fact_id}__reference_{input_ref}'
         key = {'entity_kind': authority['entity_kind'], 'key_id': authority['key_id'],
                'components': {component: component for component in components}, 'context_columns': []}
-        slots.append(ReferenceSlot(RelationView(name, name+'.rows', key['components']), {
+        slots.append(ReferenceSlot(RelationView(input_ref, name+'.rows', key['components']), {
             'kind': 'reference_slot', 'input_ref': input_ref, 'input_refs': [input_ref],
             'request_parameters': [], 'entity_references': [], 'automatic_request_parameters': [],
             'supplied_reference': inputs[input_ref].operand, 'operand_meaning': denotations[input_ref].operand_meaning,
             'columns': {component: {'type': kind, 'nullable': False, 'description': 'Required identity key component'}
                         for component, kind in components.items()},
             'candidate_keys': [key],
-        }, (input_ref,)))
+        }, (input_ref,), name))
     return tuple(slots)
 
 

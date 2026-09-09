@@ -62,17 +62,20 @@ def _validate(query: str, tables: Mapping[str, SqlTable]) -> tuple[exp.Query, tu
             name = node.name.upper() if isinstance(node, exp.Anonymous) else node.sql_name()
             if name not in _FUNCTIONS:
                 if isinstance(node.parent,exp.Table) and name.lower() in {table.lower() for table in tables}:
-                    raise QueryValidationError('Registered API views are SQL tables, not SQL functions; bind their REST parameters with request_arguments')
+                    raise QueryValidationError('Registered API views are SQL tables, not SQL functions; bind their REST parameters in api_invocations')
                 raise QueryValidationError(f'Unsupported query function: {name}')
     sources = set()
+    table_names = {name.casefold():name for name in tables}
     for scope in traverse_scope(statement):
         for _, source in scope.selected_sources.values():
             if not isinstance(source, exp.Table):
                 continue
             if (not isinstance(source.this, exp.Identifier)
-                or source.db or source.catalog or source.name not in tables):
+                or source.db or source.catalog or source.name.casefold() not in table_names):
                 raise QueryValidationError('Query references an unregistered view')
-            sources.add(source.name)
+            name = table_names[source.name.casefold()]
+            source.set('this', exp.to_identifier(name, quoted=True))
+            sources.add(name)
     return statement, tuple(sorted(sources))
 
 

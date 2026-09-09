@@ -11,9 +11,9 @@ from tests.lookup.relational_sql.test_authoring import payload
 def authored(arguments=None, query=None, tables=None):
     return parse_query_answer(payload(
         query=query or 'SELECT (SELECT COUNT(*) FROM first_item) + (SELECT COUNT(*) FROM second_item) AS total',
-        request_arguments=arguments or [
-            {'view': 'items', 'instance': 'first_item', 'parameter_ref': 'id', 'binding': 'p1'},
-            {'view': 'items', 'instance': 'second_item', 'parameter_ref': 'id', 'binding': 'p2'},
+        api_bindings=arguments or [
+            {'view': 'items', 'name': 'first_item', 'parameter_ref': 'id', 'binding': 'p1'},
+            {'view': 'items', 'name': 'second_item', 'parameter_ref': 'id', 'binding': 'p2'},
         ]), table_names={'items', 'other'}, parameter_names={'p1', 'p2'},
         request_parameters={'items': {'id'}}, tables=tables)
 
@@ -36,12 +36,12 @@ def test_same_endpoint_can_supply_two_independently_bound_sql_relations():
 
 
 @pytest.mark.parametrize('arguments', [
-    [{'view': 'items', 'instance': 'other', 'parameter_ref': 'id', 'binding': 'p1'}],
-    [{'view': 'items', 'instance': 'first_item', 'parameter_ref': 'id', 'binding': 'p1'},
-     {'view': 'other', 'instance': 'first_item', 'parameter_ref': 'id', 'binding': 'p2'}],
-    [{'view': 'items', 'instance': 'first_item', 'parameter_ref': 'id', 'binding': 'p1'},
-     {'view': 'items', 'instance': 'FIRST_ITEM', 'parameter_ref': 'id', 'binding': 'p2'}],
-    [{'view': 'invented', 'instance': 'first_item', 'parameter_ref': 'id', 'binding': 'p1'}],
+    [{'view': 'items', 'name': 'other', 'parameter_ref': 'id', 'binding': 'p1'}],
+    [{'view': 'items', 'name': 'first_item', 'parameter_ref': 'id', 'binding': 'p1'},
+     {'view': 'other', 'name': 'first_item', 'parameter_ref': 'id', 'binding': 'p2'}],
+    [{'view': 'items', 'name': 'first_item', 'parameter_ref': 'id', 'binding': 'p1'},
+     {'view': 'items', 'name': 'FIRST_ITEM', 'parameter_ref': 'id', 'binding': 'p2'}],
+    [{'view': 'invented', 'name': 'first_item', 'parameter_ref': 'id', 'binding': 'p1'}],
 ])
 def test_invocations_cannot_shadow_tables_or_mix_definitions(arguments):
     with pytest.raises(QueryValidationError):
@@ -50,7 +50,7 @@ def test_invocations_cannot_shadow_tables_or_mix_definitions(arguments):
 
 def test_repeated_parameter_within_one_invocation_is_rejected():
     arguments = [
-        {'view': 'items', 'instance': 'first_item', 'parameter_ref': 'id', 'binding': binding}
+        {'view': 'items', 'name': 'first_item', 'parameter_ref': 'id', 'binding': binding}
         for binding in ('p1', 'p2')]
     with pytest.raises(QueryValidationError, match='repeated'):
         authored(arguments=arguments, query='SELECT COUNT(*) AS total FROM first_item')
@@ -70,10 +70,10 @@ def test_named_invocations_execute_and_replay_without_crossing_arguments():
 
     _, _, catalog = _program()
     source = build_api_row_source_catalog(catalog).sources[1]
-    args = [{'view': 'items', 'instance': name, 'parameter_ref': 'facility_id', 'binding': binding}
+    args = [{'view': 'items', 'name': name, 'parameter_ref': 'facility_id', 'binding': binding}
             for name, binding in [('first_item', 'p1'), ('second_item', 'p2')]]
     answer = parse_query_answer(payload(query='SELECT SUM(id) AS total FROM (SELECT id FROM first_item UNION ALL SELECT id FROM second_item)',
-        request_arguments=args), table_names={'items'}, parameter_names={'p1', 'p2'},
+        api_bindings=args), table_names={'items'}, parameter_names={'p1', 'p2'},
         request_parameters={'items': {'facility_id'}})
     expressions = {name: ConstantRef(name, 'question', FactValue.literal(id=name,
         literal_type=LiteralType.NUMBER, value=str(value), proof_refs=('question',)))
@@ -119,7 +119,7 @@ def test_reference_argument_operations_are_owned_by_fact_namespace():
 
 
 def test_declared_invocations_bind_sql_range_aliases_without_changing_the_query_population():
-    answer = authored(query='SELECT (SELECT COUNT(*) FROM items AS first_item) + (SELECT COUNT(*) FROM items AS second_item) AS total')
+    answer = authored(query='SELECT (SELECT COUNT(*) FROM first_item AS first_range) + (SELECT COUNT(*) FROM second_item AS second_range) AS total')
     assert set(answer.referenced_views) == {'first_item', 'second_item'}
     from fervis.lookup.relational_sql.execution import execute_query, SqlTable
     result = execute_query(answer.query, tables={
@@ -130,7 +130,7 @@ def test_declared_invocations_bind_sql_range_aliases_without_changing_the_query_
 
 
 def test_invocation_range_alias_in_cte_does_not_capture_the_cte_reference():
-    answer = authored(arguments=[{'view':'items','instance':'selected','parameter_ref':'id','binding':'p1'}],
-        query='WITH selected AS (SELECT id FROM items AS selected) SELECT COUNT(*) AS total FROM selected')
+    answer = authored(arguments=[{'view':'items','name':'selected_api','parameter_ref':'id','binding':'p1'}],
+        query='WITH selected AS (SELECT id FROM selected_api AS selected) SELECT COUNT(*) AS total FROM selected')
     from fervis.lookup.relational_sql.execution import execute_query, SqlTable
-    assert execute_query(answer.query, tables={'selected': SqlTable({'id':'integer'}, ({'id':1},))}).rows == ((1,),)
+    assert execute_query(answer.query, tables={'selected_api': SqlTable({'id':'integer'}, ({'id':1},))}).rows == ((1,),)
