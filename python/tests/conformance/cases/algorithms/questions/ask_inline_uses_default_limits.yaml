@@ -24,4 +24,4 @@ expect:
     lookup:
       call_count: 1
       last_max_budget_usd: "0.5"
-      last_max_thinking_tokens: 64
+      last_max_thinking_tokens: 16384

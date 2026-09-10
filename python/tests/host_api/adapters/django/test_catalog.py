@@ -68,6 +68,25 @@ def test_catalog_uses_declared_filter_metadata_without_calling_get_queryset() ->
     )
     assert SaleListView.get_queryset_calls == 0
     assert location_param.entity_target is not None
-    assert location_param.entity_target.entity_kind == "location"
+    assert location_param.entity_target.entity_kind == Location._meta.label_lower
     assert location_param.entity_target.key_id == "primary_key"
     assert location_param.entity_target.component_id == "location_id"
+    assert contract.response_cardinality == "many"
+
+
+def test_custom_list_view_declares_cardinality_without_executing_get():
+    from rest_framework.views import APIView
+
+    class ItemSerializer(serializers.Serializer):
+        item_id = serializers.UUIDField()
+
+    class ItemListView(APIView):
+        serializer_class = ItemSerializer
+        fervis_response_cardinality = 'many'
+
+        def get(self, request):
+            raise AssertionError('Catalog discovery must not execute a read')
+
+    contract = _build_contract(path='items/', url_name='item-list',
+                               view_class=ItemListView, converters={})
+    assert contract.response_cardinality == 'many'

@@ -1,0 +1,27 @@
+id: prior_set_output_projects_identity_frame
+description: A prior row result retains its set-valued output as an identity for continuation.
+kind: algorithm
+algorithm: memory.prior_answer_request
+input:
+  source_question: Which staff members worked today?
+  subject_meaning: staff member
+  output_meaning: staff member identity
+  output_kind: set
+expect:
+  result_contains:
+    frame:
+      parts:
+        - part_id: subject
+          kind: subject
+          text: staff member
+        - part_id: output:1
+          kind: requested_output
+          text: staff member identity
+          value_type: identifier
+        - part_id: selection
+          kind: selection
+          text: all qualifying results
+        - part_id: canonical_output_identity:1
+          kind: canonical_output_identity
+          text: staff member identity
+          value_type: identifier

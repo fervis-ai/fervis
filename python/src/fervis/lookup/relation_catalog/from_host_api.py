@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from fervis.host_api.contracts.response_envelope import TOTAL_COUNT_FIELD
 from fervis.host_api.contracts.endpoint import (
     CandidateKeyAuthorityContract,
@@ -54,11 +56,17 @@ def relation_catalog_from_endpoint_contracts(
 def _validate_endpoint_contracts(contracts: tuple[EndpointContract, ...]) -> None:
     for contract in contracts:
         for param in (*contract.path_params, *contract.query_params):
-            _catalog_param(contract.endpoint_name, param)
+            _catalog_param(contract, param)
 
 
 def _endpoint_read(contract: EndpointContract) -> EndpointRead:
-    row_paths = _row_paths(contract)
+    row_paths = (
+        _row_paths(contract)
+        if contract.response_fields
+        or contract.pagination is not None
+        or contract.response_cardinality in {"one", "many"}
+        else ()
+    )
     fields = tuple(
         field
         for item in contract.response_fields
@@ -72,8 +80,8 @@ def _endpoint_read(contract: EndpointContract) -> EndpointRead:
         path=contract.path_template,
         resource_names=tuple(str(item) for item in contract.resource_names),
         params=tuple(
-            _catalog_param(contract.endpoint_name, item)
-            for item in (*contract.path_params, *contract.query_params)
+            _catalog_param(contract, item)
+            for item in _logical_read_parameters(contract)
         ),
         row_paths=row_paths,
         fields=fields,
@@ -85,6 +93,14 @@ def _endpoint_read(contract: EndpointContract) -> EndpointRead:
         catalog_endpoint=_catalog_endpoint_metadata(contract),
         source_metadata=_source_metadata(contract),
     )
+
+
+def _logical_read_parameters(contract: EndpointContract) -> tuple[ParameterContract, ...]:
+    """Complete-read traversal owns paging arguments, not semantic binding."""
+    paging = contract.pagination
+    transport_names = {paging.position_query_param, paging.page_size_query_param} if paging is not None else set()
+    return (*contract.path_params, *(param for param in contract.query_params
+                                    if param.name not in transport_names))
 
 
 def _candidate_keys(
@@ -209,7 +225,14 @@ def _entity_reference(
 
 
 def _source_metadata(contract: EndpointContract) -> dict[str, object]:
-    return {"description": contract.docstring}
+    return {
+        "description": contract.docstring,
+        **(
+            {"representation_authority": "unobserved"}
+            if not contract.response_fields
+            else {}
+        ),
+    }
 
 
 def _catalog_endpoint_metadata(
@@ -232,7 +255,10 @@ def _catalog_endpoint_metadata(
     )
 
 
-def _catalog_param(endpoint_name: str, param: ParameterContract) -> CatalogParam:
+def _catalog_param(
+    contract: EndpointContract, param: ParameterContract
+) -> CatalogParam:
+    endpoint_name = contract.endpoint_name
     raw_source = param.source
     if not raw_source:
         raise CatalogValidationError(
@@ -251,8 +277,15 @@ def _catalog_param(endpoint_name: str, param: ParameterContract) -> CatalogParam
             str(key): str(value) for key, value in param.choice_labels.items()
         },
         default=param.default,
+        default_is_known=param.default_is_known,
         entity_target=_param_entity_target(param),
         semantics=param.semantics,
+        population=replace(
+            param.population,
+            field_path=_catalog_path(contract, param.population.field_path),
+        )
+        if param.population is not None
+        else None,
     )
 
 
@@ -277,6 +310,7 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
             cardinality=(
                 RowCardinality.MANY
                 if contract.response_cardinality == "many"
+                and contract.pagination is None
                 else RowCardinality.ONE
             ),
         )
@@ -287,7 +321,13 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
             path="data",
             cardinality=RowCardinality.MANY,
         )
-    for field in contract.response_fields:
+    for field in sorted(
+        contract.response_fields,
+        key=lambda item: (
+            _catalog_path(contract, str(item.path or "")).count("."),
+            str(item.path or ""),
+        ),
+    ):
         path = _catalog_path(contract, str(field.path or ""))
         if not path:
             continue
@@ -315,7 +355,15 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
                 cardinality=RowCardinality.MANY,
                 parent_path=_parent_row_path(parent),
             )
-    return tuple(paths[key] for key in sorted(paths))
+    # Object containers can be flattened into an ancestor row. Parent links
+    # refer to that declared row, not to an undeclared lexical container.
+    return tuple(
+        replace(
+            paths[key],
+            parent_path=_field_row_path(_parent_row_path(paths[key].path), paths),
+        )
+        for key in sorted(paths)
+    )
 
 
 def _field_has_descendants(contract: EndpointContract, field_path: str) -> bool:
@@ -341,7 +389,11 @@ def _catalog_field(
         path=path,
         row_path_id=_row_path_id(row_path),
         type=str(field.type),
-        nullable=False,
+        nullable=field.nullable is not False
+        or any(
+            raw_path.startswith(parent.path + ".") and parent.nullable is not False
+            for parent in contract.response_fields
+        ),
         choices=tuple(str(item) for item in getattr(field, "choices", ()) or ()),
         requirements=_field_requirements(contract, field),
         metadata={
@@ -384,9 +436,7 @@ def _response_envelope(contract: EndpointContract) -> ResponseEnvelopeMetadata:
             else ""
         ),
         count_path=(
-            f"pagination.{TOTAL_COUNT_FIELD}"
-            if contract.pagination is not None
-            else ""
+            f"pagination.{TOTAL_COUNT_FIELD}" if contract.pagination is not None else ""
         ),
     )
 

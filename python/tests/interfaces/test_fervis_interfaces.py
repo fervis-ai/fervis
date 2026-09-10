@@ -950,6 +950,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
                 "scheme": "fastapi_principal",
                 "key": "user-1",
                 "tenant_key": None,
+                "origin": "http://testserver",
             },
             "idempotency_key": "idem-1",
         }
@@ -1010,6 +1011,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
                 "scheme": "fastapi_principal",
                 "key": "user-1",
                 "tenant_key": None,
+                "origin": "http://testserver",
             },
             "idempotency_key": "idem-2",
         }
@@ -1046,6 +1048,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
             "scheme": "fastapi_principal",
             "key": "user-1",
             "tenant_key": None,
+            "origin": "http://testserver",
         },
         "idempotency_key": "idem-rerun",
     }
@@ -1102,11 +1105,13 @@ def test_fervis_fastapi_router_captures_configured_dependency_principal() -> Non
         "scheme": "fastapi_principal",
         "key": "dep-user-1",
         "tenant_key": None,
+        "origin": "http://testserver",
     }
     assert interface.continued[0]["read_context_ref"] == {
         "scheme": "fastapi_principal",
         "key": "dep-user-1",
         "tenant_key": None,
+        "origin": "http://testserver",
     }
 
 
@@ -1212,6 +1217,7 @@ def test_fervis_flask_blueprint_uses_configured_common_question_interface() -> N
                 "scheme": "flask_principal",
                 "key": "user-1",
                 "tenant_key": None,
+                "origin": "http://localhost",
             },
             "idempotency_key": "idem-1",
         }
@@ -1267,6 +1273,7 @@ def test_fervis_flask_blueprint_uses_configured_common_question_interface() -> N
                 "scheme": "flask_principal",
                 "key": "user-1",
                 "tenant_key": None,
+                "origin": "http://localhost",
             },
             "idempotency_key": "idem-2",
         }
@@ -1402,7 +1409,8 @@ def test_common_question_interface_has_no_framework_or_runtime_internal_imports(
 ):
     from pathlib import Path
 
-    source = Path("src/fervis/interfaces/common/questions.py").read_text(
+    python_root = Path(__file__).resolve().parents[2]
+    source = (python_root / "src/fervis/interfaces/common/questions.py").read_text(
         encoding="utf-8"
     )
 

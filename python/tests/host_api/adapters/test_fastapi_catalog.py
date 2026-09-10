@@ -135,9 +135,9 @@ def test_fastapi_catalog_uses_live_route_and_mapped_response_model_metadata(
     assert authority.components[0].type == "integer"
     read = relation_catalog_from_endpoint_contracts(contracts).reads[0]
     assert tuple(path.path for path in read.row_paths) == ("",)
-    assert next(field for field in read.fields if field.path == "labels").row_path_id == (
-        "root"
-    )
+    assert next(
+        field for field in read.fields if field.path == "labels"
+    ).row_path_id == ("root")
 
 
 def test_fastapi_catalog_does_not_guess_separate_response_and_orm_model_mapping(
@@ -664,3 +664,22 @@ def _commerce_app() -> FastAPI:
         return []
 
     return app
+
+
+def test_unmodeled_fastapi_responses_preserve_only_declared_root_shapes():
+    from fastapi.routing import APIRoute
+    from fervis.host_api.adapters.fastapi.schema_introspection import (
+        inspect_fastapi_response,
+    )
+
+    for annotation, expected in [
+        (None, "unknown"),
+        (dict, "one"),
+        (list, "many"),
+        (list[dict], "many"),
+        (dict | list[dict], "unknown"),
+    ]:
+        route = APIRoute("/items", lambda: None, response_model=annotation)
+        inspection = inspect_fastapi_response(route)
+        assert inspection.fields == ()
+        assert inspection.cardinality == expected

@@ -89,7 +89,6 @@ class ProofNodeKind(StrEnum):
     ENDPOINT_ARG = "endpoint_arg"
     OPERATION = "operation"
     OPERATION_INPUT = "operation_input"
-    POPULATION_CHOICE = "population_choice"
     RELATION = "relation"
     ROW_FILTER = "row_filter"
     SCALAR = "scalar"
@@ -105,10 +104,8 @@ class ProofEdgeRole(StrEnum):
 
 class RuntimeErrorKind(StrEnum):
     PLANNING_FAILED = "planning_failed"
-    FACT_PLAN_PARSE_FAILED = "fact_plan_parse_failed"
     PLAN_VALIDATION_FAILED = "plan_validation_failed"
-    FACT_PLAN_EXECUTION_FAILED = "fact_plan_execution_failed"
-    FACT_PLAN_VERIFICATION_FAILED = "fact_plan_verification_failed"
+    PROGRAM_EXECUTION_FAILED = "program_execution_failed"
     COMPILER_INVARIANT_FAILED = "compiler_invariant_failed"
     INCOMPLETE_EVIDENCE = "incomplete_evidence"
     PAGE_CAP_TRUNCATION = "page_cap_truncation"
@@ -117,6 +114,14 @@ class RuntimeErrorKind(StrEnum):
     FRAMEWORK_ADAPTER_FAILED = "framework_adapter_failed"
     LINEAGE_PERSISTENCE_FAILED = "lineage_persistence_failed"
     INFRASTRUCTURE_FAILED = "infrastructure_failed"
+
+
+class SourceInspectionPhase(StrEnum):
+    IDENTITY = "identity"
+    CONTINUATION_IDENTITY = "continuation_identity"
+    CONTINUATION = "continuation"
+    SEMANTIC = "semantic"
+    EXECUTION = "execution"
 
 
 class RunStepKind(StrEnum):
@@ -129,11 +134,14 @@ class RunStepKey(StrEnum):
     QUESTION_CONTRACT = "question_contract"
     QUERY_ENRICHMENT = "query_enrichment"
     CATALOG_SELECTION = "catalog_selection"
+    SOURCE_INSPECTION = "source_inspection"
     GROUNDING = "grounding"
     READ_ELIGIBILITY = "read_eligibility"
     PLAN_SELECTION = "plan_selection"
+    SOURCE_ACCESS = "source_access"
+    SOURCE_POPULATION = "source_population"
+    SOURCE_REALIZATION = "source_realization"
     SOURCE_BINDING = "source_binding"
-    FACT_PLANNING = "fact_planning"
     VERIFY = "verify"
     COMPILE = "compile"
     EXECUTE = "execute"
@@ -185,6 +193,7 @@ class ArtifactKind(StrEnum):
     DETERMINISTIC_OUTPUT = "deterministic_output"
     SOURCE_RESPONSE = "source_response"
     ROW_CONTEXT = "row_context"
+    SOURCE_CONTRACT = "source_contract"
 
 
 ARTIFACT_KINDS_REQUIRING_MODEL_CALL = (

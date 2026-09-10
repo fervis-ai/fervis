@@ -1,0 +1,27 @@
+id: order_at_position_inside_leading_tie
+description: Select only the rows tied with the requested one-based position.
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: limit, value: 2, value_type: integer}]
+  relations:
+    - id: items
+      rows:
+        - {item_id: a, amount: "100"}
+        - {item_id: b, amount: "100"}
+        - {item_id: c, amount: "100"}
+      grain_keys: [item_id]
+      field_types: {item_id: string, amount: decimal}
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown}
+  operations:
+    - id: ordered
+      output_relation: top_item
+      spec:
+        kind: order
+        input_relation: items
+        order_by: [{field: amount, direction: desc}]
+        selection: {kind: at_position, limit_input_id: limit}
+expect:
+  result_contains:
+    top_item:
+      rows: [{item_id: a, amount: "100"}, {item_id: b, amount: "100"}, {item_id: c, amount: "100"}]

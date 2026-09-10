@@ -1,0 +1,28 @@
+id: qualification_normalizes_and_entails
+description: Boolean qualification normalization preserves alternatives, pushes negation to atoms, and applies clause entailment.
+kind: algorithm
+algorithm: semantic.kernel
+input:
+  mode: qualification
+  requested_fact_id: fact_1
+  actual:
+    kind: or
+    arguments:
+      - kind: and
+        arguments:
+          - {kind: atom, ref: current}
+          - {kind: atom, ref: period}
+      - kind: and
+        arguments:
+          - kind: not
+            arguments: [{kind: atom, ref: current}]
+          - {kind: atom, ref: period}
+  requested:
+    kind: atom
+    ref: period
+expect:
+  result_contains:
+    actual_clauses:
+      - ["!current", period]
+      - [current, period]
+    entails: true

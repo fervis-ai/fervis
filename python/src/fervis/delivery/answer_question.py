@@ -33,7 +33,7 @@ Grounding resolves inputs such as dates and identities.
 Read Eligibility retains sources that can validly contribute to the answer.
 Plan Selection chooses the source strategy.
 Source Binding determines the source parameters and constraints required to satisfy the request.
-Fact Planning defines the deterministic operations used to derive the requested facts.
+Fact Compilation turns verified source bindings into deterministic relational operations.
 Execution reads evidence and computes outputs.
 
 Your task:

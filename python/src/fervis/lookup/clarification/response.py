@@ -16,8 +16,6 @@ from fervis.lookup.clarification.model import (
     ConversationResolutionResponse,
     ConversationInterpretationCandidate,
     ConversationInterpretationEvidence,
-    FactPlanningCatalogInputContinuation,
-    FactPlanningCatalogInputResponse,
     GroundingContinuation,
     GroundingIdentityResponse,
     QuestionContractContinuation,
@@ -64,6 +62,7 @@ def clarification_response_payload(
             "clarificationId": response.clarification_id,
             "requestedFactId": response.requested_fact_id,
             "knownInputId": response.known_input_id,
+            **({"referenceOperand":response.reference_operand} if response.reference_operand else {}),
             "option": _option_payload(response.option),
         }
     if isinstance(response, SourceBindingCatalogInputResponse):
@@ -72,16 +71,6 @@ def clarification_response_payload(
             "responseId": response.response_id,
             "clarificationId": response.clarification_id,
             "requestedFactId": response.requested_fact_id,
-            "target": vars(response.target),
-            "value": response.value,
-        }
-    if isinstance(response, FactPlanningCatalogInputResponse):
-        return {
-            "kind": "fact_planning_catalog_input",
-            "responseId": response.response_id,
-            "clarificationId": response.clarification_id,
-            "requestedFactId": response.requested_fact_id,
-            "planningRequirementId": response.planning_requirement_id,
             "target": vars(response.target),
             "value": response.value,
         }
@@ -120,6 +109,7 @@ def clarification_response_from_payload(
             clarification_id=_required_text(payload, "clarificationId"),
             requested_fact_id=_required_text(payload, "requestedFactId"),
             known_input_id=_required_text(payload, "knownInputId"),
+            reference_operand=_optional_text(payload, "referenceOperand"),
             option=_option_from_payload(_mapping(payload, "option")),
         )
     if kind == "source_binding_catalog_input":
@@ -127,15 +117,6 @@ def clarification_response_from_payload(
             response_id=_required_text(payload, "responseId"),
             clarification_id=_required_text(payload, "clarificationId"),
             requested_fact_id=_required_text(payload, "requestedFactId"),
-            target=_target_from_payload(_mapping(payload, "target")),
-            value=_required_text(payload, "value"),
-        )
-    if kind == "fact_planning_catalog_input":
-        return FactPlanningCatalogInputResponse(
-            response_id=_required_text(payload, "responseId"),
-            clarification_id=_required_text(payload, "clarificationId"),
-            requested_fact_id=_required_text(payload, "requestedFactId"),
-            planning_requirement_id=_required_text(payload, "planningRequirementId"),
             target=_target_from_payload(_mapping(payload, "target")),
             value=_required_text(payload, "value"),
         )
@@ -328,6 +309,7 @@ def parse_clarification_response(
                 clarification_id=clarification.id,
                 requested_fact_id=clarification.requested_fact_id,
                 known_input_id=continuation.known_input_id,
+                reference_operand=continuation.reference_operand,
                 option=selected,
             )
         if not continuation.accepts_free_text:
@@ -346,15 +328,6 @@ def parse_clarification_response(
             response_id=response_id,
             clarification_id=clarification.id,
             requested_fact_id=continuation.requested_fact_id,
-            target=continuation.target,
-            value=_catalog_value(continuation.target, selected, response_text),
-        )
-    if isinstance(continuation, FactPlanningCatalogInputContinuation):
-        return FactPlanningCatalogInputResponse(
-            response_id=response_id,
-            clarification_id=clarification.id,
-            requested_fact_id=continuation.requested_fact_id,
-            planning_requirement_id=continuation.planning_requirement_id,
             target=continuation.target,
             value=_catalog_value(continuation.target, selected, response_text),
         )

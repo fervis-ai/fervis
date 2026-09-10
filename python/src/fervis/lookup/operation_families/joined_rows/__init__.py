@@ -1,1 +1,0 @@
-"""Joined-row operation family."""

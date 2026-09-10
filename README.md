@@ -43,6 +43,18 @@ fervis doctor
 organization name, API description, and timezone used for relative dates.
 Run `fervis runtime ask` only after `fervis doctor` passes.
 
+Saved answers remain readable when a compiled-program revision becomes obsolete.
+Rerunning a saved program in an unsupported format returns
+`rerun_base_not_reusable`; submit the question again to compile a program
+under the current contracts.
+
+Declared response schemas are used when available. For selected GET routes
+without response fields, Fervis can inspect JSON objects and arrays of objects
+under the current caller's read authority when no additional invocation inputs
+are needed. Inspection has its own lineage step. It does not infer candidate
+keys, relationships, or closed enums from sampled values. Saved programs inspect
+current structure again before execution; observed rows are not cached answers.
+
 ## Models
 
 Configure allowed providers and model keys in `config/fervis.json`. API keys

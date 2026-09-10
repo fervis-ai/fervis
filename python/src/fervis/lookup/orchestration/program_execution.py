@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from fervis.lookup.answer_program.model import AnswerProgram
@@ -23,6 +23,7 @@ from fervis.lineage.enums import ProgramInvocationKind
 from fervis.lookup.errors import ErrorCode
 from fervis.lookup.lineage.source_read_buffer import buffered_source_read_lineage
 from fervis.lookup.memory.projection import LookupMemory
+from fervis.lookup.outcomes.model import FactResult, OutcomeKind
 from fervis.lookup.lineage.results import record_runtime_error_lineage
 from fervis.lookup.lineage.steps import (
     compile_step_id,
@@ -34,11 +35,9 @@ from fervis.lookup.lineage.steps import (
 from fervis.lookup.orchestration.request import LookupRequest
 from fervis.lookup.orchestration.result import LookupResult, RunStatus
 from fervis.lookup.plan_execution.errors import VerificationError
-from fervis.lookup.question_contract import QuestionContract
 from fervis.observability.event_contracts import EventPayloadKey
 
 from .result_synthesis import _synthesize_result
-from .terminal_results import _execution_failure_payload, _status_for_fact_result
 
 
 @dataclass(frozen=True)
@@ -47,6 +46,26 @@ class ProgramExecutionPorts:
     memory: LookupMemory = field(default_factory=LookupMemory)
     lineage_step_sink: Any = None
     lineage_required: bool = False
+
+
+def _execution_failure_payload(
+    *,
+    request: LookupRequest,
+    error_code: str,
+    exc: Exception,
+) -> dict[str, Any]:
+    return {
+        EventPayloadKey.RUN_ID: request.run_id,
+        EventPayloadKey.ERROR_CODE: error_code,
+        EventPayloadKey.ERROR_CLASS: exc.__class__.__name__,
+        EventPayloadKey.ERROR_CONTEXT: str(exc),
+    }
+
+
+def _status_for_fact_result(result: FactResult) -> str:
+    if result.outcome.kind == OutcomeKind.NEEDS_CLARIFICATION:
+        return RunStatus.NEEDS_CLARIFICATION
+    return RunStatus.COMPLETED
 
 
 @dataclass(frozen=True)
@@ -98,6 +117,29 @@ def run_answer_program_execution(
         step_id=execution_step_id(ports),
     )
     try:
+        from fervis.lookup.orchestration.execution_sources import (
+            prepare_execution_catalog,
+        )
+
+        current_catalog = prepare_execution_catalog(
+            run_id=request.run_id,
+            catalog=environment.execution_catalog,
+            program=program,
+            data_access_port=ports.data_access_port,
+            lineage_step_sink=ports.lineage_step_sink,
+            allowed_read_ids=environment.authorized_sources.allowed_read_ids
+            if environment.authorized_sources is not None
+            else None,
+        )
+        environment = replace(
+            environment,
+            catalog=current_catalog,
+            authorized_sources=replace(
+                environment.authorized_sources, relation_catalog=current_catalog
+            )
+            if environment.authorized_sources is not None
+            else None,
+        )
         execution = invoke_answer_program(
             program=program,
             bindings=bindings,
@@ -132,7 +174,7 @@ def run_answer_program_execution(
             request=request,
             ports=ports,
             execution_lineage=execution_lineage,
-            error_code=ErrorCode.FACT_PLAN_EXECUTION_FAILED,
+            error_code=ErrorCode.PROGRAM_EXECUTION_FAILED,
             exc=exc,
             usage=usage or {},
         )
@@ -140,7 +182,10 @@ def run_answer_program_execution(
         EventPayloadKey.RUN_ID: request.run_id,
         EventPayloadKey.RELATION_COUNT: len(execution.relations),
     }
-    if execution.issue is not None:
+    reference_issue = (
+        execution.issue is not None and execution.issue.reference is not None
+    )
+    if execution.issue is not None and not reference_issue:
         execution_payload.update(
             {
                 EventPayloadKey.ERROR_CODE: execution.issue.kind.value,
@@ -159,11 +204,49 @@ def run_answer_program_execution(
         source_reads=execution_lineage.source_reads,
         artifacts=execution_lineage.artifacts,
     )
+    if reference_issue:
+        from .terminal_results import reference_clarification_fact_result
+
+        try:
+            reference_result = reference_clarification_fact_result(
+                execution.issue, contract=program.question_contract
+            )
+        except ValueError as exc:
+            record_runtime_error_lineage(
+                request=request,
+                ports=ports,
+                failed_step_id=execution_step_id(ports),
+                error_code=ErrorCode.PLAN_VALIDATION_FAILED,
+                message=str(exc),
+            )
+            return LookupResult(
+                status=RunStatus.FAILED,
+                error=ErrorCode.PLAN_VALIDATION_FAILED,
+                usage=usage or {},
+            )
+        return _synthesize_result(
+            request=request,
+            ports=ports,
+            fact_result=reference_result,
+            status=RunStatus.NEEDS_CLARIFICATION,
+            usage=usage or {},
+            question_contract=program.question_contract,
+            grounded_values=grounded_values,
+            extra_fact_addresses=extra_fact_addresses,
+            known_input_step_id=known_input_step_id,
+            question_contract_step_id=question_contract_step_id,
+            compile_step_id=compile_step_id(ports),
+            execute_step_id=execution_step_id(ports),
+            proof_graph=execution.proof_graph,
+            answer_plan=execution.program,
+            proof_node_refs_by_result_output_id=execution.proof_node_refs_by_result_output_id,
+            conversation_resolution_activation=conversation_resolution_activation,
+        )
     if execution.issue is not None or execution.fact_result is None:
         error_code = (
             execution.issue.kind.value
             if execution.issue is not None
-            else ErrorCode.FACT_PLAN_EXECUTION_FAILED
+            else ErrorCode.PROGRAM_EXECUTION_FAILED
         )
         record_runtime_error_lineage(
             request=request,
@@ -173,7 +256,7 @@ def run_answer_program_execution(
             message=(
                 execution.issue.message
                 if execution.issue is not None
-                else ErrorCode.FACT_PLAN_EXECUTION_FAILED
+                else ErrorCode.PROGRAM_EXECUTION_FAILED
             ),
         )
         return LookupResult(
@@ -185,9 +268,7 @@ def run_answer_program_execution(
         fact_result=execution.fact_result,
         status=_status_for_fact_result(execution.fact_result),
         usage=usage or {},
-        question_contract=QuestionContract(
-            requested_facts=execution.effective_requested_facts
-        ),
+        question_contract=program.question_contract,
         grounded_values=grounded_values,
         extra_fact_addresses=extra_fact_addresses,
         known_input_step_id=known_input_step_id,

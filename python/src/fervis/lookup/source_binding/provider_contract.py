@@ -1,127 +1,92 @@
-"""Typed provider-output contracts for source binding."""
+"""Provider DTOs for semantic Source Binding."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
 
 
 @dataclass(frozen=True)
-class AnswerPopulationOutput(ProviderOutput):
-    population_binding_id: str
-    intent_text: str
-    match_basis_explanation: str
-    population_test_results: dict[str, RowPredicatePopulationTestResultOutput]
+class SetRealizationOutput(ProviderOutput):
+    branch_id: str
+    mapping_basis: str
+    rows_ref: str
 
 
 @dataclass(frozen=True)
-class FulfillmentDecisionOutput(ProviderOutput):
-    match_basis_explanation: str
-    fulfillment_choice_id: str
+class ReturnedFactRealizationOutput(ProviderOutput):
+    branch_id: str
+    mapping_basis: str
+    field_ref: str
 
 
 @dataclass(frozen=True)
-class ParamDecisionOutput(ProviderOutput):
-    population_intent: str
-    match_basis_explanation: str
-    param_decision_id: str
-
-
-@dataclass(frozen=True)
-class ResolvedInputTargetApplicationOutput(ProviderOutput):
-    application_target_id: str
-    value_component: str
-    match_basis_explanation: str
+class AssociationRealizationOutput(ProviderOutput):
+    branch_id: str
+    mapping_basis: str
+    realization_ref: str
+    reference_from_set_ref: str | None = None
 
 
 @dataclass(frozen=True)
 class ResolvedInputApplicationOutput(ProviderOutput):
-    value_id: str
-    applications: tuple[ResolvedInputTargetApplicationOutput, ...]
-    population_test_results: dict[str, RowPredicatePopulationTestResultOutput]
+    kind: str
+    mapping_basis: str
+    owner_ref: str
+    value_ref: str
+    value_component: str
+    target_ref: str
 
 
 @dataclass(frozen=True)
-class SourceInvocationOutput(ProviderOutput):
-    binding_target_id: str
-    answer_population: AnswerPopulationOutput
-    fulfillment_decisions: dict[str, FulfillmentDecisionOutput]
-    param_decisions: dict[str, ParamDecisionOutput]
-    row_predicate_reviews: dict[str, RowPredicateReviewOutput]
-    finite_choice_param_reviews: dict[str, FiniteChoiceParamReviewOutput]
-    resolved_input_applications: tuple[ResolvedInputApplicationOutput, ...]
+class UnappliedInputOutput(ProviderOutput):
+    kind: str
+    mapping_basis: str
+    owner_ref: str
+    value_ref: str
 
 
 @dataclass(frozen=True)
-class MetricFitBasisOutput(ProviderOutput):
-    metric_meaning: str
-    fit_basis: str
+class FiniteChoiceApplicationOutput(ProviderOutput):
+    application_basis: str
+    surface_ref: str
+    selected_choice_values: tuple[str, ...]
 
 
 @dataclass(frozen=True)
-class FitBasisInterpretationOutput(ProviderOutput):
-    interpretation: str
+class ChoiceRequirementApplicationOutput(ProviderOutput):
+    mapping_basis: str
+    selected_by_requirements: tuple[str, ...]
 
 
 @dataclass(frozen=True)
-class PopulationTestBasisOutput(ProviderOutput):
-    test_question: str
-    role_scoped_test_question: str
+class SourceRealizationUnavailableOutput(ProviderOutput):
+    kind: str
+    unmet_requirement_refs: tuple[str, ...]
+    explanation: str
 
 
 @dataclass(frozen=True)
-class FiniteChoiceParamReviewOutput(ProviderOutput):
-    controlled_population_role_id: str
-    role_selection_basis: str
-    population_test_basis: dict[str, PopulationTestBasisOutput]
-    choice_reviews: tuple[FiniteChoiceReviewOutput, ...]
+class SourceRealizationOutput(ProviderOutput):
+    set_bindings: dict[str, tuple[SetRealizationOutput, ...]]
+    fact_bindings: dict[str, tuple[ReturnedFactRealizationOutput, ...]]
+    association_bindings: dict[str, tuple[AssociationRealizationOutput, ...]]
 
 
 @dataclass(frozen=True)
-class FiniteChoiceReviewOutput(ProviderOutput):
-    choice_option_id: str
-    choice_domain_meaning: str
-    choice_inclusion_basis: str
-    choice_inclusion: str
-    population_test_results: dict[str, ProviderObject]
+class SemanticSourceBindingOutput(ProviderOutput):
+    resolved_input_applications: dict[
+        str,
+        tuple[ProviderObject, ...],
+    ]
+    finite_choice_applications: dict[
+        str,
+        dict[str, FiniteChoiceApplicationOutput | None],
+    ]
+    choice_requirement_applications: dict[
+        str, dict[str, dict[str, ChoiceRequirementApplicationOutput]]
+    ]
 
 
-@dataclass(frozen=True)
-class StandardPopulationTestResultOutput(ProviderOutput):
-    test_basis: str
-    population_consequence: str
-    test_effect: str
-
-
-@dataclass(frozen=True)
-class NormalInstanceDispositionOutput(ProviderOutput):
-    matched_excluded_role: str
-    test_effect: str
-
-
-@dataclass(frozen=True)
-class NormalInstanceTestResultOutput(ProviderOutput):
-    role_match_basis: str
-    population_consequence: str
-    disposition: NormalInstanceDispositionOutput
-
-
-@dataclass(frozen=True)
-class RowPredicateReviewOutput(ProviderOutput):
-    choice_reviews: tuple[RowPredicateChoiceReviewOutput, ...]
-
-
-@dataclass(frozen=True)
-class RowPredicateChoiceReviewOutput(ProviderOutput):
-    choice_option_id: str
-    choice_domain_meaning: str
-    population_test_results: dict[str, RowPredicatePopulationTestResultOutput]
-
-
-@dataclass(frozen=True)
-class RowPredicatePopulationTestResultOutput(ProviderOutput):
-    test_id: str
-    test_question: str
-    role_scoped_test_question: str
-    because: str
-    test_effect: str
+__all__ = tuple(name for name in globals() if not name.startswith("_"))

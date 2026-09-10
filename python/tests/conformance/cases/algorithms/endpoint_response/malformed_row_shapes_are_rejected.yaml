@@ -1,0 +1,10 @@
+id: malformed_row_shapes_are_rejected
+kind: algorithm
+algorithm: execution.endpoint_response
+description: A declared row path must exist and contain objects with the declared cardinality.
+input:
+  row_path: results
+  cardinality: many
+  body: {results: [not-an-object]}
+expect:
+  result_contains: {status: rejected}

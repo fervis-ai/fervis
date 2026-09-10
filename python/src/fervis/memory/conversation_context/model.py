@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from fervis.types.enums import StrEnum
 from typing import Any
 
-from fervis.memory.prior_requests import PriorRequestMemory, PriorRequestSlotBinding
-
 VALID_CONTEXT_SOURCE_KINDS = frozenset(
     {
         "prior_user_question",
@@ -88,13 +86,14 @@ class ConversationContextSource:
 
 
 class ConversationFramePartKind(StrEnum):
-    ANSWER_SUBJECT = "answer_subject"
-    ANSWER_OUTPUT = "answer_output"
-    ENTITY_IDENTITY = "entity_identity"
-    TIME_SCOPE = "time_scope"
-    LIMIT = "limit"
-    POPULATION_CONSTRAINT = "population_constraint"
+    SUBJECT = "subject"
+    QUALIFICATION = "qualification"
     GROUPING = "grouping"
+    REQUESTED_OUTPUT = "requested_output"
+    ORDERING = "ordering"
+    SELECTION = "selection"
+    CANONICAL_OUTPUT_IDENTITY = "canonical_output_identity"
+    INPUT = "input"
 
 
 @dataclass(frozen=True)
@@ -103,6 +102,7 @@ class ConversationFramePart:
     kind: ConversationFramePartKind
     text: str
     source_ref: str = ""
+    value_type: str = ""
 
     def __post_init__(self) -> None:
         if not self.part_id.strip():
@@ -117,60 +117,58 @@ class ConversationFramePart:
             "part_id": self.part_id,
             "kind": self.kind.value,
             "text": self.text,
+            **({"value_type": self.value_type} if self.value_type else {}),
         }
 
 
 @dataclass(frozen=True)
-class ConversationFrameParameter:
+class ConversationCallableParameter:
     parameter_id: str
     part_id: str
-    kind: ConversationFramePartKind
+    value_type: str
+    input_ref: str
+    input_use_refs: tuple[str, ...]
     current_text: str
-    resolved_text: str
-    field_label_text: str = ""
-    value_meaning_hint: str = ""
-    binding: PriorRequestSlotBinding | None = None
 
     def __post_init__(self) -> None:
         if not self.parameter_id.strip() or not self.part_id.strip():
             raise ValueError("frame parameter requires stable identity")
-        if self.kind not in {
-            ConversationFramePartKind.ENTITY_IDENTITY,
-            ConversationFramePartKind.TIME_SCOPE,
-            ConversationFramePartKind.LIMIT,
-        }:
-            raise ValueError("frame parameter requires a bindable part kind")
-        if not self.current_text.strip() or not self.resolved_text.strip():
-            raise ValueError("frame parameter requires current and resolved values")
-        if self.binding is not None and self.binding.kind.value != self.kind.value:
-            raise ValueError("frame parameter binding kind does not match")
+        if not self.value_type or not self.input_ref or not self.input_use_refs:
+            raise ValueError("frame parameter requires its typed input signature")
+        if len(self.input_use_refs) != len(set(self.input_use_refs)):
+            raise ValueError("frame parameter input uses must be unique")
+        if not self.current_text.strip():
+            raise ValueError("frame parameter requires current display text")
 
-    def to_model_dict(self) -> dict[str, str]:
-        payload = {
+    def to_model_dict(self) -> dict[str, object]:
+        return {
             "parameter_id": self.parameter_id,
             "part_id": self.part_id,
-            "kind": self.kind.value,
+            "value_type": self.value_type,
+            "input_ref": self.input_ref,
+            "input_use_refs": list(self.input_use_refs),
             "current_text": self.current_text,
-            "resolved_text": self.resolved_text,
         }
-        if self.field_label_text:
-            payload["field_label_text"] = self.field_label_text
-        if self.value_meaning_hint:
-            payload["value_meaning_hint"] = self.value_meaning_hint
-        return payload
 
 
 @dataclass(frozen=True)
 class ConversationCallableSignature:
-    base_run_id: str
-    requested_fact_id: str
-    parameters: tuple[ConversationFrameParameter, ...]
+    base_invocation_id: str
+    program_id: str
+    requested_fact_ref: str
+    requested_fact_fingerprint: str
+    parameters: tuple[ConversationCallableParameter, ...]
 
     def __post_init__(self) -> None:
-        if not self.base_run_id.strip():
-            raise ValueError("callable signature requires base_run_id")
-        if not self.requested_fact_id.strip():
-            raise ValueError("callable signature requires requested_fact_id")
+        if not all(
+            (
+                self.base_invocation_id.strip(),
+                self.program_id.strip(),
+                self.requested_fact_ref.strip(),
+                self.requested_fact_fingerprint.strip(),
+            )
+        ):
+            raise ValueError("callable signature requires canonical persisted identity")
         parameter_ids = tuple(item.parameter_id for item in self.parameters)
         if len(parameter_ids) != len(set(parameter_ids)):
             raise ValueError("callable signature contains duplicate parameters")
@@ -180,23 +178,11 @@ class ConversationCallableSignature:
 
     def to_model_dict(self) -> dict[str, object]:
         return {
+            "base_invocation_id": self.base_invocation_id,
+            "program_id": self.program_id,
+            "requested_fact_ref": self.requested_fact_ref,
+            "requested_fact_fingerprint": self.requested_fact_fingerprint,
             "parameters": [item.to_model_dict() for item in self.parameters],
-        }
-
-
-@dataclass(frozen=True)
-class ConversationAnswerShape:
-    expression_family: str
-    output_roles: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        if not self.expression_family.strip() or not self.output_roles:
-            raise ValueError("conversation frame requires typed answer shape")
-
-    def to_model_dict(self) -> dict[str, object]:
-        return {
-            "expression_family": self.expression_family,
-            "output_roles": list(self.output_roles),
         }
 
 
@@ -204,7 +190,6 @@ class ConversationAnswerShape:
 class ConversationContextFrame:
     frame_id: str
     source_ids: tuple[str, ...]
-    answer_shape: ConversationAnswerShape
     parts: tuple[ConversationFramePart, ...]
     callable: ConversationCallableSignature | None = None
 
@@ -232,7 +217,6 @@ class ConversationContextFrame:
         payload: dict[str, Any] = {
             "frame_id": self.frame_id,
             "source_ids": list(self.source_ids),
-            "answer_shape": self.answer_shape.to_model_dict(),
             "parts": [part.to_model_dict() for part in self.parts],
         }
         if self.callable is not None:
@@ -241,14 +225,17 @@ class ConversationContextFrame:
 
     def control_key(self) -> tuple[object, ...]:
         return (
-            self.answer_shape.expression_family,
-            self.answer_shape.output_roles,
-            tuple((part.part_id, part.kind.value) for part in self.parts),
+            tuple(
+                (part.part_id, part.kind.value, part.value_type)
+                for part in self.parts
+            ),
             tuple(
                 (
                     parameter.parameter_id,
                     parameter.part_id,
-                    parameter.kind.value,
+                    parameter.value_type,
+                    parameter.input_ref,
+                    parameter.input_use_refs,
                 )
                 for parameter in (
                     self.callable.parameters if self.callable is not None else ()
@@ -258,11 +245,11 @@ class ConversationContextFrame:
 
     def control_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
-            "answer_shape": self.answer_shape.to_model_dict(),
             "parts": [
                 {
                     "part_id": part.part_id,
                     "kind": part.kind.value,
+                    **({"value_type": part.value_type} if part.value_type else {}),
                 }
                 for part in self.parts
             ],
@@ -272,7 +259,9 @@ class ConversationContextFrame:
                 {
                     "parameter_id": parameter.parameter_id,
                     "part_id": parameter.part_id,
-                    "kind": parameter.kind.value,
+                    "value_type": parameter.value_type,
+                    "input_ref": parameter.input_ref,
+                    "input_use_refs": list(parameter.input_use_refs),
                 }
                 for parameter in self.callable.parameters
             ]
@@ -324,7 +313,6 @@ class ConversationMemoryActivation:
     kind: ConversationMemoryActivationKind
     artifact_id: str
     address_id: str = ""
-    prior_request: PriorRequestMemory | None = None
 
     def __post_init__(self) -> None:
         if not self.artifact_id:
@@ -332,15 +320,10 @@ class ConversationMemoryActivation:
         if self.card.kind != self.kind.value:
             raise ValueError("memory activation kind does not match its card")
         if self.kind is ConversationMemoryActivationKind.PRIOR_REQUEST:
-            if (
-                self.prior_request is None
-                or self.address_id
-                or self.prior_request.memory_id != self.card.memory_id
-                or self.prior_request.artifact_id != self.artifact_id
-            ):
+            if self.address_id:
                 raise ValueError("prior-request activation contract is inconsistent")
             return
-        if self.prior_request is not None or not self.address_id:
+        if not self.address_id:
             raise ValueError("address activation contract is inconsistent")
 
     @property
@@ -354,7 +337,6 @@ class ConversationMemoryCardProjection:
     context_frames: tuple[ConversationContextFrame, ...] = ()
     cards: tuple[ConversationMemoryCard, ...] = ()
     activations: tuple[ConversationMemoryActivation, ...] = ()
-    prior_requests: tuple[PriorRequestMemory, ...] = ()
     private_cards: dict[str, dict[str, Any]] | None = None
     omitted_counts_by_kind: dict[str, int] | None = None
 
@@ -363,12 +345,6 @@ class ConversationMemoryCardProjection:
         if memory_id not in private_cards:
             raise KeyError(memory_id)
         return dict(private_cards[memory_id])
-
-    def prior_request(self, memory_id: str) -> PriorRequestMemory:
-        for request in self.prior_requests:
-            if request.memory_id == memory_id:
-                return request
-        raise KeyError(memory_id)
 
     def frame(self, frame_id: str) -> ConversationContextFrame:
         for frame in self.context_frames:

@@ -145,12 +145,14 @@ def _parameters(
             type=_schema_type(parameter.schema),
             required=parameter.required,
             description=parameter.description,
+            default=parameter.schema.get("default"),
             choices=tuple(str(value) for value in parameter.schema.get("enum") or ()),
             source=source,
         )
         for parameter in operation.parameters
         if parameter.location == source
     )
+
 
 def _response_fields(schema: dict[str, Any]) -> tuple[ResponseFieldContract, ...]:
     fields: list[ResponseFieldContract] = []
@@ -175,6 +177,19 @@ def _collect_response_fields(
                 type=field_type,
                 description=str(field_schema.get("description") or ""),
                 choices=tuple(str(value) for value in field_schema.get("enum") or ()),
+                nullable=(
+                    name not in schema.get("required", ())
+                    or bool(field_schema.get("nullable"))
+                    or field_schema.get("type") == "null"
+                    or isinstance(field_schema.get("type"), list)
+                    and "null" in field_schema["type"]
+                    or any(
+                        item.get("type") == "null"
+                        for key in ("anyOf", "oneOf")
+                        for item in field_schema.get(key, ())
+                        if isinstance(item, dict)
+                    )
+                ),
             )
         )
         child_schema = _nested_object_schema(field_schema)
@@ -202,7 +217,7 @@ def _object_properties(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _response_cardinality(schema: dict[str, Any]) -> str:
-    return "many" if schema.get("type") == "array" else "one"
+    return {"array": "many", "object": "one"}.get(str(schema.get("type")), "unknown")
 
 
 def _schema_properties(schema: dict[str, Any]) -> dict[str, Any]:

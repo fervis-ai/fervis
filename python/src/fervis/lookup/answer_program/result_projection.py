@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 from fervis.lookup.canonical_data import (
@@ -17,11 +17,24 @@ class ResultProjectionError(ValueError):
     """A declared answer projection cannot be applied to its result data."""
 
 
+def verify_entity_display_type(display_field_id: str, field_types: Mapping[str, str]) -> None:
+    """Validate presentation types wherever a result projection is authored or used."""
+    if display_field_id and field_types.get(display_field_id) not in {"string", "text"}:
+        raise ResultProjectionError("entity display field must be textual")
+
+
+def verify_record_fields(fields: Mapping[str, str]) -> None:
+    if not fields or any(not isinstance(name,str) or not name.strip() or not isinstance(column,str) or not column.strip()
+                         for name,column in fields.items()):
+        raise ResultProjectionError('record projection requires nonempty field names and columns')
+
+
 @dataclass(frozen=True)
 class ProjectedResultRow:
     relation_id: str
     row_index: int
     values: Mapping[str, ResultValue]
+    display_values: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -82,12 +95,29 @@ class RelationResultOutput:
     entity_key: EntityKeyProjection | None = None
     label: str = ""
     role: str = ""
+    display_field_id: str = ""
+    record_fields: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if bool(self.field_id) == bool(self.entity_key):
+        if self.display_field_id and self.entity_key is None:
+            raise ResultProjectionError("display fields require an entity output")
+        if sum((bool(self.field_id), self.entity_key is not None, bool(self.record_fields))) != 1:
             raise ResultProjectionError(
-                "relation result output requires exactly one field or entity key"
+                "relation result output requires exactly one field, entity key or record"
             )
+
+        if self.record_fields:
+            verify_record_fields(self.record_fields)
+
+    @property
+    def value_field_ids(self) -> tuple[str, ...]:
+        if self.entity_key is not None:
+            return tuple(component.field_id for component in self.entity_key.components)
+        return tuple(self.record_fields.values()) if self.record_fields else (self.field_id,)
+
+    @property
+    def field_ids(self) -> tuple[str, ...]:
+        return (*self.value_field_ids, *((self.display_field_id,) if self.display_field_id else ()))
 
     @property
     def source_node_id(self) -> str:
@@ -96,9 +126,26 @@ class RelationResultOutput:
     def project(self, row: Mapping[str, RuntimeValue]) -> ResultValue:
         if self.entity_key is not None:
             return self.entity_key.project(row)
+        if self.record_fields:
+            if any(column not in row for column in self.record_fields.values()):
+                raise ResultProjectionError('record result field is unavailable')
+            return {name:row[column] for name,column in self.record_fields.items()}
         if self.field_id not in row:
             raise ResultProjectionError("result field is unavailable")
         return row[self.field_id]
+
+
+    def project_display(self, row: Mapping[str, RuntimeValue]) -> str:
+        if not self.display_field_id:
+            return ''
+        if self.display_field_id not in row:
+            raise ResultProjectionError('entity display field is unavailable')
+        value=row[self.display_field_id]
+        if value is None:
+            return ''
+        if not isinstance(value,str):
+            raise ResultProjectionError('entity display value must be text')
+        return value
 
 
 @dataclass(frozen=True)
@@ -135,6 +182,7 @@ class ResultProjection:
                     relation_id=relation_id,
                     row_index=row_index,
                     values={output.id: output.project(row) for output in outputs},
+                    display_values={output.id:output.project_display(row) for output in outputs if output.display_field_id},
                 )
                 for row_index, row in enumerate(rows)
             )

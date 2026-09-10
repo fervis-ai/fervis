@@ -424,6 +424,14 @@ class QuestionLifecyclePort(Protocol):
         tenant_id: str,
     ) -> StoredProgramInvocation | None: ...
 
+    def load_prior_invocation(
+        self,
+        *,
+        invocation_id: str,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None: ...
+
     def load_program_invocation_for_execution(
         self,
         *,

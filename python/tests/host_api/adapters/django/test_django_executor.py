@@ -1,4 +1,5 @@
 import pytest
+from fervis.host_api.contracts.response_page import ResponsePage
 
 from fervis.host_api.adapters.get_execution import (
     PreparedGet,
@@ -20,7 +21,7 @@ class _Client:
 
     def get(self, url, params):
         self.requests.append((url, dict(params)))
-        return 200, self.pages.pop(0)
+        return ResponsePage(200, self.pages.pop(0))
 
 
 def _contract() -> EndpointContract:

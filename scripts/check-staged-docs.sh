@@ -3,11 +3,12 @@ set -euo pipefail
 
 readonly SUMMARY_PATH="docs/architecture/summary.md"
 readonly SMALL_CORE_PATH="docs/architecture/small-core.md"
+readonly DEV_DOCS_PREFIX="docs/dev/"
 
 forbidden_paths=()
 while IFS= read -r -d '' path; do
   case "$path" in
-    "$SUMMARY_PATH" | "$SMALL_CORE_PATH") ;;
+    "$SUMMARY_PATH" | "$SMALL_CORE_PATH" | "$DEV_DOCS_PREFIX"*) ;;
     docs/*) forbidden_paths+=("$path") ;;
   esac
 done < <(git ls-files -z -- docs/)
@@ -19,6 +20,7 @@ fi
 echo "pre-commit: only these docs files may be tracked:" >&2
 echo "  $SUMMARY_PATH" >&2
 echo "  $SMALL_CORE_PATH" >&2
+echo "  $DEV_DOCS_PREFIX*" >&2
 echo "pre-commit: remove these paths from the index:" >&2
 printf '  %s\n' "${forbidden_paths[@]}" >&2
 exit 1

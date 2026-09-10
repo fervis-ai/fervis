@@ -1,0 +1,326 @@
+from tests.lookup.relational_sql.test_authoring import payload as query_payload
+from dataclasses import replace
+import pytest
+from jsonschema import validate
+from fervis.lookup.relational_sql.reference_planning import ReferenceMeaning,ReferenceQueryPrompt,parse_reference_query,compile_reference_plan
+from fervis.lookup.relational_sql.parameters import query_parameter_menu,with_catalog_choices
+from fervis.lookup.relational_sql.catalog import build_query_view_catalog
+from fervis.lookup.relational_sql.compiler import compile_query_answer
+from fervis.lookup.relational_sql.results import ResultContract
+from fervis.lookup.available_sources import build_available_source_catalog
+from fervis.lookup.read_eligibility import SemanticReadEligibilityResult,ReadRequirementAssessment,SemanticReadDecision
+from fervis.lookup.relation_catalog import RelationCatalog,CatalogField
+from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
+from fervis.lookup.source_reads.access_model import ReadAccessCatalog
+from fervis.lookup.answer_program.values import FactValue,LiteralType
+from fervis.lookup.grounding.semantic import CanonicalInputValue
+from fervis.lookup.question_contract import InputTerm,InputDenotation
+from fervis.lookup.question_contract.model import InputDenotationKind
+from fervis.lookup.semantic_types import SourceOrigin,SourceOriginKind,TextType
+from fervis.lookup.answer_program.invocation import invoke_answer_program,RuntimePorts
+from fervis.lookup.answer_program.instantiation import ExecutionEnvironment
+from fervis.lookup.memory.projection import LookupMemory
+from tests.lookup.relational_engine.test_dependent_reads import _read
+
+
+@pytest.mark.parametrize(('case','text','expected'),[
+    ('name','Default',1),('name_named','Default',1),('role','the primary record',2),('split','Ada Lovelace',2),
+    ('unfiltered_name','Default',1),('unfiltered_missing','Default',None),
+])
+def test_reference_authoring_supports_observed_expressions_without_backend_name_rules(case,text,expected,monkeypatch):
+    from fervis.lookup.relation_catalog import CatalogParam, ParamSource
+    read=replace(_read('records', params=(CatalogParam('name', 'name', ParamSource.QUERY, 'string'),)),fields=(*_read('records').fields,
+        CatalogField('name','string',path='name',row_path_id='root'),
+        CatalogField('given','string',path='given',row_path_id='root'),
+        CatalogField('family','string',path='family',row_path_id='root'),
+        CatalogField('primary','boolean',path='is_primary',row_path_id='root',metadata={'description':'True marks the configured primary record.'})))
+    catalog=RelationCatalog(reads=(read,));sources=build_api_row_source_catalog(catalog);source=sources.sources[0]
+    eligibility=SemanticReadEligibilityResult((ReadRequirementAssessment('fact_1',read.id,(source.id,),read.id,
+        tuple(f.field_ref for f in source.fields),'These records expose the reference attributes.',SemanticReadDecision.RETAIN),),())
+    available=build_available_source_catalog(sources,read_eligibility=eligibility)
+    view_catalog=build_query_view_catalog(catalog);view=view_catalog.views[0]
+    value=FactValue.literal(id='reference_text',known_input_id='i1',literal_type=LiteralType.STRING,value=text,proof_refs=('question_input:i1',))
+    if case == 'name_named':
+        value = FactValue.named(id='reference_text', known_input_id='i1', text=text, proof_refs=('question_input:i1',))
+    menu=with_catalog_choices(query_parameter_menu((CanonicalInputValue(value.id,'i1',('fact_1:sql_input:i1',),value,value.proof_refs),)),
+        source_catalog=available,source_refs={source.id})
+    origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,text)
+    meaning=ReferenceMeaning('fact_1','i1','record',f'Identify {text}.',(origin,),('i1',),reference_text=text,reference_kind="description" if case == "role" else "literal")
+    prompt=ReferenceQueryPrompt(meaning=meaning,tables=view_catalog.tables,parameters=menu.descriptions)
+    interpretations=[]
+    if case=='role':
+        choice=next(name for name,desc in menu.descriptions.items() if desc.get('kind')=='catalog_choice' and desc['value']=='true')
+        predicate=f'is_primary=${choice}'
+        interpretations=[{'input':'p1_1','choice':choice,'basis':'The API identifies primary records using this flag.'}]
+    else:predicate=("CONCAT(given, ' ', family)" if case=='split' else 'name')+'=$p1_1'
+    if case == 'unfiltered_name': predicate = 'TRUE'
+    if case == 'unfiltered_missing': predicate = '$p1_1 = $p1_1'
+    matching = "CONCAT(given, ' ', family)" if case == 'split' else 'name'
+    extra = f', {matching} AS matched_name' if case != 'role' else ''
+    payload={'query':f'SELECT id AS record_id{extra} FROM "{view.name}" WHERE {predicate}',
+        'mode':'rows',
+        'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'record_id'},'label':'record','display_column':None}],
+        'ordering':[],'api_bindings':[],'interpretations':[],
+        'reference_binding':{'kind':'description','basis':'The primary property defines the role.'} if case=='role' else {'kind':'literal','match_column':'matched_name'}}
+    payload = query_payload(**payload)
+    if case != "role": payload["query"] = payload["query"].split(" WHERE ")[0]
+    validate(payload,prompt._schema())
+    authored=parse_reference_query(payload,prompt=prompt,menu=menu)
+    if case == 'role':
+        from copy import deepcopy
+        from jsonschema import ValidationError
+        from fervis.lookup.relational_sql.execution import QueryValidationError
+        assert prompt.parameters['p1_1']['kind'] == 'definition'
+        bad = deepcopy(payload)
+        bad['api_invocations'] = [{'view':view.name,'name':view.name,'arguments':[{'parameter_ref':'name','binding':'p1_1'}]}]
+        with pytest.raises(ValidationError):
+            validate(bad, prompt._schema())
+        with pytest.raises(QueryValidationError):
+            parse_reference_query(bad, prompt=prompt, menu=menu)
+    inputs=(InputTerm('i1',origin,text,TextType()),)
+    denotations=(InputDenotation('d1','i1','record reference','The input denotes a record.','records',InputDenotationKind.IDENTITY_REFERENCE,reference_descriptions=(text,) if case == 'role' else ()),)
+    reference=compile_reference_plan(authored,meaning=meaning,menu=menu,views=view_catalog.views,catalog=catalog,
+        inputs=inputs,input_denotations=denotations,access=ReadAccessCatalog())
+    final=compile_query_answer(question='Return the referenced ID.',query=f'SELECT id AS value FROM "{reference.view.name}"',
+        views=(),relation_views=(reference.view,),prerequisites=reference.program,catalog=catalog,
+        bindings=reference.bindings,inputs=inputs,input_denotations=denotations,expected_input_refs=('i1',),
+        output_types={'value':'integer'},result_contract=ResultContract('scalar'))
+    class Port:
+        def read(self,**kwargs):return {'responseStatus':200,'responseBody':([
+            {'id':1,'name':'Default','given':'Ada','family':'Byron','is_primary':False},
+            {'id':2,'name':'Cedar','given':'Ada','family':'Lovelace','is_primary':True}][1:] if case == 'unfiltered_missing' else [
+            {'id':1,'name':'Default','given':'Ada','family':'Byron','is_primary':False},
+            {'id':2,'name':'Cedar','given':'Ada','family':'Lovelace','is_primary':True}])}
+    executed=invoke_answer_program(program=final.program,bindings=final.bindings,
+        environment=ExecutionEnvironment(catalog=catalog),ports=RuntimePorts(Port(),LookupMemory()))
+    if expected is None:
+        from fervis.lookup.identity_types import IdentityExecutionFailureReason
+        assert executed.fact_result is None
+        assert executed.issue.reference.reason is IdentityExecutionFailureReason.NOT_FOUND
+        return
+    assert executed.issue is None
+    assert next(iter(executed.fact_result.outcome.projected_rows[0].values.values()))==expected
+    if case in {'name', 'name_named'}:
+        _assert_literal_reference_continuation(final, catalog, monkeypatch)
+
+
+@pytest.mark.parametrize('match_expression', ['$p1_1', "'Alpha'", "CASE WHEN $p1_1 = $p1_1 THEN 'Alpha' END", "COALESCE(name, 'Alpha')", "CASE WHEN name IS NULL THEN 'Alpha' ELSE name END", "CONCAT(name, 'Alpha')"])
+def test_reference_output_contract_does_not_request_unused_presentation_fields(match_expression):
+    from jsonschema import ValidationError
+    from fervis.lookup.relational_sql.execution import QueryValidationError
+    catalog=RelationCatalog(reads=(replace(_read('records'),fields=(*_read('records').fields,CatalogField('name','string',path='name',row_path_id='root'))),))
+    views=build_query_view_catalog(catalog)
+    view=views.views[0]
+    origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,'Identify the record.')
+    meaning=ReferenceMeaning('fact_1','i1','records','Identify the record.',(origin,),('i1',),reference_text='Alpha')
+    value=FactValue.literal(id='name',known_input_id='i1',literal_type=LiteralType.STRING,value='Alpha',proof_refs=('question_input:i1',))
+    menu=query_parameter_menu((CanonicalInputValue(value.id,'i1',('fact_1:sql_input:i1',),value,value.proof_refs),))
+    prompt=ReferenceQueryPrompt(meaning=meaning,tables=views.tables,parameters=menu.descriptions)
+    payload={'query':f'SELECT id, {match_expression} AS display_name FROM "{view.name}"','mode':'rows',
+
+        'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':'display_name'}],
+        'ordering':[],'api_bindings':[],'interpretations':[],'reference_binding':{'kind':'literal','match_column':'display_name'}}
+    payload = query_payload(**payload)
+    with pytest.raises(ValidationError):validate(payload,prompt._schema())
+    with pytest.raises(QueryValidationError,match='display projection'):
+        parse_reference_query(payload,prompt=prompt,menu=menu)
+    payload['outputs'][0]['display_column']=None
+    validate(payload,prompt._schema())
+    with pytest.raises(QueryValidationError, match='literal|observed'):
+        parse_reference_query(payload,prompt=prompt,menu=menu)
+
+
+@pytest.mark.parametrize('query', [
+    'SELECT id FROM records LIMIT 1',
+    'SELECT id FROM (SELECT id FROM records LIMIT 1) AS subset',
+    'SELECT id FROM records OFFSET 1',
+    'SELECT id FROM records QUALIFY ROW_NUMBER() OVER (ORDER BY id)=1',
+    'SELECT DISTINCT ON (name) id FROM records',
+])
+def test_reference_candidate_truncation_is_rejected(query):
+    from fervis.lookup.relational_sql.reference_matching import reject_reference_truncation
+    from fervis.lookup.relational_sql.execution import QueryValidationError
+    with pytest.raises(QueryValidationError, match='truncated'):
+        reject_reference_truncation(query)
+
+
+def test_literal_formatting_cannot_turn_missing_components_into_a_name():
+    from fervis.lookup.relational_sql.reference_matching import literal_match_query
+    from fervis.lookup.relational_sql.execution import execute_query, SqlTable
+    query = literal_match_query("SELECT id, CONCAT(name, '-') AS matched_name FROM records",
+        column='matched_name', parameter='name', tables={'records': {'columns': {'id': {}, 'name': {}}}})
+    result = execute_query(query, tables={'records': SqlTable({'id':'INTEGER','name':'TEXT'},
+        ({'id':1,'name':None},))}, parameters={'name':'-'})
+    assert result.rows == ()
+
+
+@pytest.mark.parametrize('predicate', ['name = $p1', '$p1 = name', 'r.name = $p1'])
+def test_only_equivalent_literal_predicates_are_canonicalized(predicate):
+    from fervis.lookup.relational_sql.reference_matching import literal_match_query
+    from fervis.lookup.relational_sql.execution import execute_query, SqlTable, QueryValidationError
+    tables = {'records': {'columns': {'id': {}, 'name': {}}}}
+    query = literal_match_query(f'SELECT id, name AS matched_name FROM records r WHERE {predicate}',
+        column='matched_name', parameter='p1', tables=tables)
+    result = execute_query(query, tables={'records': SqlTable({'id':'INTEGER','name':'TEXT'},
+        ({'id':1,'name':'Default'}, {'id':2,'name':'Default'}))}, parameters={'p1':'Default'})
+    assert len(result.rows) == 2
+    with pytest.raises(QueryValidationError, match='predicates|observed'):
+        literal_match_query('SELECT id, name AS matched_name FROM records WHERE id=1',
+            column='matched_name', parameter='p1', tables=tables)
+
+
+@pytest.mark.parametrize('named_invocation', [False, True])
+@pytest.mark.parametrize('key_type', ['string', 'uuid'])
+@pytest.mark.parametrize('returned', ['ABC123', 'OTHER', None])
+def test_required_key_lookup_establishes_identity_from_observed_return_and_replays(returned, key_type, named_invocation):
+    from fervis.lookup.relation_catalog import CatalogParam, ParamSource, EntityKeyComponentTarget
+    from fervis.lookup.contract_codec import canonical_answer_program_json, decode_answer_program
+    from fervis.lookup.identity_types import IdentityExecutionFailureReason
+    literal = 'ABC123' if key_type == 'string' else '00000000-0000-0000-0000-000000000001'
+    actual = (literal if returned == 'ABC123' else '00000000-0000-0000-0000-000000000002' if key_type == 'uuid' and returned else returned)
+    read = _read('records', value_type=key_type, params=(CatalogParam('id', 'id', ParamSource.PATH,
+        key_type, required=True, entity_target=EntityKeyComponentTarget('records', 'primary', 'id')),))
+    catalog = RelationCatalog(reads=(read,))
+    views = build_query_view_catalog(catalog)
+    view = views.views[0]
+    value = FactValue.named(id='original', known_input_id='i1', text=literal, proof_refs=('question_input:i1',))
+    menu = query_parameter_menu((CanonicalInputValue(value.id, 'i1', ('fact_1:sql_input:i1',), value, value.proof_refs),))
+    origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, literal)
+    meaning = ReferenceMeaning('fact_1', 'i1', 'record', 'record ABC123', (origin,), ('i1',), reference_text=literal)
+    prompt = ReferenceQueryPrompt(meaning=meaning, tables=views.tables, parameters=menu.descriptions)
+    payload = {'query': f'SELECT id FROM "{view.name}"', 'mode': 'rows',
+
+        'outputs': [{'kind': 'identity', 'authority': 'records/primary(id)', 'components': {'id': 'id'}, 'label': 'record', 'display_column': None}],
+        'ordering': [], 'interpretations': [], 'reference_binding': {'kind': 'literal', 'match_column': 'id'},
+        'api_bindings': [{'name': None, 'view': view.name, 'parameter_ref': 'id', 'binding': 'p1_1'}]}
+    payload = query_payload(**payload)
+    if named_invocation:
+        payload['query'] = payload['query'].replace(view.name, 'selected_record')
+        payload['api_invocations'][0]['name'] = 'selected_record'
+    validate(payload, prompt._schema())
+    authored = parse_reference_query(payload, prompt=prompt, menu=menu)
+    inputs = (InputTerm('i1', origin, literal, TextType()),)
+    denotations = (InputDenotation('d1', 'i1', 'record', 'Supplied record key', 'records', InputDenotationKind.IDENTITY_REFERENCE),)
+    reference = compile_reference_plan(authored, meaning=meaning, menu=menu, views=views.views, catalog=catalog,
+        inputs=inputs, input_denotations=denotations, access=ReadAccessCatalog())
+    final = compile_query_answer(question='Return its ID.', query=f'SELECT id AS value FROM "{reference.view.name}"',
+        views=(), relation_views=(reference.view,), prerequisites=reference.program, catalog=catalog,
+        bindings=reference.bindings, inputs=inputs, input_denotations=denotations, expected_input_refs=('i1',),
+        output_types={'value': key_type}, result_contract=ResultContract('scalar'))
+    class Port:
+        def read(self, *, endpoint_name, args):
+            assert endpoint_name == 'records' and args == {'id': literal}
+            return {'responseStatus': 200, 'responseBody': [] if returned is None else [{'id': actual}]}
+    program = decode_answer_program(canonical_answer_program_json(final.program))
+    for _ in range(2):
+        result = invoke_answer_program(program=program, bindings=final.bindings,
+            environment=ExecutionEnvironment(catalog=catalog), ports=RuntimePorts(Port(), LookupMemory()))
+        if returned == 'ABC123':
+            assert result.issue is None
+            assert str(next(iter(result.fact_result.outcome.projected_rows[0].values.values()))) == literal
+        else:
+            assert result.issue.reference.reason is IdentityExecutionFailureReason.NOT_FOUND
+
+
+def _assert_literal_reference_continuation(compiled, catalog, monkeypatch):
+    from fervis.lookup.answer_program.persistence import ProgramInvocation, StoredProgramInvocation
+    from fervis.lookup.answer_program.rerun import RerunnableProgramInvocation
+    from fervis.lookup.conversation_resolution.callable_frames import CallableFrameProgram, _callable_argument, callable_frame_bindings
+    from fervis.lookup.contract_codec import answer_program_id, canonical_answer_program_json, decode_answer_program
+    from fervis.lineage.enums import ProgramInvocationKind
+    from fervis.memory.conversation_context.semantic_frames import _semantic_frame_projection
+    from fervis.lookup.orchestration import semantic_compilation as compilation
+    from fervis.lookup.question_contract import QuestionContractRequest
+    from fervis.lookup.turn_prompts import HostPromptContext
+    from fervis.lookup.identity_types import IdentityExecutionFailureReason
+    program = decode_answer_program(canonical_answer_program_json(compiled.program))
+    stored = StoredProgramInvocation(ProgramInvocation('initial-invocation','initial-run',answer_program_id(program),
+        compiled.bindings,ProgramInvocationKind.COMPILED_QUESTION),program)
+    signature = _semantic_frame_projection(program.fact_template[0], stored=stored).callable
+    parameter = next(p for p in program.parameters if p.input_ref == 'i1')
+    from fervis.lookup.conversation_resolution.compilation import CompiledResolvedValue, _compile_input
+    from fervis.lookup.conversation_resolution.model import CurrentSpanSource
+    from fervis.memory.conversation_context import ConversationMemoryCardProjection
+    copied = _compile_input(CompiledResolvedValue('changed','site named Cedar',(),
+        (CurrentSpanSource('Cedar',1),),value_type=parameter.value_type.value),
+        memory_projection=ConversationMemoryCardProjection())
+    base = RerunnableProgramInvocation.parse(stored)
+    argument = _callable_argument(base,parameter_id=parameter.id,resolved_value_ref=copied.input_ref,
+        inputs_by_ref={copied.input_ref:copied})
+    frame = CallableFrameProgram(base, signature, (argument,))
+    def forbidden(*args, **kwargs):
+        raise AssertionError('A saved literal-reference program must replay its guard without rediscovering identity routes')
+    monkeypatch.setattr(compilation, '_turn', forbidden)
+    class Port:
+        calls = 0
+        rows = [{'id':1,'name':'Default'}, {'id':2,'name':'Cedar'}]
+        def read(self, **kwargs):
+            self.calls += 1
+            return {'responseStatus':200, 'responseBody':self.rows}
+    port = Port()
+    request = compilation.SemanticCompilationRequest('continuation','And Cedar?',
+        QuestionContractRequest(current_question='And Cedar?',conversation_context={}),catalog,(),port,None,
+        'openai',64,10,None,{},HostPromptContext())
+    values = compilation.resolve_semantic_continuation_arguments(frame, request)
+    assert port.calls == 0
+    bindings = callable_frame_bindings(frame, grounded_values=values)
+    for rows, expected in [([{'id':1,'name':'Default'},{'id':2,'name':'Cedar'}],2),
+                           ([{'id':1,'name':'Default'}],IdentityExecutionFailureReason.NOT_FOUND),
+                           ([{'id':2,'name':'Cedar'},{'id':3,'name':'Cedar'}],IdentityExecutionFailureReason.AMBIGUOUS_RESULT)]:
+        port.rows = rows
+        result = invoke_answer_program(program=program,bindings=bindings,environment=ExecutionEnvironment(catalog=catalog),
+            ports=RuntimePorts(port,LookupMemory()))
+        if expected == 2:
+            assert result.issue is None
+            assert next(iter(result.fact_result.outcome.projected_rows[0].values.values())) == 2
+        else:
+            assert result.fact_result is None
+            assert result.issue.reference.reason is expected
+    assert port.calls == 3
+
+
+@pytest.mark.parametrize('reference_kind',['literal','description'])
+def test_literal_reference_prompt_retains_only_possible_identity_carriers(reference_kind):
+    origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,'Find the supplied member.')
+    meaning=ReferenceMeaning('fact_1','i1','member','Find the member.',(origin,),('i1',),
+        reference_text='Cedar',reference_kind=reference_kind)
+    key={'entity_kind':'member','key_id':'primary','components':{'id':'id'}}
+    tables={
+        'members':{'source_ref':'members','columns':{'id':{'type':'uuid'},'name':{'type':'string'}},'candidate_keys':[key]},
+        'observations':{'source_ref':'observations','columns':{'member_id':{'type':'uuid'},'member_name':{'type':'string'}},
+            'entity_references':[{'target_entity_kind':'member','target_key_id':'primary','components':{'id':'member_id'}}]},
+        'settings':{'source_ref':'settings','columns':{'selected_id':{'type':'uuid'}}},
+        'unrelated':{'source_ref':'unrelated','columns':{'id':{'type':'integer'}},
+            'candidate_keys':[{'entity_kind':'other','key_id':'primary','components':{'id':'id'}}]},
+    }
+    parameters={'p1':{'input_ref':'i1','kind':'literal','value_type':'string','value':'Cedar'},
+        'c1':{'kind':'catalog_choice','source_ref':'members','type':'string','value':'active'},
+        'c2':{'kind':'catalog_choice','source_ref':'unrelated','type':'string','value':'closed'}}
+    prompt=ReferenceQueryPrompt(meaning=meaning,tables=tables,parameters=parameters,expected_key=key,
+        consumer_view_refs=('observations','unrelated'))
+    assert set(prompt.tables)==({'members','observations'} if reference_kind=='literal' else set(tables))
+    assert set(prompt.parameters)==({'p1'} if reference_kind=='literal' else set(parameters))
+    assert set(prompt.consumer_view_refs)<=set(prompt.tables)
+
+
+def test_literal_reference_keeps_compatible_control_values_from_noncarrier_sources():
+    from types import SimpleNamespace
+    origin=SourceOrigin(SourceOriginKind.QUESTION_CONTEXT,'Cedar')
+    meaning=ReferenceMeaning('fact_1','i1','member','Cedar',(origin,),('i1',),reference_text='Cedar')
+    key={'entity_kind':'member','key_id':'primary','components':{'id':'id'}}
+    tables={'members':{'columns':{'id':{'type':'integer'},'name':{'type':'string'}},'candidate_keys':[key],
+                'request_parameters':[{'param_ref':'representation','name':'representation','source':'query','type':'string','required':True}]},
+            'settings':{'columns':{'format':{'type':'string'}},'request_parameters':[]}}
+    parameters={'p1':{'input_ref':'i1','kind':'literal','value_type':'string','value':'Cedar'},
+                'c1':{'kind':'catalog_choice','source_ref':'settings','type':'string','value':'full'}}
+    prompt=ReferenceQueryPrompt(meaning=meaning,tables=tables,parameters=parameters,expected_key=key)
+    assert set(prompt.tables)=={'members'}
+    assert 'c1' in prompt.parameters
+    body=query_payload(query='SELECT id,name AS matched FROM members',mode='rows',
+
+        outputs=[{'kind':'identity','authority':'member/primary(id)','components':{'id':'id'},'label':'member','display_column':None}],
+        reference_binding={'kind':'literal','match_column':'matched'},
+        api_bindings=[{'view':'members','parameter_ref':'representation','binding':'c1'}])
+    validate(body,prompt._schema())
+    answer=parse_reference_query(body,prompt=prompt,menu=SimpleNamespace(expressions={'p1':None,'c1':None},descriptions=parameters))
+    assert answer.request_arguments[0].binding=='c1'

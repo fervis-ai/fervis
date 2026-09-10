@@ -13,36 +13,40 @@ input:
   context_frames:
     - frame_id: request:1
       source_ids: [prior_question]
-      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_COUNT]}
       parts:
-        - {part_id: subject, kind: answer_subject, text: sales}
-        - {part_id: output:1, kind: answer_output, text: number of sales}
-        - {part_id: input:entity_identity:1, kind: entity_identity, text: Acacia Mall}
-        - {part_id: input:time_scope:1, kind: time_scope, text: today}
+        - {part_id: subject, kind: subject, text: sales}
+        - {part_id: output:1, kind: requested_output, text: number of sales}
+        - {part_id: input:location, kind: input, text: Acacia Mall, value_type: identity}
+        - {part_id: input:time, kind: input, text: today, value_type: time}
       callable:
-        base_run_id: run_base
-        requested_fact_id: fact_1
+        base_invocation_id: pi_base
+        program_id: ap_base
+        requested_fact_ref: fact_1
+        requested_fact_fingerprint: fingerprint_1
         parameters:
-          - parameter_id: question.location
-            part_id: input:entity_identity:1
-            kind: entity_identity
+          - parameter_id: value.location
+            part_id: input:location
+            value_type: identity
+            input_ref: location
+            input_use_refs: [fact_1:input_use:location]
             current_text: Acacia Mall
-            resolved_text: Acacia Mall
-          - parameter_id: question.time
-            part_id: input:time_scope:1
-            kind: time_scope
+          - parameter_id: value.time
+            part_id: input:time
+            value_type: time
+            input_ref: time
+            input_use_refs: [fact_1:input_use:time]
             current_text: today
-            resolved_text: today
   payload:
     kind: conversation_resolution
     current_question_text: What about Pivot Mall?
     outcome:
       kind: resolved
       resolution_basis: Current meaning and retained prior meaning form the resolved question.
-      contextualized_question: How many sales did we make at Pivot Mall today?
       clauses:
         - current_clause_text: What about Pivot Mall?
           occurrence: 1
+          request_shape_basis: The prior frame supplies the omitted sales subject and requested count.
+          request_shape_source: prior_frame_supplies_omitted_request_parts
           resolved_text: How many sales did we make at Pivot Mall today?
           retained_frame_parts:
             - {kind: frame_part, frame_id: request:1, part_id: subject}
@@ -50,14 +54,14 @@ input:
           values:
             - value_id: pivot_mall
               resolved_text: Pivot Mall
-              frame_parameter: {kind: parameter, frame_id: request:1, parameter_id: question.location}
+              frame_parameter: {kind: parameter, frame_id: request:1, parameter_id: value.location}
               sources:
                 - {kind: current_span, text: Pivot Mall, occurrence: 1}
             - value_id: retained_time
               resolved_text: today
-              frame_parameter: {kind: parameter, frame_id: request:1, parameter_id: question.time}
+              frame_parameter: {kind: parameter, frame_id: request:1, parameter_id: value.time}
               sources:
-                - {kind: frame_part, frame_id: request:1, part_id: input:time_scope:1}
+                - {kind: frame_part, frame_id: request:1, part_id: input:time}
 expect:
   result_contains:
     current_question_text: What about Pivot Mall?

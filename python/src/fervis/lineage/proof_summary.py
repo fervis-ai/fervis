@@ -90,7 +90,6 @@ def proof_applied_inputs(
         if node.kind
         in {
             ProofNodeKind.ENDPOINT_ARG,
-            ProofNodeKind.POPULATION_CHOICE,
             ProofNodeKind.ROW_FILTER,
             ProofNodeKind.OPERATION_INPUT,
         }
@@ -158,8 +157,6 @@ def proof_node_debug_label(node_id: str) -> str:
 def _applied_action(kind: ProofNodeKind) -> str:
     if kind is ProofNodeKind.ENDPOINT_ARG:
         return "was used as an endpoint argument."
-    if kind is ProofNodeKind.POPULATION_CHOICE:
-        return "was reviewed as a population choice."
     if kind is ProofNodeKind.ROW_FILTER:
         return "was applied as a row filter."
     if kind is ProofNodeKind.OPERATION_INPUT:

@@ -27,10 +27,11 @@ input:
     outcome:
       kind: resolved
       resolution_basis: The current name and prior verified identity establish one person.
-      contextualized_question: Where did Nadia work?
       clauses:
         - current_clause_text: Where did Nadia work?
           occurrence: 1
+          request_shape_basis: The current clause states the complete factual request.
+          request_shape_source: current_clause_supplies_request
           resolved_text: Where did Nadia work?
           retained_frame_parts: []
           values:
@@ -44,13 +45,12 @@ expect:
   result_contains:
     question_contract_context:
       resolved_question_inputs:
-        - kind: literal_text
+        - kind: literal
           input_ref: conversation.staff
           value_source_text: Nadia
           resolved_value_text: Nadia
-          role: reference_value
+          value_type: identity
           occurrence: 1
-          value_meaning_hint: staff identity
     canonical_identity_inputs:
       - input_ref: conversation.staff
         entity_kind: staff

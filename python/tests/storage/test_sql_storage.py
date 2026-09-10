@@ -71,8 +71,8 @@ from fervis.lookup.answer_program import (
     CapabilityApplication,
     ParameterBinding,
     SetParameter,
-    answer_program_id,
 )
+from fervis.lookup.contract_codec import answer_program_id
 from fervis.lookup.answer_program.revisions import (
     apply_capability,
     decode_capability_application,
@@ -630,7 +630,6 @@ def _record_sql_memory_artifact(
             run_id=run_id,
             produced_by_step_id=step_id,
             fact_key="fact_1",
-            answer_expression_family="scalar",
         )
     )
     recorder.record_fact_result(
@@ -1259,9 +1258,8 @@ def test_sql_lineage_recorder_treats_json_normalization_as_idempotent(
             produced_by_step_id="step_contract",
             fact_key="fact_1",
             description="order count",
-            answer_expression_family="scalar_aggregate",
             requested_fact_json={"description": "order count"},
-            answer_requests_json={"outputs": ("answer_1",)},
+            inputs_json={"inputs": ()},
         )
     )
     recorder.record_fact_result(

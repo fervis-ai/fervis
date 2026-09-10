@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fervis.lookup.answer_program.operations import JoinMode, SqlQuerySpec
+
 from typing_extensions import assert_never
 
 from fervis.lookup.plan_execution.errors import VerificationError
@@ -15,13 +17,12 @@ from fervis.lookup.answer_program.operations import (
     JoinSpec,
     NamedExpression,
     Operation,
-    Predicate,
-    PredicateOperator,
     ProjectSpec,
     ProjectToKeySpec,
     KeepAll,
     OrderSpec,
     Take,
+    AtPosition,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
@@ -30,26 +31,10 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
-from fervis.lookup.answer_program.expressions import FieldRef, expression_references
-
-
-BINARY_PREDICATE_OPERATORS = frozenset(
-    {
-        PredicateOperator.EQUALS,
-        PredicateOperator.NOT_EQUALS,
-        PredicateOperator.LT,
-        PredicateOperator.LTE,
-        PredicateOperator.GT,
-        PredicateOperator.GTE,
-        PredicateOperator.IN,
-        PredicateOperator.CONTAINS,
-    }
-)
-UNARY_PREDICATE_OPERATORS = frozenset(
-    {
-        PredicateOperator.IS_NULL,
-        PredicateOperator.NOT_NULL,
-    }
+from fervis.lookup.answer_program.expressions import (
+    Expression,
+    FieldRef,
+    expression_references,
 )
 
 
@@ -57,9 +42,12 @@ def verify_operation(operation: Operation) -> None:
     spec = operation.spec
     if not isinstance(spec, ComputeSpec) and not operation.output_relation:
         raise VerificationError(f"{operation.id} requires output relation")
-    if isinstance(spec, FilterSpec):
+    if isinstance(spec, SqlQuerySpec):
+        from fervis.lookup.relational_sql.operation import validate_sql_operation
+        validate_sql_operation(spec)
+    elif isinstance(spec, FilterSpec):
         _require_input(spec.input_relation, "filter")
-        _require_predicate(spec.predicate, "filter")
+        _require_condition(spec.condition, "filter")
     elif isinstance(spec, ProjectSpec):
         _require_input(spec.input_relation, "project")
         if not spec.outputs:
@@ -72,8 +60,10 @@ def verify_operation(operation: Operation) -> None:
         _require_input(spec.input_relation, "project_to_key")
         if not spec.key_fields:
             raise VerificationError("project_to_key requires key fields")
-        _require_unique_fields(spec.key_fields, "project_to_key")
+        _require_unique_fields((*spec.key_fields, *spec.carry_fields), "project_to_key")
     elif isinstance(spec, JoinSpec):
+        if not isinstance(spec.mode, JoinMode):
+            raise VerificationError("join requires a declared join mode")
         _require_binary_join(spec.left, spec.right, spec.join_keys, "join")
     elif isinstance(spec, UnionSpec):
         if len(spec.inputs) < 2:
@@ -174,7 +164,7 @@ def _require_universal_condition(spec: UniversalConditionSpec) -> None:
         raise VerificationError("universal_condition requires dimension keys")
     if not spec.output_fields:
         raise VerificationError("universal_condition requires output fields")
-    _require_predicate(spec.predicate, "universal_condition")
+    _require_condition(spec.condition, "universal_condition")
     _require_unique_fields(
         tuple(output.output_field for output in spec.output_fields),
         "universal_condition",
@@ -199,11 +189,11 @@ def _require_order(spec: OrderSpec) -> None:
     if not spec.order_by:
         raise VerificationError("order requires ordering keys")
     _require_sort_keys(spec.order_by, "order")
-    if not isinstance(spec.selection, (KeepAll, Take)):
+    if not isinstance(spec.selection, (KeepAll, Take, AtPosition)):
         raise VerificationError("order requires a selection")
     if (
-        isinstance(spec.selection, Take)
-        and not expression_references(spec.selection.limit).leaves
+        isinstance(spec.selection, (Take, AtPosition))
+        and not expression_references((spec.selection.limit if isinstance(spec.selection, Take) else spec.selection.position)).leaves
     ):
         raise VerificationError("order take limit requires an expression")
 
@@ -215,17 +205,9 @@ def _require_compute(spec: ComputeSpec) -> None:
         raise VerificationError("compute requires output scalar")
 
 
-def _require_predicate(predicate: Predicate, label: str) -> None:
-    if not predicate.left or not predicate.operator:
-        raise VerificationError(f"{label} requires predicate")
-    if predicate.operator not in set(PredicateOperator):
-        raise VerificationError(f"{label} requires supported predicate operator")
-    if predicate.operator in BINARY_PREDICATE_OPERATORS:
-        if predicate.right is None:
-            raise VerificationError(f"{label} requires a right-hand side")
-        return
-    if predicate.operator in UNARY_PREDICATE_OPERATORS and predicate.right is not None:
-        raise VerificationError(f"{label} does not accept a right-hand side")
+def _require_condition(condition: Expression, label: str) -> None:
+    if not expression_references(condition).leaves:
+        raise VerificationError(f"{label} requires condition")
 
 
 def _require_aggregations(spec: AggregateSpec) -> None:
@@ -240,6 +222,15 @@ def _require_aggregations(spec: AggregateSpec) -> None:
             and not aggregation.input_field
         ):
             raise VerificationError("aggregate requires input field")
+        if not isinstance(aggregation.distinct_argument, bool):
+            raise VerificationError("aggregate distinct flag must be boolean")
+        if aggregation.distinct_argument and not aggregation.input_field and not aggregation.grain_fields:
+            raise VerificationError(
+                "distinct row count requires an explicit argument field"
+            )
+        _require_unique_fields(aggregation.grain_fields, "aggregate observation grain")
+        if aggregation.filter is not None:
+            _require_condition(aggregation.filter, "aggregate filter")
         output_fields.append(aggregation.output_field)
     _require_unique_fields(tuple(output_fields), "aggregate")
 

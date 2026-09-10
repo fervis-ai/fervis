@@ -1,7 +1,7 @@
 """Source, relation, catalog, and expression checks for program verification."""
 
+from fervis.lookup.answer_program.model import RelationProgram
 from ._shared import (
-    AnswerProgram,
     AuthorizedExecutionSources,
     CatalogField,
     CatalogSelectionResult,
@@ -20,22 +20,10 @@ from ._shared import (
 from fervis.lookup.answer_program.expression_instantiation import (
     InstantiatedProgramInputs,
 )
-from fervis.lookup.answer_program.operations import (
-    ComputeSpec,
-    FilterSpec,
-    compute_value_input_id,
-)
-from fervis.lookup.answer_program.expressions import expression_references
-from fervis.lookup.answer_program.inputs import resolve_value_expression
-from fervis.lookup.answer_program.values import ConstantRef, ParameterRef
-from fervis.lookup.question_contract import (
-    AnswerPopulationMembershipTestKind,
-    QuestionContract,
-)
 
 
 def _verify_program_expression_targets(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     bindings,
     catalog: RelationCatalog | None,
@@ -51,7 +39,7 @@ def _verify_program_expression_targets(
 
 
 def _verify_required_source_params(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     row_sources: RowSourceCatalog,
 ) -> None:
@@ -90,7 +78,7 @@ def _verify_required_source_params(
 
 
 def _verify_sources(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     row_sources: RowSourceCatalog,
     allowed_read_ids: frozenset[str] | None = None,
@@ -103,157 +91,14 @@ def _verify_sources(
         )
 
 
-def _verify_source_population_coverage_claims(
-    answer: AnswerProgram,
-    *,
-    question_contract: QuestionContract,
-    row_sources: RowSourceCatalog,
-    bindings,
-) -> None:
-    tests = {
-        (fact.id, test.id): test
-        for fact in question_contract.requested_facts
-        for test in (
-            fact.answer_population.membership_tests
-            if fact.answer_population is not None
-            else ()
-        )
-    }
-    mechanic_refs_by_relation: dict[str, set[str]] = {}
-    for relation in answer.relations:
-        seen: set[tuple[str, str, str]] = set()
-        source_refs = _source_mechanic_proof_refs(relation)
-        mechanic_refs_by_relation[relation.id] = source_refs
-        for claim in relation.source.population_coverage_claims:
-            _verify_population_coverage_claim(
-                claim,
-                tests=tests,
-                seen=seen,
-                mechanic_refs=source_refs,
-            )
-    for operation in answer.operations:
-        spec = operation.spec
-        if not isinstance(spec, FilterSpec):
-            continue
-        seen = set()
-        mechanic_refs = {
-            *mechanic_refs_by_relation.get(spec.input_relation, set()),
-            *spec.proof_refs,
-        }
-        references = expression_references(
-            spec.predicate.left,
-            *((spec.predicate.right,) if spec.predicate.right is not None else ()),
-        )
-        for parameter in references.parameters:
-            resolved = resolve_value_expression(parameter, bindings=bindings)
-            mechanic_refs.update((*resolved.proof_refs, *resolved.source_refs))
-        for constant in references.constants:
-            resolved = resolve_value_expression(constant, bindings=bindings)
-            mechanic_refs.update((*resolved.proof_refs, *resolved.source_refs))
-        for claim in spec.population_coverage_claims:
-            _verify_population_coverage_claim(
-                claim,
-                tests=tests,
-                seen=seen,
-                mechanic_refs=mechanic_refs,
-            )
-        if operation.output_relation:
-            mechanic_refs_by_relation[operation.output_relation] = mechanic_refs
-
-
-def _verify_population_coverage_claim(
-    claim,
-    *,
-    tests,
-    seen: set[tuple[str, str, str]],
-    mechanic_refs: set[str],
-) -> None:
-    test_key = (
-        claim.test_ref.requested_fact_id,
-        claim.test_ref.membership_test_id,
-    )
-    test = tests.get(test_key)
-    if test is None:
-        raise VerificationError(
-            "population coverage claim references unknown membership test"
-        )
-    if test.kind is AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY:
-        raise VerificationError(
-            "subject identity cannot be a source population coverage claim"
-        )
-    claim_key = (*test_key, claim.role.value)
-    if claim_key in seen:
-        raise VerificationError("duplicate population coverage claim")
-    seen.add(claim_key)
-    if not set(claim.proof_refs).issubset(mechanic_refs):
-        raise VerificationError("population coverage claim lacks source-mechanic proof")
-
-
-def _verify_compute_input_population_coverage_claims(
-    answer: AnswerProgram,
-    *,
-    question_contract: QuestionContract,
-    bindings,
-) -> None:
-    tests = {
-        (fact.id, test.id): test
-        for fact in question_contract.requested_facts
-        for test in (
-            fact.answer_population.membership_tests
-            if fact.answer_population is not None
-            else ()
-        )
-    }
-    for operation in answer.operations:
-        spec = operation.spec
-        if not isinstance(spec, ComputeSpec):
-            continue
-        leaves = {
-            compute_value_input_id(expression): expression
-            for expression in expression_references(spec.expression).leaves
-            if isinstance(expression, (ParameterRef, ConstantRef))
-        }
-        for input_coverage in spec.input_population_coverage:
-            expression = leaves.get(input_coverage.input_id)
-            if expression is None:
-                raise VerificationError(
-                    "compute population coverage references unknown input"
-                )
-            resolved = resolve_value_expression(expression, bindings=bindings)
-            source_refs = set((*resolved.proof_refs, *resolved.source_refs))
-            for claim in input_coverage.claims:
-                test = tests.get(
-                    (
-                        claim.test_ref.requested_fact_id,
-                        claim.test_ref.membership_test_id,
-                    )
-                )
-                if test is None:
-                    raise VerificationError(
-                        "population coverage claim references unknown membership test"
-                    )
-                if test.kind is AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY:
-                    raise VerificationError(
-                        "subject identity cannot be a source population coverage claim"
-                    )
-                if not set(claim.proof_refs).issubset(source_refs):
-                    raise VerificationError(
-                        "compute population coverage claim lacks input proof"
-                    )
-
-
 def _source_mechanic_proof_refs(
     relation: Relation,
 ) -> set[str]:
     source = relation.source
-    refs: set[str] = set()
-    if source.population_binding is not None:
-        refs.update(source.population_binding.proof_refs)
+    refs: set[str] = set(source.proof_refs)
     for binding in source.param_bindings:
         refs.update(binding.proof_refs)
         refs.add(f"source_param:{binding.param_id}")
-    for choice in source.population_choices:
-        refs.update(choice.proof_refs)
     return refs
 
 
@@ -267,8 +112,11 @@ def _verify_source(
     if kind == SourceKind.API_READ:
         if not source.read_id:
             raise VerificationError("api_read source requires read_id")
-        if allowed_read_ids is not None and source.read_id not in allowed_read_ids:
-            raise VerificationError("relation uses source outside selected catalog")
+        from fervis.lookup.plan_execution.authorized_sources import (
+            require_read_in_scope,
+        )
+
+        require_read_in_scope(source.read_id, allowed_read_ids)
         if not any(
             item.kind == RowSourceKind.API_READ and item.read_id == source.read_id
             for item in row_sources.sources
@@ -382,6 +230,16 @@ def _verify_api_relation_catalog_refs(
                     raise VerificationError(
                         f"relation {relation.id} field role is not allowed"
                     )
+            if row_source_field.request_parameter_ref:
+                continue
+            if row_source_field.declared_entity_kind:
+                if {key.entity_kind for key in row_source.candidate_keys} != {
+                    row_source_field.declared_entity_kind
+                }:
+                    raise VerificationError(
+                        "row class contradicts its declared entity authority"
+                    )
+                continue
             _verify_field_requirements(
                 relation=relation,
                 field=_catalog_field(
@@ -471,3 +329,36 @@ def _requirement_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value).strip().lower()
+
+
+def verify_dependent_argument_contracts(answer, *, relation_contracts, row_sources):
+    from fervis.lookup.answer_program.expressions import expression_references, FieldRef
+    from fervis.lookup.api_arguments import compatible_argument, relation_argument_description
+    from dataclasses import asdict
+    from fervis.lookup.plan_execution.expression_schema import expression_value_type
+    from fervis.lookup.plan_execution.declared_values import (
+        declared_kind, DeclaredValueKind,
+    )
+    from fervis.lookup.plan_execution.errors import RelationEngineError
+    for relation in answer.relations:
+        if not relation.source.argument_relation_id:
+            continue
+        parent = relation_contracts[relation.source.argument_relation_id]
+        source = _row_source_for_relation(relation, row_sources=row_sources)
+        for binding in relation.source.param_bindings:
+            references = expression_references(binding.value_expr)
+            if not references.fields:
+                continue
+            if any(ref.field_id not in parent.fields for ref in references.fields):
+                raise VerificationError('dependent argument references an unavailable parent field')
+            param = source.param(binding.param_id)
+            try:
+                value_type = expression_value_type(binding.value_expr,field_types=parent.field_types)
+                description = (relation_argument_description(parent, binding.value_expr.field_id, param.entity_target)
+                    if isinstance(binding.value_expr, FieldRef) else {'value_type':value_type})
+                compatible = (declared_kind(value_type) is not DeclaredValueKind.RUNTIME
+                              and compatible_argument(asdict(param), description))
+            except RelationEngineError as exc:
+                raise VerificationError('dependent argument type cannot be established') from exc
+            if not compatible:
+                raise VerificationError('dependent argument has an incompatible parameter type or identity authority')

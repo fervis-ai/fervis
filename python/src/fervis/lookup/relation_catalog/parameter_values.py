@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, time
+from decimal import Decimal, InvalidOperation
 from math import isfinite
+from enum import Enum
 from typing import TypeAlias
 from uuid import UUID
 
@@ -25,10 +28,30 @@ class CatalogParameterValueError(ValueError):
 
 
 def parse_catalog_parameter_value(
+    value: object, *, type_name: str, choices: tuple[str, ...] = (),
+) -> CatalogParameterValue:
+    parsed = _parse_catalog_parameter_value(value,type_name=type_name)
+    require_catalog_parameter_choice(parsed,type_name=type_name,choices=choices)
+    return parsed
+
+
+def require_catalog_parameter_choice(value: object, *, type_name: str, choices: tuple[str, ...]) -> None:
+    if not choices or value is None:
+        return
+    from fervis.lookup.plan_execution.declared_values import declared_equal
+    from fervis.lookup.plan_execution.errors import RelationEngineError
+    try:
+        allowed = any(declared_equal(value,type_name,choice,type_name) for choice in choices)
+    except RelationEngineError as exc:
+        raise CatalogParameterValueError("parameter choice does not match its declared type") from exc
+    if not allowed:
+        raise CatalogParameterValueError("value is not a declared choice")
+
+
+def _parse_catalog_parameter_value(
     value: object,
     *,
     type_name: str,
-    choices: tuple[str, ...] = (),
 ) -> CatalogParameterValue:
     """Parse one raw catalog value according to its declared endpoint type."""
 
@@ -59,21 +82,14 @@ def parse_catalog_parameter_value(
         if not isinstance(value, dict):
             raise CatalogParameterValueError("object value must be an object")
         return _parse_json_object(value)
-    if normalized_type in {
-        "choice",
-        "date",
-        "datetime",
-        "decimal",
-        "duration",
-        "path",
-        "pk",
-        "string",
-        "time",
-    }:
+    if normalized_type in {"date", "datetime", "decimal", "time"}:
         if not isinstance(value, str):
             raise CatalogParameterValueError("text value must be a string")
-        if choices and value not in choices:
-            raise CatalogParameterValueError("value is not a declared choice")
+        _validate_text_scalar(value, type_name=normalized_type)
+        return value
+    if normalized_type in {"choice", "duration", "path", "pk", "string"}:
+        if not isinstance(value, str):
+            raise CatalogParameterValueError("text value must be a string")
         return value
     if normalized_type == "uuid":
         if not isinstance(value, str):
@@ -85,6 +101,24 @@ def parse_catalog_parameter_value(
     if normalized_type in {"any", "unknown", ""}:
         return _parse_json_value(value)
     raise CatalogParameterValueError(f"unsupported catalog value type {type_name}")
+
+
+def _validate_text_scalar(value: str, *, type_name: str) -> None:
+    try:
+        if type_name == "date":
+            date.fromisoformat(value)
+        elif type_name == "datetime":
+            datetime.fromisoformat(value)
+        elif type_name == "time":
+            time.fromisoformat(value)
+        else:
+            number = Decimal(value)
+            if not number.is_finite():
+                raise CatalogParameterValueError("decimal value must be finite")
+    except (ValueError, InvalidOperation) as exc:
+        raise CatalogParameterValueError(
+            f"{type_name} value has invalid syntax"
+        ) from exc
 
 
 def parse_catalog_parameter_text(
@@ -132,3 +166,25 @@ def _parse_json_object(value: dict[object, object]) -> dict[str, CatalogParamete
     if any(type(key) is not str for key in value):
         raise CatalogParameterValueError("object keys must be strings")
     return {str(key): _parse_json_value(item) for key, item in value.items()}
+
+
+def catalog_parameter_wire_value(value: object, *, type_name: str = "") -> object:
+    if isinstance(value, Decimal) and type_name == "integer":
+        if not value.is_finite() or value != value.to_integral_value():
+            raise ValueError("integer parameter requires an exact integral value")
+        return int(value)
+    if isinstance(value, Decimal) and type_name in {"number", "float", "double"}:
+        # These API types use JSON numbers; decimal API types use text.
+        if value.is_finite() and type_name == "number" and value == value.to_integral_value():
+            return int(value)
+        projected = float(value)
+        if not value.is_finite() or Decimal(str(projected)) != value:
+            raise ValueError("numeric parameter cannot preserve the canonical value")
+        return projected
+    if isinstance(value, Decimal | UUID):
+        return str(value)
+    if isinstance(value, datetime | date | time):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    return value

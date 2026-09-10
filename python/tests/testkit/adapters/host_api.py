@@ -17,7 +17,10 @@ from fervis.host_api.contracts import (
 from fervis.lookup.relation_catalog.from_host_api import (
     relation_catalog_from_endpoint_contracts,
 )
-from fervis.lookup.relation_catalog import CatalogValidationError, parse_relation_catalog
+from fervis.lookup.relation_catalog import (
+    CatalogValidationError,
+    parse_relation_catalog,
+)
 from fervis.lookup.relation_catalog.model import PaginationMetadata
 
 from tests.testkit.assertions import (

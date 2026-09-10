@@ -1,25 +1,121 @@
-"""Typed provider-output contracts for question interpretation."""
+"""Provider-authored DTOs for the semantic relational Question Contract."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
-from fervis.types.enums import StrEnum
-
-
-class QuestionInputOwnerKind(StrEnum):
-    GROUP_KEY = "GROUP_KEY"
-    POPULATION_TESTS = "POPULATION_TESTS"
-    COMPUTE_EXPRESSION = "COMPUTE_EXPRESSION"
-    RESULT_LIMIT = "RESULT_LIMIT"
 
 
 @dataclass(frozen=True)
-class QuestionContractDecisionOutput(ProviderOutput):
+class SemanticQuestionContractDecisionOutput(ProviderOutput):
     decision_basis: str
     outcome: ProviderObject
+
+
+@dataclass(frozen=True)
+class SemanticQuestionFrameDecisionOutput(ProviderOutput):
+    decision_basis: str
+    outcome: ProviderObject
+
+
+@dataclass(frozen=True)
+class FrameOriginOutput(ProviderOutput):
+    kind: str
+    resolved_input_ref: str | None = None
+
+
+@dataclass(frozen=True)
+class MeaningOriginOutput(ProviderOutput):
+    meaning: str
+    origin: FrameOriginOutput
+
+
+@dataclass(frozen=True)
+class SuppliedInputValueOutput(ProviderOutput):
+    operands: tuple[str, ...]
+    value_type: ProviderObject
+    origin: FrameOriginOutput
+
+
+@dataclass(frozen=True)
+class NonEntityValueOutput(ProviderOutput):
+    value: SuppliedInputValueOutput
+
+
+@dataclass(frozen=True)
+class IdentityOperandOutput(ProviderOutput):
+    kind: str
+    value: str
+
+
+@dataclass(frozen=True)
+class SingleIdentityValueOutput(ProviderOutput):
+    kind: str
+    identity_value: IdentityOperandOutput
+    origin: FrameOriginOutput
+
+
+@dataclass(frozen=True)
+class IdentityAlternativesValueOutput(ProviderOutput):
+    kind: str
+    identity_values: tuple[IdentityOperandOutput, ...]
+    origin: FrameOriginOutput
+
+
+@dataclass(frozen=True)
+class EntityReferenceOutput(ProviderOutput):
+    instance_kind: str
+    value: ProviderObject
+
+
+@dataclass(frozen=True)
+class SuppliedEntityReferenceOutput(ProviderOutput):
+    meaning: str
+    denotation_basis: str
+    answer_request_numbers: tuple[int, ...]
+    entity_reference: EntityReferenceOutput
+
+
+@dataclass(frozen=True)
+class NonEntityLedgerValueOutput(ProviderOutput):
+    operands: tuple[str, ...]
+    origin: FrameOriginOutput
+
+
+@dataclass(frozen=True)
+class NonEntityOperandOutput(ProviderOutput):
+    kind: str
+    value: NonEntityLedgerValueOutput
+
+
+@dataclass(frozen=True)
+class DurationOperandOutput(ProviderOutput):
+    kind: str
+    unit: str
+    value: NonEntityLedgerValueOutput
+
+
+@dataclass(frozen=True)
+class SuppliedNonEntityValueOutput(ProviderOutput):
+    meaning: str
+    denotation_basis: str
+    answer_request_numbers: tuple[int, ...]
+    non_entity_value: ProviderObject
+
+
+@dataclass(frozen=True)
+class SelectionLimitOutput(ProviderOutput):
+    answer_request_number: int
+    meaning: str
+    denotation_basis: str
+    non_entity_value: NonEntityValueOutput
+
+
+@dataclass(frozen=True)
+class SuppliedValuesLedgerOutput(ProviderOutput):
+    operands: tuple[ProviderObject, ...]
+    selection_limits: tuple[SelectionLimitOutput, ...]
 
 
 @dataclass(frozen=True)
@@ -28,138 +124,252 @@ class QuestionInputInventoryCheckOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class QuestionInputItemInventoryCheckOutput(ProviderOutput):
-    why_this_is_an_input: str
-
-
-@dataclass(frozen=True)
-class LiteralTextInputOutput(ProviderOutput):
-    input_ref: str
+class SourceOriginOutput(ProviderOutput):
     source: str
-    value_source_text: str
-    operand_text: str
-    role: str
-    inventory_check: QuestionInputItemInventoryCheckOutput
+    meaning: str
+    resolved_input_ref: str | None
+
+
+@dataclass(frozen=True)
+class SetTermOutput(ProviderOutput):
+    id: str
+    instance_kind: str
+    origin: SourceOriginOutput
+
+
+@dataclass(frozen=True)
+class AssociationTermOutput(ProviderOutput):
+    id: str
+    from_set_ref: str
+    to_set_ref: str
+    origin: SourceOriginOutput
+
+
+@dataclass(frozen=True)
+class FactTermOutput(ProviderOutput):
     kind: str
-    field_label_text: Optional[str] = None
-    value_meaning_hint: Optional[str] = None
-    occurrence: Optional[int] = None
-    resolved_input_ref: Optional[str] = None
-    comparison_operator: Optional[str] = None
+    observed_for_ref: str
+    origin: SourceOriginOutput
+    identified_set_ref: str | None = None
 
 
 @dataclass(frozen=True)
-class RowSetReferenceInputOutput(ProviderOutput):
-    input_ref: str
-    source: str
-    reference_text: str
-    occurrence: int
-    resolved_input_ref: str
-    inventory_check: QuestionInputItemInventoryCheckOutput
+class GroupingMeaningOutput(ProviderOutput):
+    group_ref: str
+    grouping_basis: str
+    meaning: str
+    origin: FrameOriginOutput
+    grouping_kind: str
+    grouping_value: ProviderObject | None = None
+
+
+@dataclass(frozen=True)
+class FrameRowSourceOutput(ProviderOutput):
+    instance_kind: str
+    origin: FrameOriginOutput
+
+
+@dataclass(frozen=True)
+class AnswerRequestFrameOutput(ProviderOutput):
+    return_request_basis: str
+    relational_shape_basis: str
+    request: ProviderObject
+
+
+@dataclass(frozen=True)
+class QuestionFrameRequestOutput(ProviderOutput):
+    relational_shape: str
+    result_grain_basis: str
+    result: ProviderObject
+
+
+@dataclass(frozen=True)
+class FrameResultOrderOutput(ProviderOutput):
+    ordering_request_basis: str
+    ordering: ProviderObject
+    selection: ProviderObject
+
+
+@dataclass(frozen=True)
+class OrderedByOutput(ProviderOutput):
+    kind: str
+    values: tuple[ProviderObject, ...]
+
+
+@dataclass(frozen=True)
+class ReturnedMeaningOutput(ProviderOutput):
+    meaning: str
+    origin: FrameOriginOutput
+    meaning_ref: str
+
+
+@dataclass(frozen=True)
+class RequestedValueOrderingOutput(ProviderOutput):
+    ownership_basis: str
+    kind: str
+    value_ref: str
+
+
+@dataclass(frozen=True)
+class GroupOrderingReferenceOutput(ProviderOutput):
+    ownership_basis: str
+    kind: str
+    group_ref: str
+
+
+@dataclass(frozen=True)
+class NonTemporalGroupingValueOutput(ProviderOutput):
     kind: str
 
 
 @dataclass(frozen=True)
-class AnswerOutputOutput(ProviderOutput):
-    description: str
-    role: str
-
-
-@dataclass(frozen=True)
-class AnswerPopulationMembershipTestOutput(ProviderOutput):
-    population_use_refs: tuple[str, ...]
-    polarity: str
-    test_question: str
-
-
-@dataclass(frozen=True)
-class AnswerPopulationOutput(ProviderOutput):
-    membership_tests: tuple[AnswerPopulationMembershipTestOutput, ...]
-
-
-@dataclass(frozen=True)
-class AnswerSubjectInstanceInterpretationOutput(ProviderOutput):
+class TemporalBucketGroupingValueOutput(ProviderOutput):
     kind: str
+    grain: str
 
 
 @dataclass(frozen=True)
-class AnswerSubjectOutput(ProviderOutput):
-    subject_text: str
-    instance_interpretation: AnswerSubjectInstanceInterpretationOutput
-
-
-@dataclass(frozen=True)
-class GroupKeyValueSourceOutput(ProviderOutput):
+class UnreturnedOrderingMeaningOutput(ProviderOutput):
+    ownership_basis: str
     kind: str
-    grain: Optional[str] = None
+    meaning: str
+    origin: FrameOriginOutput
 
 
 @dataclass(frozen=True)
-class GroupKeyOutput(ProviderOutput):
-    description: str
-    value_source: GroupKeyValueSourceOutput
+class ReturnedProjectionValueOutput(ProviderOutput):
+    value_ref: str
+    value_kind_basis: str
+    value_kind: str
+    meaning: str
+    origin: FrameOriginOutput
 
 
 @dataclass(frozen=True)
-class OrderingOutput(ProviderOutput):
-    basis: str
-    direction: str
+class CandidateProjectionOutput(ProviderOutput):
+    projection_basis: str
+    candidate_identity: str
+    explicitly_requested_values: tuple[ReturnedProjectionValueOutput, ...]
 
 
 @dataclass(frozen=True)
-class ResultSelectionOutput(ProviderOutput):
+class GroupProjectionOutput(ProviderOutput):
+    projection_basis: str
+    returned_grouping_keys: str
+    explicitly_requested_values: tuple[ReturnedProjectionValueOutput, ...]
+
+
+@dataclass(frozen=True)
+class CompleteSemanticQuestionFrameOutput(ProviderOutput):
     kind: str
-
-
-@dataclass(frozen=True)
-class AnswerExpressionOutput(ProviderOutput):
-    family: str
-    group_key: Optional[GroupKeyOutput] = None
-    ordering: Optional[OrderingOutput] = None
-    selection: Optional[ResultSelectionOutput] = None
-
-
-@dataclass(frozen=True)
-class QuestionInputUseOutput(ProviderOutput):
-    input_ref: str
-    owner_kind: str
-    use_id: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class AnswerRequestOutput(ProviderOutput):
-    answer_fact: str
-    answer_expression: AnswerExpressionOutput
-    question_input_uses: tuple[ProviderObject, ...]
-    answer_subject: AnswerSubjectOutput
-    answer_population: AnswerPopulationOutput
-    answer_outputs: tuple[AnswerOutputOutput, ...]
-
-
-@dataclass(frozen=True)
-class QuestionContractOutput(ProviderOutput):
-    kind: str
-    answer_requests_count: int
-    answer_requests: tuple[AnswerRequestOutput, ...]
-    question_inputs: tuple[ProviderObject, ...]
+    answer_requests: tuple[AnswerRequestFrameOutput, ...]
+    supplied_values: SuppliedValuesLedgerOutput
     question_input_inventory_check: QuestionInputInventoryCheckOutput
 
 
 @dataclass(frozen=True)
-class UnresolvedPriorTurnReferenceOutput(ProviderOutput):
-    source_text: str
-    target_label: str
-    why_question_is_incomplete: str
+class CandidateSetOutput(ProviderOutput):
+    instance_kind: str
+    instance_interpretation: str
 
 
 @dataclass(frozen=True)
-class UnresolvedPriorTurnReferencesOutput(ProviderOutput):
-    kind: str
-    references: tuple[UnresolvedPriorTurnReferenceOutput, ...]
+class RequestedOutputOutput(ProviderOutput):
+    expression: ProviderObject
 
 
 @dataclass(frozen=True)
-class MissingRequestedFactOutput(ProviderOutput):
+class RequestedValueOutputOutput(ProviderOutput):
+    output_ref: str
+    expression: ProviderObject
+
+
+@dataclass(frozen=True)
+class RequestedRelatedEntityOutputOutput(ProviderOutput):
+    output_ref: str
+    instance_kind: str
+
+
+@dataclass(frozen=True)
+class RoleRelationOutput(ProviderOutput):
+    association: ProviderObject
+    set: SetTermOutput
+    related_sets: tuple[ProviderObject, ...]
+
+
+@dataclass(frozen=True)
+class SetGraphOutput(ProviderOutput):
+    identity_input_relations: dict[str, RoleRelationOutput | None]
+    requested_output_relations: dict[str, RoleRelationOutput]
+    other_related_sets: tuple[ProviderObject, ...]
+
+
+@dataclass(frozen=True)
+class RequestedOutputsOutput(ProviderOutput):
+    result_key_outputs: tuple[RequestedOutputOutput, ...]
+    requested_value_outputs: tuple[ProviderObject, ...]
+
+
+@dataclass(frozen=True)
+class CandidateIdentityGroupingOutput(ProviderOutput):
+    id: str
+    grouping_basis: str
     kind: str
-    source_text: str
-    why_question_is_incomplete: str
+
+
+@dataclass(frozen=True)
+class GroupingAssociationOutput(ProviderOutput):
+    id: str
+    origin: SourceOriginOutput
+
+
+@dataclass(frozen=True)
+class RelatedIdentityGroupingOutput(ProviderOutput):
+    id: str
+    grouping_basis: str
+    kind: str
+    set_ref: str
+
+
+@dataclass(frozen=True)
+class ValueGroupingOutput(ProviderOutput):
+    id: str
+    grouping_basis: str
+    kind: str
+    expression: ProviderObject
+
+
+@dataclass(frozen=True)
+class OrderingOutput(ProviderOutput):
+    ordering_basis: str
+    expression: ProviderObject
+    direction: str
+
+
+@dataclass(frozen=True)
+class SelectionOutput(ProviderOutput):
+    kind: str
+    limit: ProviderObject | None = None
+
+
+@dataclass(frozen=True)
+class AnswerRequestOutput(ProviderOutput):
+    requested_fact_ref: str
+    origin: SourceOriginOutput
+    candidate_set: CandidateSetOutput
+    grouping: tuple[ProviderObject, ...]
+    set_graph: ProviderObject
+    qualification: ProviderObject | None
+    ordering: tuple[OrderingOutput, ...]
+    selection: ProviderObject | None
+    distinct_by: tuple[ProviderObject, ...]
+    outputs: RequestedOutputsOutput
+
+
+@dataclass(frozen=True)
+class CompleteSemanticQuestionContractOutput(ProviderOutput):
+    kind: str
+    answer_requests: tuple[AnswerRequestOutput, ...]
+
+
+__all__ = tuple(name for name in globals() if not name.startswith("_"))

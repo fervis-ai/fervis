@@ -1,6 +1,14 @@
 # Fervis Flask Host API Setup Checklist
 
-Use this file to make a Flask API fully readable by Fervis. Fervis can only answer factual questions reliably when every configured GET route exposes a deterministic route contract: path params, query params, operation identity, JSON response schema, and correct object-vs-array response cardinality. Follow the steps in order, keep existing OpenAPI/Swagger-style surfaces when they already exist, add schema metadata where routes are plain Flask, then run Fervis doctor until every configured GET route is certified read-eligible.
+Start with installation, authentication, and runtime verification in Steps 8–10.
+Fervis can inspect selected JSON object or object-array GET responses without a
+declared response schema when the read requires no additional invocation inputs.
+Inspection uses the current caller's read authority and records its own lineage.
+It cannot infer keys, relationships, or closed enums from observed values.
+
+Steps 1–7 describe optional contract enrichment. Keep existing OpenAPI/Swagger
+surfaces and correct their declarations when necessary; plain Flask routes do not
+require a new schema package merely to become inspectable.
 
 This checklist must not change business logic or host API functionality; its sole purpose is to enrich endpoint contracts with metadata that supports Fervis' factual answer runtime.
 
@@ -15,10 +23,10 @@ This checklist must not change business logic or host API functionality; its sol
 - [ ] 1.3 Check whether the app already exposes OpenAPI/Swagger, `flask-smorest`, `flask-apispec`, `flask-restx`, `Flask-AppBuilder`, `flask-rest-jsonapi-next`, Connexion, or RESTPlus.
 - [ ] 1.4 Keep the existing surface when one exists.
 - [ ] 1.5 Treat Connexion and RESTPlus apps as OpenAPI/Swagger apps when they expose a Swagger document.
-- [ ] 1.6 Choose `flask-smorest` + `marshmallow` + `apispec` only when the app has plain Flask routes and no existing contract surface.
+- [ ] 1.6 If adding declared contracts to plain Flask routes, `flask-smorest` + `marshmallow` + `apispec` is one supported option.
 - [ ] 1.7 Open package links when needed: <https://pypi.org/project/flask-smorest/>, <https://pypi.org/project/marshmallow/>, <https://pypi.org/project/apispec/>, <https://pypi.org/project/flask-apispec/>, <https://pypi.org/project/flask-restx/>, <https://pypi.org/project/Flask-AppBuilder/>, <https://pypi.org/project/flask-rest-jsonapi-next/>.
 
-## Step 2: Install the selected package family.
+## Step 2: Install an optional schema package only when adding contract metadata.
 - [ ] 2.1 Use the newest Python version supported by both Fervis and the host app's pinned dependencies.
 - [ ] 2.2 Install the host app's runtime dependencies first, using `uv sync`, `pip install -r requirements.txt`, `poetry install`, or the app's documented runtime package list.
 - [ ] 2.3 Run no schema-package install when the app already exposes complete OpenAPI/Swagger.
@@ -32,7 +40,7 @@ This checklist must not change business logic or host API functionality; its sol
 - [ ] 2.11 Run `python -c "from <module> import <app_or_factory>"` for the chosen Flask app target.
 - [ ] 2.12 Fix every import or dependency error before running Fervis commands.
 
-## Step 3: Annotate every Fervis-exposed GET route.
+## Step 3: Preserve exact semantics when documenting GET routes.
 - [ ] 3.1 Declare every path parameter in the route path, such as `/orders/<int:order_id>`.
 - [ ] 3.2 Declare every query parameter with schema or argument metadata.
 - [ ] 3.3 Attach the JSON response schema to the route's existing documented success response.
@@ -61,11 +69,11 @@ This checklist must not change business logic or host API functionality; its sol
 - [ ] 6.6 Preserve any `x-fervis` relational metadata on the GET operation when regenerating OpenAPI or Swagger.
 
 ## Step 7: Fix doctor blockers.
-- [ ] 7.1 Add a response schema when doctor reports missing response fields.
+- [ ] 7.1 Missing response fields are reported as a skipped schema check; runtime inspection may supply structure. Add declared contracts when the required representation or relational guarantees cannot otherwise be established.
 - [ ] 7.2 Add an argument/query schema when doctor reports missing query parameters.
 - [ ] 7.3 Fix object-vs-array metadata when doctor reports that the declared schema cardinality does not match the runtime JSON response.
 - [ ] 7.4 Fix every configured GET route before certifying the app.
-- [ ] 7.5 Pass doctor only when every configured GET route is read-eligible.
+- [ ] 7.5 Treat doctor as a setup and declared-contract check; verify actual questions separately.
 
 ## Step 8: Install and initialize Fervis.
 - [ ] 8.1 Run `uv add "fervis[flask]"` or `pip install "fervis[flask]"` or `poetry add "fervis[flask]"`.
@@ -90,5 +98,5 @@ This checklist must not change business logic or host API functionality; its sol
 - [ ] 9.5 Fix every host API regression before treating Fervis setup as complete.
 
 ## Step 10: Ask a factual question through Fervis.
-- [ ] 10.1 Run `fervis runtime ask "How many records are available?" --wait` after doctor succeeds.
+- [ ] 10.1 Run `fervis runtime ask "How many records are available?" --tenant-id <tenant-id> --principal-id <principal-id> --wait` after doctor succeeds.
 - [ ] 10.2 Verify Fervis answers from the configured Flask API.

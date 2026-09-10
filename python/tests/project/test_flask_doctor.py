@@ -8,7 +8,7 @@ from fervis.interfaces.cli.dispatch import run_doctor_command
 from fervis.project import discover_project
 
 
-def test_fervis_doctor_reports_route_only_flask_endpoints_not_ready(
+def test_fervis_doctor_allows_runtime_inspection_of_unmodeled_flask_endpoints(
     tmp_path: Path,
 ) -> None:
     root = _flask_project(tmp_path)
@@ -33,9 +33,9 @@ def test_fervis_doctor_reports_route_only_flask_endpoints_not_ready(
 
     envelope = json.loads(stdout.getvalue())
     checks = _checks(envelope)
-    assert exit_code == 2
-    assert checks["source.catalog"]["status"] == "failed"
-    assert "no lookup-readable GET endpoints" in checks["source.catalog"]["message"]
+    assert exit_code == 2  # This fixture still requires auth and persistence setup.
+    assert checks["source.catalog"]["status"] == "passed"
+    assert checks["source.response_schema"]["status"] == "skipped"
 
 
 def test_fervis_doctor_accepts_openapi_backed_flask_endpoint(
@@ -290,11 +290,11 @@ def test_fervis_doctor_fails_flask_source_when_any_configured_route_lacks_contra
     )
 
     checks = _checks(json.loads(stdout.getvalue()))
-    assert exit_code == 2
+    assert exit_code == 2  # This fixture still requires auth and persistence setup.
     assert checks["source.catalog"]["status"] == "passed"
-    assert checks["source.response_schema"]["status"] == "failed"
+    assert checks["source.response_schema"]["status"] == "skipped"
     assert (
-        "1 exposed endpoint has no response fields"
+        "1 exposed endpoint has no declared response fields"
         in checks["source.response_schema"]["message"]
     )
 

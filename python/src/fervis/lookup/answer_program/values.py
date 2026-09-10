@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from fervis.types.enums import StrEnum
 from typing import TYPE_CHECKING
 
@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from fervis.lookup.answer_program.expressions import Expression
 
 from fervis.lookup.answer_program.errors import AnswerProgramContractError
-from fervis.lookup.question_inputs import normalize_decimal_text
 from fervis.lookup.canonical_data import (
     EntityKeyComponentValue,
     EntityKeyValue,
@@ -64,6 +63,13 @@ class TimeComponent(StrEnum):
     INSTANT = "instant"
 
 
+class ValueProjectionKind(StrEnum):
+    WHOLE_VALUE = "WHOLE_VALUE"
+    TEMPORAL_START = "TEMPORAL_START"
+    TEMPORAL_END = "TEMPORAL_END"
+    IDENTITY_COMPONENT = "IDENTITY_COMPONENT"
+
+
 class TimeGranularity(StrEnum):
     HOUR = "hour"
     DAY = "day"
@@ -77,23 +83,29 @@ ValueComponentValue = str | bool | Decimal | tuple[str, ...]
 
 
 @dataclass(frozen=True)
+class IdentityMatchEvidence:
+    key: EntityKeyValue
+    matched_field_ref: str
+    matched_field_path: str
+    matched_value: RuntimeScalar
+    proof_refs: tuple[str, ...] = ()
+    source_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, EntityKeyValue):
+            raise TypeError("identity evidence requires a complete entity key")
+        if not self.matched_field_ref or not self.matched_field_path or self.matched_value is None:
+            raise ValueError("identity match evidence must be complete")
+
+
+@dataclass(frozen=True)
 class IdentityValuePayload:
     key: EntityKeyValue
     display_value: str = ""
-    matched_field_ref: str = ""
-    matched_field_path: str = ""
-    matched_value: RuntimeScalar = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.key, EntityKeyValue):
             raise TypeError("identity value requires a complete entity key")
-        match_parts_present = (
-            bool(self.matched_field_ref),
-            bool(self.matched_field_path),
-            self.matched_value is not None,
-        )
-        if any(match_parts_present) and not all(match_parts_present):
-            raise ValueError("identity match evidence must be complete")
 
     @property
     def entity_kind(self) -> str:
@@ -423,7 +435,7 @@ class StringSetValuePayload:
 
 def _normalized_number(value: str) -> str:
     try:
-        return normalize_decimal_text(value)
+        return _normalize_decimal_text(value)
     except ValueError as exc:
         raise AnswerProgramContractError(
             "binding_type_mismatch",
@@ -433,6 +445,18 @@ def _normalized_number(value: str) -> str:
 
 def _decimal_number(value: str) -> Decimal:
     return Decimal(value)
+
+
+def _normalize_decimal_text(value: str) -> str:
+    try:
+        parsed = Decimal(value.strip())
+    except InvalidOperation as exc:
+        raise ValueError("number contains a non-numeric value") from exc
+    if not parsed.is_finite():
+        raise ValueError("number must be finite")
+    if parsed == 0:
+        return "0"
+    return format(parsed.normalize(), "f")
 
 
 def _parse_iso_boundary(value: str) -> tuple[str, date | datetime]:
@@ -461,10 +485,18 @@ class FactValue:
     source_refs: tuple[str, ...] = ()
     dependencies: tuple[ValueDependency, ...] = ()
     applies_to_requested_fact_ids: tuple[str, ...] = ()
+    identity_evidence: tuple[IdentityMatchEvidence, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.dependencies, tuple):
             raise TypeError("value dependencies must be a tuple")
+        keys = ((self.payload.key,) if isinstance(self.payload, IdentityValuePayload)
+                else self.payload.keys if isinstance(self.payload, IdentitySetValuePayload) else ())
+        if not isinstance(self.identity_evidence, tuple) or any(
+            not isinstance(evidence, IdentityMatchEvidence) or evidence.key not in keys
+            for evidence in self.identity_evidence
+        ):
+            raise ValueError("identity evidence must certify this value's keys")
         canonical = tuple(
             sorted(
                 set(self.dependencies),
@@ -472,6 +504,13 @@ class FactValue:
             )
         )
         object.__setattr__(self, "dependencies", canonical)
+
+    def has_same_value_as(self, other: FactValue) -> bool:
+        if isinstance(self.payload, IdentityValuePayload) and isinstance(other.payload, IdentityValuePayload):
+            return self.payload.key == other.payload.key
+        if isinstance(self.payload, IdentitySetValuePayload) and isinstance(other.payload, IdentitySetValuePayload):
+            return self.payload.keys == other.payload.keys
+        return self.payload == other.payload
 
     @property
     def kind(self) -> ValueKind:
@@ -509,10 +548,10 @@ class FactValue:
             payload=IdentityValuePayload(
                 key=key,
                 display_value=display_value,
-                matched_field_ref=matched_field_ref,
-                matched_field_path=matched_field_path,
-                matched_value=matched_value,
             ),
+            identity_evidence=(IdentityMatchEvidence(key, matched_field_ref, matched_field_path, matched_value,
+                                                     tuple(proof_refs), tuple(source_refs)),)
+            if matched_field_ref or matched_field_path or matched_value is not None else (),
             proof_refs=tuple(proof_refs),
             source_refs=tuple(source_refs),
             dependencies=tuple(dependencies),
@@ -532,6 +571,7 @@ class FactValue:
         dependencies: tuple[ValueDependency, ...] = (),
         applies_to_requested_fact_ids: tuple[str, ...] = (),
         known_input_id: str = "",
+        identity_evidence: tuple[IdentityMatchEvidence, ...] = (),
     ) -> FactValue:
         return cls(
             id=id,
@@ -545,6 +585,7 @@ class FactValue:
                 display_value=display_value,
                 source_relation_id=source_relation_id,
             ),
+            identity_evidence=identity_evidence,
             proof_refs=tuple(proof_refs),
             source_refs=tuple(source_refs),
             dependencies=tuple(dependencies),
@@ -669,6 +710,29 @@ class FactValue:
         )
 
 
+def project_fact_value(
+    value: FactValue,
+    *,
+    projection: ValueProjectionKind,
+    component_id: str | None = None,
+) -> RuntimeValue:
+    """Project one typed runtime value from a canonical fact value."""
+
+    if projection is ValueProjectionKind.IDENTITY_COMPONENT:
+        if not component_id:
+            raise ValueError("identity projection requires a component")
+        return value.identity_key_component(component_id)
+    if component_id is not None:
+        raise ValueError("only identity projection accepts a component")
+    if projection is ValueProjectionKind.WHOLE_VALUE:
+        return value.payload.component_value(ValueComponent.VALUE)
+    if projection is ValueProjectionKind.TEMPORAL_START:
+        return value.payload.component_value(TimeComponent.START)
+    if projection is ValueProjectionKind.TEMPORAL_END:
+        return value.payload.component_value(TimeComponent.END)
+    raise ValueError(f"unsupported value projection: {projection.value}")
+
+
 def known_input_id_for_value(value: FactValue) -> str:
     return value.known_input_id
 
@@ -791,9 +855,12 @@ class ParameterDeclaration:
     id: str
     role: ParameterRole
     value_type: ParameterValueType
+    input_ref: str = ""
+    input_use_refs: tuple[str, ...] = ()
     required: bool = True
     allowed_values: tuple[str, ...] = ()
     semantic_control_ref: str = ""
+    fixed_value_fingerprint: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, str) or not self.id:
@@ -802,6 +869,20 @@ class ParameterDeclaration:
             raise TypeError("parameter role must be ParameterRole")
         if not isinstance(self.value_type, ParameterValueType):
             raise TypeError("parameter value_type must be ParameterValueType")
+        if not isinstance(self.input_ref, str):
+            raise TypeError("parameter input_ref must be a string")
+        if not isinstance(self.input_use_refs, tuple) or any(
+            not isinstance(ref, str) or not ref for ref in self.input_use_refs
+        ):
+            raise TypeError("parameter input_use_refs must contain strings")
+        if bool(self.input_ref) != bool(self.input_use_refs):
+            raise ValueError(
+                "parameter input signature requires both input ref and use refs"
+            )
+        if len(self.input_use_refs) != len(set(self.input_use_refs)):
+            raise ValueError("parameter input use refs cannot contain duplicates")
+        if not isinstance(self.fixed_value_fingerprint, str):
+            raise TypeError("fixed value fingerprint must be text")
         if not isinstance(self.required, bool):
             raise TypeError("parameter required must be bool")
         if not isinstance(self.allowed_values, tuple):

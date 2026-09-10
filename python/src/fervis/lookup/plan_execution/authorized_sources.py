@@ -1,4 +1,4 @@
-"""Authorized execution-source transport for fact-plan verification/execution."""
+"""Authorized execution-source transport for answer-program verification."""
 
 from __future__ import annotations
 
@@ -103,12 +103,18 @@ def _project_catalog(
     catalog: RelationCatalog,
     read_ids: tuple[str, ...],
 ) -> RelationCatalog:
-    selected = set(read_ids)
-    return RelationCatalog(
-        reads=tuple(read for read in catalog.reads if read.id in selected),
-        facts=tuple(
-            fact
-            for fact in catalog.facts
-            if not fact.read_id or fact.read_id in selected
-        ),
-    )
+    from fervis.lookup.relation_catalog.selection.results import relation_catalog_for_read_ids
+    from fervis.lookup.plan_execution.errors import VerificationError
+    try:
+        return relation_catalog_for_read_ids(catalog, read_ids=read_ids)
+    except KeyError as exc:
+        raise VerificationError("program references an unavailable source catalog definition") from exc
+
+
+def require_read_in_scope(
+    read_id: str, allowed_read_ids: frozenset[str] | None
+) -> None:
+    from fervis.lookup.plan_execution.errors import VerificationError
+
+    if allowed_read_ids is not None and read_id not in allowed_read_ids:
+        raise VerificationError("relation uses source outside selected catalog")

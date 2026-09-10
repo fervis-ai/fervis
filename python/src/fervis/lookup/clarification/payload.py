@@ -20,7 +20,6 @@ from fervis.lookup.clarification.model import (
     ConversationInterpretationCandidate,
     ConversationInterpretationEvidence,
     ConversationResolutionContinuation,
-    FactPlanningCatalogInputContinuation,
     GroundingContinuation,
     QuestionContractContinuation,
     SourceBindingCatalogInputContinuation,
@@ -111,19 +110,13 @@ def _continuation_payload(
         return {
             "kind": "grounding",
             "knownInputId": continuation.known_input_id,
+            **({"referenceOperand":continuation.reference_operand} if continuation.reference_operand else {}),
             "acceptsFreeText": continuation.accepts_free_text,
         }
     if isinstance(continuation, SourceBindingCatalogInputContinuation):
         return {
             "kind": "source_binding_catalog_input",
             "requestedFactId": continuation.requested_fact_id,
-            "target": _catalog_target_payload(continuation.target),
-        }
-    if isinstance(continuation, FactPlanningCatalogInputContinuation):
-        return {
-            "kind": "fact_planning_catalog_input",
-            "requestedFactId": continuation.requested_fact_id,
-            "planningRequirementId": continuation.planning_requirement_id,
             "target": _catalog_target_payload(continuation.target),
         }
     raise TypeError("unsupported clarification continuation")
@@ -163,22 +156,18 @@ def _continuation_from_payload(
             expected_value_kind=_required_text(payload, "expectedValueKind"),
         )
     if kind == "grounding":
+        operand=payload.get("referenceOperand", "")
+        if not isinstance(operand,str):
+            raise ValueError("Reference operand must be text")
         return GroundingContinuation(
             known_input_id=_required_text(payload, "knownInputId"),
+            reference_operand=operand,
             accepts_free_text=_boolean(payload.get("acceptsFreeText")),
         )
     target = _catalog_target_from_payload(_required_mapping(payload, "target"))
     if kind == "source_binding_catalog_input":
         return SourceBindingCatalogInputContinuation(
             requested_fact_id=_required_text(payload, "requestedFactId"),
-            target=target,
-        )
-    if kind == "fact_planning_catalog_input":
-        return FactPlanningCatalogInputContinuation(
-            requested_fact_id=_required_text(payload, "requestedFactId"),
-            planning_requirement_id=_required_text(
-                payload, "planningRequirementId"
-            ),
             target=target,
         )
     raise ValueError(f"unsupported clarification continuation: {kind}")

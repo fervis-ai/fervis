@@ -3,7 +3,6 @@ description: A one-row result whose answer value is a typed entity key carries t
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
-  current_question: Where did Nadia work?
   conversation_context:
     factArtifacts:
       - artifactId: turn_1

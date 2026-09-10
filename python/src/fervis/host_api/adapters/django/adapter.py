@@ -89,6 +89,7 @@ class DjangoHostApiAdapter:
         return execute_get_endpoint(
             endpoint_name=invocation.endpoint_name,
             user=user,
+            origin=authority.read_context_ref.origin,
             sources=self.sources,
             path_params=dict(invocation.path_params),
             query_params=dict(invocation.query_params),

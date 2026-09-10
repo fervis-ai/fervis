@@ -1,847 +1,439 @@
-"""Provider schema for source binding."""
+"""Strict provider schema for Source Binding."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
 
-from fervis.lookup.fact_plan.fact_plan import (
-    BlockedFactBasis,
-    MissingCatalogInputKind,
-    PlanOutcomeKind,
+from fervis.model_io.structured_output.schema import without_unreferenced_definitions
+
+from fervis.lookup.question_contract import (
+    AssociationTerm,
+    SetTerm,
 )
-from fervis.lookup.question_contract import NormalInstanceExcludedStateRole
-from fervis.lookup.source_binding.normal_instance_roles import (
-    NORMAL_INSTANCE_NO_EXCLUDED_ROLE,
-    NORMAL_INSTANCE_UNKNOWN_EXCLUDED_ROLE,
-)
-from fervis.lookup.source_binding.metric_fit import (
-    METRIC_FIT_DECISIONS,
-)
-from fervis.lookup.source_binding.input_applications import (
-    empty_resolved_input_applications_schema,
-)
-from fervis.lookup.source_binding.population_effects import (
-    population_test_results_schema,
-)
-from fervis.lookup.source_binding import provider_contract as provider_output
-from fervis.lookup.source_binding.plan_targets import (
-    SourceBindingPlanFamily,
-    source_binding_fact_field_id,
+from fervis.lookup.source_binding import provider_contract as output
+from fervis.lookup.source_binding.association_choices import association_choices
+from fervis.lookup.source_binding.model import (
+    InvocationProjectionOption,
+    SemanticSourceBindingRequest,
 )
 
-_POPULATION_TEST_EFFECT_SCHEMA = {
-    "enum": [
-        "SATISFIES_TEST",
-        "CONFLICTS_WITH_TEST",
-        "DOES_NOT_DECIDE_TEST",
-        "UNKNOWN_TEST_EFFECT",
-    ]
-}
 
-
-@dataclass(frozen=True)
-class _SourceBindingSchemaScope:
-    required_catalog_input_ids: tuple[str, ...]
-    required_catalog_choice_input_ids: tuple[str, ...]
-    target_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]]
-    target_required_param_decision_ids: dict[str, tuple[str, ...]]
-    target_resolved_input_application_schemas: dict[str, dict[str, object]]
-    target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]]
-    target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]]
-    target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]]
-    target_finite_choice_normal_instance_test_ids: dict[str, dict[str, tuple[str, ...]]]
-    target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]]
-    target_population_roles: dict[str, tuple[dict[str, object], ...]]
-    target_requested_fact_ids: dict[str, str]
-    metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]]
-    target_fulfillment_support_set_ids_by_answer_output: dict[
-        str, dict[str, tuple[str, ...]]
-    ]
-    target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]]
-    target_population_binding_ids: dict[str, tuple[str, ...]]
-    target_population_binding_test_ids: dict[str, tuple[str, ...]]
-    plan_families: tuple[SourceBindingPlanFamily, ...]
-
-    @property
-    def binding_target_ids(self) -> tuple[str, ...]:
-        return tuple(self.target_param_decision_ids_by_param)
-
-    @property
-    def requested_fact_ids(self) -> tuple[str, ...]:
-        return tuple(dict.fromkeys(self.target_requested_fact_ids.values()))
-
-
-def _handle_schema() -> dict[str, object]:
-    return {"type": "string", "minLength": 1}
-
-
-def _strict_object(
-    properties: Mapping[str, object],
-    *,
-    required: tuple[str, ...],
+def build_unavailable_source_realization_schema(
+    requirement_refs: tuple[str, ...],
 ) -> dict[str, object]:
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": dict(properties),
-        "required": list(required),
-    }
-
-
-def _variant_schema(variants: tuple[dict[str, object], ...]) -> dict[str, object]:
-    if len(variants) == 1:
-        return variants[0]
-    return {"oneOf": list(variants)}
-
-
-def build_source_binding_schema(
-    *,
-    required_catalog_input_ids: tuple[str, ...] = (),
-    required_catalog_choice_input_ids: tuple[str, ...] = (),
-    target_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]],
-    target_required_param_decision_ids: dict[str, tuple[str, ...]],
-    target_resolved_input_application_schemas: dict[
-        str, dict[str, object]
-    ] | None = None,
-    target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]],
-    target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]],
-    target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]],
-    target_finite_choice_normal_instance_test_ids: dict[
-        str,
-        dict[str, tuple[str, ...]],
-    ],
-    target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]],
-    target_population_roles: dict[str, tuple[dict[str, object], ...]],
-    target_requested_fact_ids: dict[str, str],
-    metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
-    target_fulfillment_support_set_ids_by_answer_output: dict[
-        str, dict[str, tuple[str, ...]]
-    ],
-    target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]],
-    target_population_binding_ids: dict[str, tuple[str, ...]] | None = None,
-    target_population_binding_test_ids: dict[str, tuple[str, ...]] | None = None,
-    plan_families: tuple[SourceBindingPlanFamily, ...],
-) -> dict[str, object]:
-    scope = _SourceBindingSchemaScope(
-        required_catalog_input_ids=required_catalog_input_ids,
-        required_catalog_choice_input_ids=required_catalog_choice_input_ids,
-        target_param_decision_ids_by_param=target_param_decision_ids_by_param,
-        target_required_param_decision_ids=target_required_param_decision_ids,
-        target_resolved_input_application_schemas=(
-            target_resolved_input_application_schemas or {}
-        ),
-        target_finite_choice_values=target_finite_choice_values,
-        target_row_predicate_values=target_row_predicate_values,
-        target_finite_choice_test_ids=target_finite_choice_test_ids,
-        target_finite_choice_normal_instance_test_ids=(
-            target_finite_choice_normal_instance_test_ids
-        ),
-        target_row_predicate_test_ids=target_row_predicate_test_ids,
-        target_population_roles=target_population_roles,
-        target_requested_fact_ids=target_requested_fact_ids,
-        metric_evidence_ids_by_requested_fact=metric_evidence_ids_by_requested_fact,
-        target_fulfillment_support_set_ids_by_answer_output=(
-            target_fulfillment_support_set_ids_by_answer_output
-        ),
-        target_required_fulfillment_answer_output_ids=(
-            target_required_fulfillment_answer_output_ids
-        ),
-        target_population_binding_ids=target_population_binding_ids or {},
-        target_population_binding_test_ids=(
-            target_population_binding_test_ids or {}
-        ),
-        plan_families=plan_families,
-    )
-    outcome_schema = _source_binding_outcome_schema(scope)
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {"outcome": outcome_schema},
-        "required": ["outcome"],
-    }
-
-
-def _source_binding_outcome_schema(
-    scope: _SourceBindingSchemaScope,
-) -> dict[str, object]:
-    variants: list[dict[str, object]] = []
-    if scope.plan_families:
-        variants.append(_source_binding_plan_schema(scope))
-        variants.append(
-            _impossible_schema(
-                allowed_bases=(BlockedFactBasis.POLICY_ACCESS.value,),
-                requested_fact_ids=scope.requested_fact_ids,
-            )
+    refs = tuple(dict.fromkeys(requirement_refs))
+    if not refs:
+        raise ValueError(
+            "unavailable realization requires a declared requirement scope"
         )
-    clarification = _clarification_schema(
-        required_catalog_input_ids=scope.required_catalog_input_ids,
-        required_catalog_choice_input_ids=scope.required_catalog_choice_input_ids,
-    )
-    if (
-        not scope.plan_families
-        and not scope.required_catalog_input_ids
-        and not scope.required_catalog_choice_input_ids
-    ):
-        variants.append(_impossible_schema(requested_fact_ids=scope.requested_fact_ids))
-    if clarification is not None:
-        variants.append(clarification)
-    return {"oneOf": variants}
-
-
-def _source_binding_plan_schema(scope: _SourceBindingSchemaScope) -> dict[str, object]:
-    properties = {
-        "kind": {"enum": ["source_bindings"]},
-        "metric_fit_bases": _metric_fit_bases_schema(
-            scope.metric_evidence_ids_by_requested_fact
-        ),
-        "fit_basis_interpretations": _fit_basis_interpretations_schema(
-            scope.metric_evidence_ids_by_requested_fact
-        ),
-        **_fact_binding_schemas(scope),
-    }
-    return _strict_object(
-        properties,
-        required=tuple(properties),
-    )
-
-
-def _fact_binding_schemas(
-    scope: _SourceBindingSchemaScope,
-) -> dict[str, dict[str, object]]:
-    families_by_fact: dict[str, list[SourceBindingPlanFamily]] = {}
-    for family in scope.plan_families:
-        families_by_fact.setdefault(family.requested_fact_id, []).append(family)
-    return {
-        source_binding_fact_field_id(
-            requested_fact_id
-        ): _requested_fact_variants_schema(
-            tuple(families),
-            scope=scope,
-        )
-        for requested_fact_id, families in families_by_fact.items()
-    }
-
-
-def _requested_fact_variants_schema(
-    families: tuple[SourceBindingPlanFamily, ...],
-    *,
-    scope: _SourceBindingSchemaScope,
-) -> dict[str, object]:
-    variants = tuple(
-        _requested_fact_binding_schema(family, scope=scope) for family in families
-    )
-    return _variant_schema(variants)
-
-
-def _requested_fact_binding_schema(
-    family: SourceBindingPlanFamily,
-    *,
-    scope: _SourceBindingSchemaScope,
-) -> dict[str, object]:
-    role_schemas = {
-        role_id: _variant_schema(
-            tuple(
-                _source_binding_item_schema(target.binding_target_id, scope=scope)
-                for target in targets
-            )
-        )
-        for role_id, targets in family.role_targets
-    }
-    properties = {
-        "plan_shape": {"enum": [family.plan_shape]},
-        **role_schemas,
-    }
-    return _strict_object(properties, required=tuple(properties))
-
-
-def _source_binding_item_schema(
-    target_id: str,
-    *,
-    scope: _SourceBindingSchemaScope,
-) -> dict[str, object]:
-    return provider_output.SourceInvocationOutput.schema(
+    return output.SourceRealizationUnavailableOutput.schema(
         {
-            "binding_target_id": {"enum": [target_id]},
-            "answer_population": _answer_population_schema(
-                scope.target_population_binding_ids.get(target_id, ()),
-                test_ids=scope.target_population_binding_test_ids.get(target_id, ()),
-            ),
-            "fulfillment_decisions": _fulfillment_decisions_schema(
-                scope.target_fulfillment_support_set_ids_by_answer_output.get(
-                    target_id, {}
-                ),
-                required_answer_output_ids=(
-                    scope.target_required_fulfillment_answer_output_ids.get(
-                        target_id,
-                        (),
-                    )
-                ),
-            ),
-            "param_decisions": _param_decisions_schema(
-                scope.target_param_decision_ids_by_param.get(target_id, {}),
-                required_param_ids=scope.target_required_param_decision_ids.get(
-                    target_id, ()
-                ),
-            ),
-            "resolved_input_applications": (
-                scope.target_resolved_input_application_schemas.get(
-                    target_id,
-                    empty_resolved_input_applications_schema(),
-                )
-            ),
-            "row_predicate_reviews": _row_predicate_reviews_schema(
-                scope.target_row_predicate_values.get(target_id, {}),
-                test_ids_by_predicate=scope.target_row_predicate_test_ids.get(
-                    target_id, {}
-                ),
-            ),
-            "finite_choice_param_reviews": _finite_choice_param_reviews_schema(
-                scope.target_finite_choice_values.get(target_id, {}),
-                test_ids_by_param=scope.target_finite_choice_test_ids.get(
-                    target_id, {}
-                ),
-                normal_instance_test_ids_by_param=(
-                    scope.target_finite_choice_normal_instance_test_ids.get(
-                        target_id, {}
-                    )
-                ),
-                population_roles=scope.target_population_roles.get(target_id, ()),
-            ),
-        }
-    )
-
-
-def _finite_choice_param_reviews_schema(
-    finite_choice_values: dict[str, tuple[str, ...]],
-    *,
-    test_ids_by_param: dict[str, tuple[str, ...]],
-    normal_instance_test_ids_by_param: dict[str, tuple[str, ...]],
-    population_roles: tuple[dict[str, object], ...],
-) -> dict[str, object]:
-    reviewed_values = {
-        param_id: choices
-        for param_id, choices in finite_choice_values.items()
-        if test_ids_by_param.get(param_id)
-    }
-    if not reviewed_values:
-        return _empty_object_schema()
-    return _strict_object(
-        {
-            param_id: _finite_choice_param_review_schema(
-                choices,
-                membership_test_ids=test_ids_by_param[param_id],
-                normal_instance_test_ids=normal_instance_test_ids_by_param.get(
-                    param_id,
-                    (),
-                ),
-                population_roles=population_roles,
-            )
-            for param_id, choices in reviewed_values.items()
-        },
-        required=tuple(reviewed_values),
-    )
-
-
-def _finite_choice_param_review_schema(
-    choices: tuple[str, ...],
-    *,
-    membership_test_ids: tuple[str, ...],
-    normal_instance_test_ids: tuple[str, ...],
-    population_roles: tuple[dict[str, object], ...],
-) -> dict[str, object]:
-    role_variants = tuple(
-        _finite_choice_param_role_review_schema(
-            choices,
-            role=role,
-            membership_test_ids=membership_test_ids,
-            normal_instance_test_ids=normal_instance_test_ids,
-        )
-        for role in population_roles
-        if str(role.get("role_id") or "")
-    )
-    if role_variants:
-        return _variant_schema(role_variants)
-    raise ValueError("finite choice param requires population roles")
-
-
-def _finite_choice_param_role_review_schema(
-    choices: tuple[str, ...],
-    *,
-    role: dict[str, object],
-    membership_test_ids: tuple[str, ...],
-    normal_instance_test_ids: tuple[str, ...],
-) -> dict[str, object]:
-    role_id = str(role.get("role_id") or "")
-    return provider_output.FiniteChoiceParamReviewOutput.schema(
-        {
-            "controlled_population_role_id": (
-                {"enum": [role_id]} if role_id else _handle_schema()
-            ),
-            "role_selection_basis": _handle_schema(),
-            "population_test_basis": _population_test_basis_schema(membership_test_ids),
-            "choice_reviews": {
+            "kind": {"enum": ["unavailable_source_realization"]},
+            "unmet_requirement_refs": {
                 "type": "array",
-                "minItems": len(choices),
-                "maxItems": len(choices),
-                "items": _finite_choice_review_schema(
-                    choices,
-                    membership_test_ids=membership_test_ids,
-                    normal_instance_test_ids=normal_instance_test_ids,
-                ),
+                "minItems": 1,
+                "maxItems": len(refs),
+                "items": {"enum": list(refs)},
             },
+            "explanation": {"type": "string", "minLength": 1},
         }
     )
 
 
-def _population_test_basis_schema(
-    membership_test_ids: tuple[str, ...],
+def build_semantic_source_realization_schema(
+    request: SemanticSourceBindingRequest,
 ) -> dict[str, object]:
-    return _strict_object(
+    branch_ids = tuple(item.branch_id for item in request.strategy.branches)
+    source_refs = tuple(source.id for source in request.source_catalog.sources)
+    set_refs = tuple(
+        ref.token
+        for ref in request.index.source_requirement_refs
+        if isinstance(request.index.term_by_ref.get(ref), SetTerm)
+    )
+    association_refs = tuple(
+        ref.token
+        for ref in request.index.association_requirement_refs
+        if isinstance(request.index.term_by_ref.get(ref), AssociationTerm)
+    )
+    return output.SourceRealizationOutput.schema(
         {
-            test_id: provider_output.PopulationTestBasisOutput.schema(
+            "set_bindings": _closed_object(
                 {
-                    "test_question": _handle_schema(),
-                    "role_scoped_test_question": _handle_schema(),
+                    ref: _exact_realizations(
+                        branch_ids,
+                        output.SetRealizationOutput.schema(
+                            {
+                                "branch_id": {"enum": list(branch_ids)},
+                                "mapping_basis": _text(),
+                                "rows_ref": {
+                                    "enum": list(request.row_references_for_set(ref))
+                                },
+                            }
+                        ),
+                    )
+                    for ref in set_refs
                 }
-            )
-            for test_id in membership_test_ids
-        },
-        required=membership_test_ids,
-    )
-
-
-def _finite_choice_review_schema(
-    choices: tuple[str, ...],
-    *,
-    membership_test_ids: tuple[str, ...],
-    normal_instance_test_ids: tuple[str, ...],
-) -> dict[str, object]:
-    return provider_output.FiniteChoiceReviewOutput.schema(
-        {
-            "choice_option_id": {"enum": list(choices)},
-            "choice_domain_meaning": _handle_schema(),
-            "choice_inclusion_basis": _handle_schema(),
-            "choice_inclusion": {"enum": ["INCLUDE", "EXCLUDE"]},
-            "population_test_results": _population_test_results_schema(
-                membership_test_ids,
-                normal_instance_test_ids=normal_instance_test_ids,
             ),
-        }
-    )
-
-
-def _population_test_results_schema(
-    membership_test_ids: tuple[str, ...],
-    *,
-    normal_instance_test_ids: tuple[str, ...],
-) -> dict[str, object]:
-    return _strict_object(
-        {
-            test_id: _population_test_result_schema(
-                test_id,
-                is_normal_instance=test_id in normal_instance_test_ids,
-            )
-            for test_id in membership_test_ids
-        },
-        required=membership_test_ids,
-    )
-
-
-def _population_test_result_schema(
-    test_id: str,
-    *,
-    is_normal_instance: bool,
-) -> dict[str, object]:
-    if is_normal_instance:
-        return _normal_instance_test_result_schema()
-    return provider_output.StandardPopulationTestResultOutput.schema(
-        {
-            "test_basis": _handle_schema(),
-            "population_consequence": _handle_schema(),
-            "test_effect": _POPULATION_TEST_EFFECT_SCHEMA,
-        }
-    )
-
-
-def _normal_instance_test_result_schema() -> dict[str, object]:
-    return provider_output.NormalInstanceTestResultOutput.schema(
-        {
-            "role_match_basis": _handle_schema(),
-            "population_consequence": _handle_schema(),
-            "disposition": provider_output.NormalInstanceDispositionOutput.schema(
+            "fact_bindings": _closed_object(
                 {
-                    "matched_excluded_role": _normal_instance_role_schema(),
-                    "test_effect": _POPULATION_TEST_EFFECT_SCHEMA,
+                    ref: _fact_realizations_schema(
+                        request,
+                        fact_ref=ref,
+                        branch_ids=branch_ids,
+                        source_refs=source_refs,
+                    )
+                    for ref in request.model_authored_fact_refs
+                }
+            ),
+            "association_bindings": _closed_object(
+                {
+                    ref: _exact_realizations(
+                        branch_ids,
+                        _association_realization_schema(
+                            request=request,
+                            association_ref=ref,
+                            branch_ids=branch_ids,
+                        ),
+                    )
+                    for ref in association_refs
                 }
             ),
         }
     )
 
-def _normal_instance_role_schema() -> dict[str, object]:
-    return {
-        "enum": [
-            *(role.value for role in NormalInstanceExcludedStateRole),
-            NORMAL_INSTANCE_NO_EXCLUDED_ROLE,
-            NORMAL_INSTANCE_UNKNOWN_EXCLUDED_ROLE,
-        ],
-    }
 
 
-def _answer_population_schema(
-    population_binding_ids: tuple[str, ...],
-    *,
-    test_ids: tuple[str, ...],
+def build_semantic_source_binding_schema(
+    request: SemanticSourceBindingRequest,
 ) -> dict[str, object]:
-    population_binding_id_schema: dict[str, object] = _handle_schema()
-    if population_binding_ids:
-        population_binding_id_schema = {
-            "type": "string",
-            "enum": list(population_binding_ids),
-        }
-    return provider_output.AnswerPopulationOutput.schema(
+    """Bind inputs and population controls to an already realized source graph."""
+    schema = output.SemanticSourceBindingOutput.schema(
         {
-            "population_binding_id": population_binding_id_schema,
-            "intent_text": _handle_schema(),
-            "match_basis_explanation": _handle_schema(),
-            "population_test_results": population_test_results_schema(test_ids),
+            "resolved_input_applications": _resolved_input_applications_schema(request),
+            "finite_choice_applications": _finite_choice_applications_schema(request),
+            "choice_requirement_applications": _choice_requirement_applications_schema(
+                request
+            ),
         }
     )
+    return without_unreferenced_definitions(schema)
 
 
-def _fulfillment_decisions_schema(
-    fulfillment_support_set_ids_by_answer_output: dict[str, tuple[str, ...]],
+def _association_realization_schema(
     *,
-    required_answer_output_ids: tuple[str, ...],
+    request: SemanticSourceBindingRequest,
+    association_ref: str,
+    branch_ids: tuple[str, ...],
 ) -> dict[str, object]:
-    properties = {
-        answer_output_id: _fulfillment_decision_item_schema(support_set_ids)
-        for answer_output_id, support_set_ids in (
-            fulfillment_support_set_ids_by_answer_output.items()
+    choices = tuple(
+        dict.fromkeys(
+            (choice.realization_ref, choice.reference_from_set_ref)
+            for choice in association_choices(request, association_ref)
         )
+    )
+    variants = []
+    for evidence, orientation in choices:
+        variant = output.AssociationRealizationOutput.schema(
+            {
+                "branch_id": {"enum": list(branch_ids)},
+                "mapping_basis": _text(),
+                "realization_ref": {"enum": [evidence]},
+                "reference_from_set_ref": {"enum": [orientation]},
+            }
+        )
+        if orientation is not None:
+            variant["required"] = [
+                "branch_id",
+                "mapping_basis",
+                "realization_ref",
+                "reference_from_set_ref",
+            ]
+        variants.append(variant)
+    if not variants:
+        raise ValueError("association has no structurally compatible row realization")
+    return variants[0] if len(variants) == 1 else {"oneOf": variants}
+
+
+def _fact_realizations_schema(
+    request: SemanticSourceBindingRequest,
+    *,
+    fact_ref: str,
+    branch_ids: tuple[str, ...],
+    source_refs: tuple[str, ...],
+) -> dict[str, object]:
+    observed = fact_ref in {item.token for item in request.index.observed_fact_refs}
+    if not request.returned_field_refs_for_fact(fact_ref):
+        if observed:
+            raise ValueError("observed fact has no returned-field realization")
+        return {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 0,
+            "items": _closed_object({}),
+        }
+    return (_exact_realizations if observed else _optional_realizations)(
+        branch_ids,
+        _fact_realization_schema(
+            request, fact_ref=fact_ref, branch_ids=branch_ids, source_refs=source_refs
+        ),
+    )
+
+
+def _fact_realization_schema(
+    request: SemanticSourceBindingRequest,
+    *,
+    fact_ref: str,
+    branch_ids: tuple[str, ...],
+    source_refs: tuple[str, ...],
+) -> dict[str, object]:
+    field_refs_for_sources = request.returned_field_refs_for_fact(fact_ref)
+    common = {
+        "branch_id": {"enum": list(branch_ids)},
+        "mapping_basis": _text(),
     }
-    schema: dict[str, object] = {
+    return output.ReturnedFactRealizationOutput.schema(
+        {
+            **common,
+            "field_ref": {"type": "string", "enum": list(field_refs_for_sources)},
+        }
+    )
+
+
+def _resolved_input_applications_schema(
+    request: SemanticSourceBindingRequest,
+) -> dict[str, object]:
+    return _closed_object(
+        {
+            branch.branch_id: _branch_resolved_input_applications_schema(
+                request,
+                branch_id=branch.branch_id,
+            )
+            for branch in request.strategy.branches
+        }
+    )
+
+
+def unapplied_input_application_schema(
+    owner_ref: str, value_ref: str
+) -> dict[str, object]:
+    return output.UnappliedInputOutput.schema(
+        {
+            "kind": {"enum": ["no_request_application"]},
+            "mapping_basis": _text(),
+            "owner_ref": {"enum": [owner_ref]},
+            "value_ref": {"enum": [value_ref]},
+        }
+    )
+
+
+def _branch_resolved_input_applications_schema(
+    request: SemanticSourceBindingRequest,
+    *,
+    branch_id: str,
+) -> dict[str, object]:
+    variants = [
+        output.ResolvedInputApplicationOutput.schema(
+            {
+                "kind": {"enum": ["request_application"]},
+                "mapping_basis": _text(),
+                "owner_ref": {"enum": [owner_ref]},
+                "value_ref": {"enum": [option.value_ref]},
+                "value_component": {"enum": [_projection_component(option)]},
+                "target_ref": {"enum": [option.target_ref]},
+            }
+        )
+        for owner_ref in request.invocation_application_owner_refs
+        for option in request.direct_value_options_for_owner(
+            owner_ref,
+            branch_id=branch_id,
+        )
+    ]
+    variants.extend(
+        unapplied_input_application_schema(owner_ref, value_ref)
+        for owner_ref in request.invocation_application_owner_refs
+        for value_ref in request.unapplied_input_value_refs_for_owner(
+            owner_ref, branch_id=branch_id
+        )
+    )
+    # Multiple response row paths can expose the same endpoint parameter.
+    # The authored value/target projection is still one legal choice.
+    variants = list({repr(variant): variant for variant in variants}.values())
+    item_schema = (
+        variants[0]
+        if len(variants) == 1
+        else {"oneOf": variants}
+        if variants
+        else _closed_object({})
+    )
+    return {
+        "type": "array",
+        "items": item_schema,
+        "maxItems": len(variants),
+    }
+
+
+def _projection_component(option: InvocationProjectionOption) -> str:
+    return option.component_ref or option.projection.value
+
+
+def _finite_choice_applications_schema(
+    request: SemanticSourceBindingRequest,
+) -> dict[str, object]:
+    return _closed_object(
+        {
+            branch.branch_id: _branch_finite_choice_applications_schema(
+                request,
+                branch_id=branch.branch_id,
+            )
+            for branch in request.strategy.branches
+        }
+    )
+
+
+def _branch_finite_choice_applications_schema(
+    request: SemanticSourceBindingRequest,
+    *,
+    branch_id: str,
+) -> dict[str, object]:
+    return _closed_object(
+        {
+            owner_ref: (
+                {
+                    "anyOf": [
+                        _finite_choice_owner_application_schema(options),
+                        {"type": "null"},
+                    ]
+                }
+                if owner_ref
+                in {item.requirement_ref for item in request.index.boolean_requirements}
+                else _finite_choice_owner_application_schema(options)
+            )
+            for owner_ref in request.invocation_application_owner_refs
+            if (
+                options := request.finite_choice_options_for_owner(
+                    owner_ref,
+                    branch_id=branch_id,
+                )
+            )
+        }
+    )
+
+
+def _finite_choice_owner_application_schema(options) -> dict[str, object]:
+    variants = [
+        output.FiniteChoiceApplicationOutput.schema(
+            {
+                "application_basis": _text(),
+                "surface_ref": {"enum": [surface.surface_ref]},
+                "selected_choice_values": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": len(choices),
+                    "items": {"enum": [choice.value for choice in choices]},
+                },
+            }
+        )
+        for surface, choices in options
+    ]
+    return variants[0] if len(variants) == 1 else {"oneOf": variants}
+
+
+def _choice_requirement_applications_schema(request: SemanticSourceBindingRequest):
+    from fervis.lookup.source_binding.choice_requirements import (
+        requirement_choice_surfaces,
+    )
+
+    return _closed_object(
+        {
+            branch.branch_id: _closed_object(
+                {
+                    surface.surface_ref: _closed_object(
+                        {
+                            choice.value: output.ChoiceRequirementApplicationOutput.schema(
+                                {
+                                    "mapping_basis": _text(),
+                                    "selected_by_requirements": {
+                                        "type": "array",
+                                        "uniqueItems": True,
+                                        "maxItems": len(refs),
+                                        "items": {"enum": list(refs)}
+                                        if refs
+                                        else {"type": "string"},
+                                    },
+                                }
+                            )
+                            for choice in surface.values
+                            for refs in (
+                                request.explicit_subject_requirement_refs(
+                                    choice, branch_id=branch.branch_id
+                                ),
+                            )
+                        }
+                    )
+                    for surface in requirement_choice_surfaces(
+                        request, branch.branch_id
+                    )
+                }
+            )
+            for branch in request.strategy.branches
+        }
+    )
+
+
+def _exact_realizations(
+    branch_ids: tuple[str, ...], item_schema: dict[str, object]
+) -> dict[str, object]:
+    return {
+        "type": "array",
+        "minItems": len(branch_ids),
+        "maxItems": len(branch_ids),
+        "items": item_schema,
+    }
+
+
+def _optional_realizations(
+    branch_ids: tuple[str, ...], item_schema: dict[str, object]
+) -> dict[str, object]:
+    return {
+        "type": "array",
+        "minItems": 0,
+        "maxItems": len(branch_ids),
+        "items": item_schema,
+    }
+
+
+def _bounded_array(values: tuple[str, ...], *, min_items: int = 0) -> dict[str, object]:
+    return {
+        "type": "array",
+        "minItems": min_items,
+        "maxItems": len(values),
+        "items": {"type": "string", "enum": list(values)},
+    }
+
+
+def _closed_object(properties: dict[str, object]) -> dict[str, object]:
+    return {
         "type": "object",
         "additionalProperties": False,
         "properties": properties,
-        "required": [
-            output_id
-            for output_id in required_answer_output_ids
-            if output_id in properties
-        ],
+        "required": list(properties),
     }
-    return schema
 
 
-def _fulfillment_decision_item_schema(
-    fulfillment_choice_ids: tuple[str, ...],
-) -> dict[str, object]:
-    choice_id_schema = _handle_schema()
-    if fulfillment_choice_ids:
-        choice_id_schema = {
-            "type": "string",
-            "enum": list(fulfillment_choice_ids),
-        }
-    return provider_output.FulfillmentDecisionOutput.schema(
-        {
-            "match_basis_explanation": {"type": "string", "minLength": 1},
-            "fulfillment_choice_id": choice_id_schema,
-        }
-    )
-
-
-def _metric_fit_bases_schema(
-    metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
-) -> dict[str, object]:
-    return _metric_reviews_schema(
-        metric_evidence_ids_by_requested_fact,
-        item_schema=provider_output.MetricFitBasisOutput.schema(
-            {
-                "metric_meaning": {"type": "string", "minLength": 1},
-                "fit_basis": {"type": "string", "minLength": 1},
-            }
-        ),
-    )
-
-
-def _fit_basis_interpretations_schema(
-    metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
-) -> dict[str, object]:
-    return _metric_reviews_schema(
-        metric_evidence_ids_by_requested_fact,
-        item_schema=provider_output.FitBasisInterpretationOutput.schema(
-            {
-                "interpretation": {
-                    "type": "string",
-                    "enum": list(METRIC_FIT_DECISIONS),
-                },
-            }
-        ),
-    )
-
-
-def _metric_reviews_schema(
-    metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
-    *,
-    item_schema: dict[str, object],
-) -> dict[str, object]:
-    properties = {
-        requested_fact_id: _strict_object(
-            {
-                metric_evidence_id: item_schema
-                for metric_evidence_id in metric_evidence_ids
-            },
-            required=metric_evidence_ids,
-        )
-        for requested_fact_id, metric_evidence_ids in (
-            metric_evidence_ids_by_requested_fact.items()
-        )
-        if metric_evidence_ids
-    }
-    if not properties:
-        return _empty_object_schema()
-    return _strict_object(properties, required=tuple(properties))
-
-
-def _param_decisions_schema(
-    param_decision_ids_by_param: dict[str, tuple[str, ...]],
-    *,
-    required_param_ids: tuple[str, ...],
-) -> dict[str, object]:
-    if not param_decision_ids_by_param:
-        return _empty_object_schema()
-    param_ids = tuple(param_decision_ids_by_param)
-    return _strict_object(
-        {
-            param_id: _param_decision_item_schema(
-                param_decision_ids_by_param[param_id],
-            )
-            for param_id in param_ids
-        },
-        required=tuple(
-            dict.fromkeys(
-                param_id for param_id in required_param_ids if param_id in param_ids
-            )
-        ),
-    )
-
-
-def _row_predicate_reviews_schema(
-    row_predicate_values: dict[str, tuple[str, ...]],
-    *,
-    test_ids_by_predicate: dict[str, tuple[str, ...]],
-) -> dict[str, object]:
-    reviewed_values = {
-        predicate_id: values
-        for predicate_id, values in row_predicate_values.items()
-        if test_ids_by_predicate.get(predicate_id)
-    }
-    if not reviewed_values:
-        return _empty_object_schema()
-    return _strict_object(
-        {
-            predicate_id: _row_predicate_review_schema(
-                values,
-                membership_test_ids=test_ids_by_predicate[predicate_id],
-            )
-            for predicate_id, values in reviewed_values.items()
-        },
-        required=tuple(reviewed_values),
-    )
-
-
-def _row_predicate_review_schema(
-    values: tuple[str, ...],
-    *,
-    membership_test_ids: tuple[str, ...],
-) -> dict[str, object]:
-    return provider_output.RowPredicateReviewOutput.schema(
-        {
-            "choice_reviews": {
-                "type": "array",
-                "minItems": len(values),
-                "maxItems": len(values),
-                "items": _row_predicate_choice_review_schema(
-                    values,
-                    membership_test_ids=membership_test_ids,
-                ),
-            },
-        }
-    )
-
-
-def _row_predicate_choice_review_schema(
-    values: tuple[str, ...],
-    *,
-    membership_test_ids: tuple[str, ...],
-) -> dict[str, object]:
-    return provider_output.RowPredicateChoiceReviewOutput.schema(
-        {
-            "choice_option_id": {"enum": list(values)},
-            "choice_domain_meaning": _handle_schema(),
-            "population_test_results": _row_predicate_population_test_results_schema(
-                membership_test_ids,
-            ),
-        }
-    )
-
-
-def _row_predicate_population_test_results_schema(
-    membership_test_ids: tuple[str, ...],
-) -> dict[str, object]:
-    return _strict_object(
-        {
-            test_id: _row_predicate_population_test_result_schema(test_id)
-            for test_id in membership_test_ids
-        },
-        required=membership_test_ids,
-    )
-
-
-def _row_predicate_population_test_result_schema(test_id: str) -> dict[str, object]:
-    return provider_output.RowPredicatePopulationTestResultOutput.schema(
-        {
-            "test_id": {"enum": [test_id]},
-            "test_question": _handle_schema(),
-            "role_scoped_test_question": _handle_schema(),
-            "because": _handle_schema(),
-            "test_effect": _POPULATION_TEST_EFFECT_SCHEMA,
-        }
-    )
-
-
-def _empty_object_schema() -> dict[str, object]:
+def _nullable_enum(values: tuple[str, ...]) -> dict[str, object]:
     return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {},
+        "oneOf": [
+            *(({"type": "string", "enum": list(values)},) if values else ()),
+            {"type": "null"},
+        ]
     }
 
 
-def _param_decision_item_schema(
-    param_decision_ids: tuple[str, ...],
-) -> dict[str, object]:
-    param_decision_id_schema: dict[str, object] = {"type": "string"}
-    if param_decision_ids:
-        param_decision_id_schema["enum"] = list(param_decision_ids)
-    return provider_output.ParamDecisionOutput.schema(
-        {
-            "population_intent": _handle_schema(),
-            "match_basis_explanation": _handle_schema(),
-            "param_decision_id": param_decision_id_schema,
-        }
-    )
+def _text() -> dict[str, object]:
+    return {"type": "string", "minLength": 1}
 
 
-def _impossible_schema(
-    *,
-    allowed_bases: tuple[str, ...] = (
-        BlockedFactBasis.CATALOG_ACCESS.value,
-        BlockedFactBasis.POLICY_ACCESS.value,
-    ),
-    requested_fact_ids: tuple[str, ...] = (),
-) -> dict[str, object]:
-    requested_fact_id_schema = _handle_schema()
-    if requested_fact_ids:
-        requested_fact_id_schema = {"enum": list(requested_fact_ids)}
-    blocked_fact_schema = _strict_object(
-        {
-            "requested_fact_id": requested_fact_id_schema,
-            "basis": {"enum": list(allowed_bases)},
-            "evidence_refs": {
-                "type": "array",
-                "minItems": 1,
-                "items": _handle_schema(),
-            },
-            "reviewed_read_ids": {
-                "type": "array",
-                "items": _handle_schema(),
-            },
-            "nearest_fields": {
-                "type": "array",
-                "items": _strict_object(
-                    {
-                        "read_id": _handle_schema(),
-                        "field_id": _handle_schema(),
-                    },
-                    required=("read_id", "field_id"),
-                ),
-            },
-            "explanation": {"type": "string"},
-        },
-        required=("requested_fact_id", "basis", "evidence_refs"),
-    )
-    return _strict_object(
-        {
-            "kind": {"enum": [PlanOutcomeKind.IMPOSSIBLE.value]},
-            "blocked_facts": {
-                "type": "array",
-                "minItems": 1,
-                "items": blocked_fact_schema,
-            },
-        },
-        required=("kind", "blocked_facts"),
-    )
-
-
-def _clarification_schema(
-    *,
-    required_catalog_input_ids: tuple[str, ...],
-    required_catalog_choice_input_ids: tuple[str, ...],
-) -> dict[str, object] | None:
-    variants: list[dict[str, object]] = []
-    if required_catalog_input_ids:
-        variants.append(
-            _strict_object(
-                {
-                    "kind": {
-                        "enum": [MissingCatalogInputKind.REQUIRED_INPUT.value],
-                    },
-                    "id": _handle_schema(),
-                    "requested_fact_id": _handle_schema(),
-                    "required_catalog_input_id": {
-                        "enum": list(required_catalog_input_ids),
-                    },
-                },
-                required=(
-                    "kind",
-                    "id",
-                    "requested_fact_id",
-                    "required_catalog_input_id",
-                ),
-            )
-        )
-    if required_catalog_choice_input_ids:
-        variants.append(
-            _strict_object(
-                {
-                    "kind": {
-                        "enum": [MissingCatalogInputKind.CHOICE_INPUT.value],
-                    },
-                    "id": _handle_schema(),
-                    "requested_fact_id": _handle_schema(),
-                    "required_catalog_choice_input_id": {
-                        "enum": list(required_catalog_choice_input_ids),
-                    },
-                },
-                required=(
-                    "kind",
-                    "id",
-                    "requested_fact_id",
-                    "required_catalog_choice_input_id",
-                ),
-            )
-        )
-    if not variants:
-        return None
-    return _strict_object(
-        {
-            "kind": {"enum": ["needs_clarification"]},
-            "missing_catalog_inputs": {
-                "type": "array",
-                "minItems": 1,
-                "items": {"oneOf": variants},
-            },
-        },
-        required=("kind", "missing_catalog_inputs"),
-    )
+__all__ = [
+    "build_semantic_source_binding_schema",
+    "build_semantic_source_realization_schema",
+    "build_unavailable_source_realization_schema",
+]

@@ -1,0 +1,13 @@
+id: operator_signatures_are_closed
+description: Dividing like measures produces one dimensionless ratio through the shared signature registry.
+kind: algorithm
+algorithm: semantic.kernel
+input:
+  mode: infer_operator
+  operator: divide
+  operands:
+    - {kind: decimal, measure: unitless}
+    - {kind: decimal, measure: unitless}
+expect:
+  result_contains:
+    result_type: {kind: decimal, measure: ratio}

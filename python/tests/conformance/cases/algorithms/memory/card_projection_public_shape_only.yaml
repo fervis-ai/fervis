@@ -5,24 +5,13 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
-  current_question: How about those sales?
   conversation_context:
     factArtifacts:
       - artifactId: turn_1
         outcome: answered
         sourceQuestion: How much money did we make yesterday?
         sourceAnswer: We made 100.
-        provenance:
-          question_contract:
-            question_inputs: []
-            answer_requests:
-              - id: fact_1
-                answer_fact: money we made yesterday
-                answer_outputs:
-                  - id: answer_1
-                    description: total sales amount
-                    role: ANSWER_VALUE
-                used_question_inputs: []
+        provenance: {}
         addresses:
           - address: relation.answer_rows
             kind: relation
@@ -49,7 +38,7 @@ input:
 expect:
   result_contains:
     public_card_keys:
-      - [card_id, details, display, kind]
+      - [card_id, display, kind]
     excludes_from:
       public_cards:
         memory_id: true

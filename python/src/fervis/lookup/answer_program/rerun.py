@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing_extensions import assert_never
 
-from fervis.lookup.answer_program.codec import answer_program_id
+from fervis.lookup.contract_codec import answer_program_id
 from fervis.lookup.answer_program.inputs import program_value_expressions
 from fervis.lookup.answer_program.model import AnswerProgram
 from fervis.lookup.answer_program.persistence import (

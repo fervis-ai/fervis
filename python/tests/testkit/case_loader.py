@@ -108,21 +108,8 @@ _TURN_CONTRACT_ALGORITHMS = {
     "conversation_resolution.compile",
     "conversation_resolution.parse",
     "conversation_resolution.schema",
-    "question_contract.parse",
-    "question_contract.schema",
-    "question_contract.schema_validate",
-    "question_contract.prompt",
-    "query_enrichment.parse",
-    "query_enrichment.schema",
-    "query_enrichment.prompt",
-    "read_eligibility.parse",
-    "read_eligibility.schema_validate",
-    "read_eligibility.prompt",
-    "read_eligibility.cards",
-    "source_binding.fulfillment_support",
-    "source_binding.metric_fit_surface",
-    "source_binding.row_predicates",
-    "planning.fact_plan_schema",
+    "semantic.query_enrichment",
+    "semantic.question_contract",
 }
 
 

@@ -5,24 +5,12 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
-  current_question: How much did she make yesterday?
   conversation_context:
     factArtifacts:
       - artifactId: turn_sales_total
         outcome: answered
         sourceQuestion: What was the total sales amount for products Staff One sold today?
         sourceAnswer: "2468"
-        provenance:
-          question_contract:
-            question_inputs: []
-            answer_requests:
-              - id: fact_1
-                answer_fact: products Staff One sold today
-                answer_outputs:
-                  - id: answer_1
-                    description: total sales amount
-                    role: ANSWER_VALUE
-                used_question_inputs: []
         addresses:
           - address: value.total_sales
             kind: value

@@ -50,12 +50,20 @@ from fervis.lookup.answer_program.result_projection import (
     ResultProjection,
 )
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
-from fervis.lookup.question_contract import (
+from fervis.lookup.question_contract.model import (
+    AllResults,
+    FactTerm,
+    InstanceInterpretation,
     QuestionContract,
     RequestedFact,
-    RequestedFactAnswerExpression,
-    RequestedFactAnswerExpressionFamily,
-    RequestedFactAnswerOutput,
+    RequestedOutput,
+    SetTerm,
+    Subject,
+)
+from fervis.lookup.semantic_types import (
+    SourceOrigin,
+    SourceOriginKind,
+    TextType,
 )
 from fervis.lookup.answer_rendering import RenderedFact
 from fervis.lookup.lineage.results import (
@@ -116,12 +124,6 @@ def test_answered_lineage_records_only_fulfilled_answer_outputs() -> None:
     answered = recorder.answered_results[0]
     assert [output.output_key for output in answered.outputs] == ["answer_1"]
     assert answered.outputs[0].proof_node_refs_json == ["answer_output:fact_1:answer_1"]
-    assert answered.requested_facts[0].answer_requests_json[
-        "clarification_lineage_refs"
-    ] == [
-        "clarification_response:response_1",
-        "clarification_response:response_2",
-    ]
 
 
 def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
@@ -181,7 +183,7 @@ def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
         {
             "address": "value.answer_1",
             "kind": "value",
-                "value": {"type": "decimal", "value": 14},
+            "value": {"type": "decimal", "value": 14},
             "derivation": {
                 "source": "operation_output",
                 "answer_output_ids": ["answer_1"],
@@ -235,11 +237,7 @@ def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
                 "kind": "entity",
                 "entity_kind": "staff",
                 "key_id": "primary_key",
-                "components": {
-                    "id": {
-                        "$uuid": "93939393-0000-0000-0003-000000000003"
-                    }
-                },
+                "components": {"id": {"$uuid": "93939393-0000-0000-0003-000000000003"}},
             },
         ),
     ),
@@ -325,37 +323,37 @@ def test_answered_lineage_links_each_output_to_its_requested_fact() -> None:
         ),
         rendered=RenderedFact(
             kind=OutcomeKind.ANSWER,
-            rows=({"answer_1": "London", "answer_2": "14"},),
+            rows=({"fact_1.output_1": "London", "fact_2.output_1": "14"},),
         ),
         answer="London\n14",
         question_contract=_question_contract(
             {
-                "fact_1": "answer_1",
-                "fact_2": "answer_2",
+                "fact_1": "output_1",
+                "fact_2": "output_1",
             }
         ),
         question_contract_step_id="step_contract",
         compile_step_id="step_compile",
         execute_step_id="step_execute",
         render_step_id="step_render",
-        proof_graph=_proof_graph("answer_1", "answer_2"),
+        proof_graph=_proof_graph("output_1", "output_1"),
         answer_plan=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="fact_1",
-                    answer_output_id="answer_1",
-                    result_output_id="answer_1",
+                    answer_output_id="output_1",
+                    result_output_id="fact_1.output_1",
                 ),
                 FactFulfillment(
                     requested_fact_id="fact_2",
-                    answer_output_id="answer_2",
-                    result_output_id="answer_2",
+                    answer_output_id="output_1",
+                    result_output_id="fact_2.output_1",
                 ),
             )
         ),
         proof_node_refs_by_result_output_id={
-            "answer_1": ("answer_output:fact_1:answer_1",),
-            "answer_2": ("answer_output:fact_2:answer_2",),
+            "fact_1.output_1": ("answer_output:fact_1:output_1",),
+            "fact_2.output_1": ("answer_output:fact_2:output_1",),
         },
     )
 
@@ -378,8 +376,12 @@ def test_answered_lineage_links_each_output_to_its_requested_fact() -> None:
         for fact in answered.fact_results
     }
     assert output_fact_results == {
-        "answer_1": fact_result_by_requested_fact[requested_fact_id_by_key["fact_1"]],
-        "answer_2": fact_result_by_requested_fact[requested_fact_id_by_key["fact_2"]],
+        "fact_1.output_1": fact_result_by_requested_fact[
+            requested_fact_id_by_key["fact_1"]
+        ],
+        "fact_2.output_1": fact_result_by_requested_fact[
+            requested_fact_id_by_key["fact_2"]
+        ],
     }
     assert evidence_by_fact == {
         "fact_1": ["source_read:read_1"],
@@ -458,22 +460,17 @@ def test_answered_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
     assert {
         fact_id: (
             [address["address"] for address in payload["addresses"]],
-            [
-                item["id"]
-                for item in payload["provenance"]["question_contract"][
-                    "answer_requests"
-                ]
-            ],
+            payload["provenance"]["requestedFactKey"],
         )
         for fact_id, payload in artifacts_by_fact.items()
     } == {
         "fact_1": (
             ["value.answer_1"],
-            ["fact_1"],
+            "fact_1",
         ),
         "fact_2": (
             ["value.answer_2"],
-            ["fact_2"],
+            "fact_2",
         ),
     }
     known_input_artifact = _single_memory_artifact(
@@ -656,16 +653,16 @@ def test_clarification_wait_records_each_structured_request() -> None:
     )
 
     assert recorder.terminal_results == []
-    assert [item.payload_json["requestedFactId"] for item in recorder.clarifications] == [
+    assert [
+        item.payload_json["requestedFactId"] for item in recorder.clarifications
+    ] == [
         "fact_1",
         "fact_2",
     ]
     assert {item.step_id for item in recorder.clarifications} == {"step_render"}
 
 
-def test_pre_contract_clarification_is_a_run_step_wait() -> (
-    None
-):
+def test_pre_contract_clarification_is_a_run_step_wait() -> None:
     recorder = _Recorder()
     record_lookup_result_lineage(
         request=_request("run_pre_contract_clarification"),
@@ -1018,31 +1015,58 @@ def _question_contract(
     *,
     clarification_lineage_refs: tuple[str, ...] = (),
 ) -> QuestionContract:
+    origin = SourceOrigin(
+        source=SourceOriginKind.QUESTION_CONTEXT,
+        meaning="requested fact",
+    )
     return QuestionContract(
+        inputs=(),
         requested_facts=tuple(
             RequestedFact(
                 id=fact_id,
-                description="requested fact",
-                answer_expression=RequestedFactAnswerExpression(
-                    family=RequestedFactAnswerExpressionFamily.SCALAR_VALUE,
+                origin=origin,
+                sets=(SetTerm(id="s1", origin=origin),),
+                associations=(),
+                facts=(
+                    FactTerm(
+                        id="f1",
+                        owner_ref="s1",
+                        value_type=TextType(),
+                        origin=origin,
+                    ),
                 ),
-                answer_outputs=(
-                    RequestedFactAnswerOutput(id=answer_output_id, role="ANSWER_VALUE"),
+                expressions=(),
+                subject=Subject(
+                    set_ref="s1",
+                    instance_interpretation=(
+                        InstanceInterpretation.RESOURCE_POPULATION
+                    ),
                 ),
+                qualification_ref=None,
+                grouping_refs=(),
+                outputs=(
+                    RequestedOutput(
+                        id=answer_output_id,
+                        expression_ref="f1",
+                        origin=origin,
+                    ),
+                ),
+                ordering=(),
+                selection=AllResults(),
+                distinct_by=(),
             )
             for fact_id, answer_output_id in answer_output_id_by_fact_id.items()
         ),
-        clarification_lineage_refs=clarification_lineage_refs,
     )
 
 
 def _proof_graph(*answer_output_ids: str) -> ExecutionProofGraph:
     answer_output_nodes = tuple(
         ExecutionProofNode(
-            id=f"answer_output:fact_{index}:answer_{index}",
+            id=f"answer_output:fact_{index}:{answer_output_id}",
             kind=ProofNodeKind.ANSWER_OUTPUT,
         )
-        for index, _ in enumerate(answer_output_ids, start=1)
+        for index, answer_output_id in enumerate(answer_output_ids, start=1)
     )
     relation_nodes = tuple(
         ExecutionProofNode(
@@ -1057,9 +1081,9 @@ def _proof_graph(*answer_output_ids: str) -> ExecutionProofGraph:
         edges=tuple(
             ExecutionProofEdge(
                 source=f"relation:fact_{index}",
-                target=f"answer_output:fact_{index}:answer_{index}",
+                target=f"answer_output:fact_{index}:{answer_output_id}",
                 role=ProofEdgeRole.PRODUCES,
             )
-            for index, _ in enumerate(answer_output_ids, start=1)
+            for index, answer_output_id in enumerate(answer_output_ids, start=1)
         ),
     )

@@ -29,7 +29,6 @@ from fervis.lookup.answer_program.operations import (
     JoinKey,
     JoinSpec,
     OrderSpec,
-    Predicate,
     NamedExpression,
     ProjectSpec,
     ProjectToKeySpec,
@@ -39,7 +38,7 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
-from fervis.lookup.answer_program.expressions import FieldRef
+from fervis.lookup.answer_program.expressions import Expression, FieldRef
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
 )
@@ -52,9 +51,11 @@ from fervis.lookup.outcomes.operation_semantics import (
 from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.plan_execution.declared_values import (
     declared_equal,
+    declared_key,
     declared_number,
     declared_order_key,
 )
+from .expression_evaluator import ExpressionEnvironment, evaluate_condition
 
 
 def _role_relation(
@@ -204,20 +205,9 @@ def _operation_relation(
     )
 
 
-def _project_grain(
-    input_relation: RelationRows,
-    fields: tuple[NamedExpression, ...],
-) -> tuple[str, ...]:
-    if not input_relation.grain_keys:
-        return ()
-    projections = {
-        field.expression.field_id: field.output_field
-        for field in fields
-        if isinstance(field.expression, FieldRef)
-    }
-    if not all(field in projections for field in input_relation.grain_keys):
-        return ()
-    return tuple(projections[field] for field in input_relation.grain_keys)
+def _project_grain(relation: RelationRows, outputs: tuple[NamedExpression, ...]) -> tuple[str, ...]:
+    from fervis.lookup.plan_execution.expression_schema import projected_grain
+    return projected_grain(relation.grain_keys, outputs)
 
 
 def _operation_proof_refs(
@@ -262,16 +252,23 @@ def _operation_scalar_refs(operation: ExecutableOperation) -> tuple[str, ...]:
             *(expression_input_id(item) for item in references.constants),
         )
     if isinstance(spec, FilterSpec):
-        return _predicate_scalar_refs(spec.predicate)
+        return _expression_scalar_refs(spec.condition)
     if isinstance(spec, UniversalConditionSpec):
-        return _predicate_scalar_refs(spec.predicate)
+        return _expression_scalar_refs(spec.condition)
+    if isinstance(spec, AggregateSpec):
+        return tuple(
+            dict.fromkeys(
+                scalar_ref
+                for aggregation in spec.aggregations
+                if aggregation.filter is not None
+                for scalar_ref in _expression_scalar_refs(aggregation.filter)
+            )
+        )
     return ()
 
 
-def _predicate_scalar_refs(predicate: Predicate) -> tuple[str, ...]:
-    if predicate.right is None:
-        return ()
-    references = expression_references(predicate.right)
+def _expression_scalar_refs(expression: Expression) -> tuple[str, ...]:
+    references = expression_references(expression)
     return (
         *(item.output_id for item in references.outputs),
         *(expression_input_id(item) for item in references.parameters),
@@ -477,30 +474,81 @@ def _require_rows_have_fields(
                 raise RelationEngineError(f"{label} missing field {field}")
 
 
-def _raise_undefined_empty_aggregation(
-    aggregations: tuple[AggregationSpec, ...],
-) -> None:
-    for aggregation in aggregations:
-        reason = empty_aggregation_undefined_reason(aggregation.function)
-        if reason is not None:
-            raise UndefinedOperationError(
-                reason_code=reason,
-                input_refs=(aggregation.input_field,),
-            )
-
-
 def _aggregate_value(
     aggregation: AggregationSpec,
     rows: list[Row],
     field_types: dict[str, str],
+    *,
+    empty_is_null: bool = False,
+    node_outputs: dict[str, dict[str, RuntimeValue]],
+    node_output_types: dict[str, dict[str, str]],
+    scalars: dict[str, RuntimeValue],
+    scalar_types: dict[str, str],
+    environment_values: dict[str, RuntimeValue],
+    environment_types: dict[str, str],
 ) -> RuntimeValue:
+    if aggregation.filter is not None:
+        rows = [
+            row
+            for row in rows
+            if evaluate_condition(
+                aggregation.filter,
+                environment=ExpressionEnvironment(
+                    node_outputs=node_outputs, node_output_types=node_output_types,
+                    row=row,
+                    field_types=field_types,
+                    scalars=scalars,
+                    scalar_types=scalar_types,
+                environment_values=environment_values,
+                environment_types=environment_types,
+                ),
+            )
+        ]
+    if aggregation.grain_fields:
+        observations: dict[tuple[object, ...], Row] = {}
+        for row in rows:
+            identity = tuple(_field(row, field) for field in aggregation.grain_fields)
+            if any(value is None for value in identity):
+                continue
+            key = tuple(declared_key(value, field_types.get(field))
+                        for field, value in zip(aggregation.grain_fields, identity, strict=True))
+            previous = observations.get(key)
+            if previous is not None and aggregation.input_field and declared_key(
+                _field(previous, aggregation.input_field), field_types.get(aggregation.input_field)
+            ) != declared_key(_field(row, aggregation.input_field), field_types.get(aggregation.input_field)):
+                raise RelationEngineError("aggregate observation has conflicting values for one identity")
+            observations[key] = row
+        rows = list(observations.values())
     function = aggregation.function
-    if function == AggregationFunction.COUNT:
+    if function in {AggregationFunction.BOOL_ANY, AggregationFunction.BOOL_ALL}:
+        truths = [_field(row, aggregation.input_field) for row in rows]
+        if any(value is not None and not isinstance(value, bool) for value in truths):
+            raise RelationEngineError("Boolean aggregation requires Boolean values")
+        decisive = function is AggregationFunction.BOOL_ANY
+        if any(value is decisive for value in truths):
+            return decisive
+        return None if any(value is None for value in truths) else not decisive
+    if function == AggregationFunction.COUNT and not aggregation.input_field:
         return len(rows)
-    values = [_field(row, aggregation.input_field) for row in rows]
+    values = [
+        value
+        for row in rows
+        if (value := _field(row, aggregation.input_field)) is not None
+    ]
+    if aggregation.distinct_argument:
+        values = list(
+            {
+                declared_key(value, field_types.get(aggregation.input_field)): value
+                for value in values
+            }.values()
+        )
+    if function == AggregationFunction.COUNT:
+        return len(values)
     if not values:
         reason = empty_aggregation_undefined_reason(function)
         if reason is not None:
+            if empty_is_null:
+                return None
             raise UndefinedOperationError(
                 reason_code=reason,
                 input_refs=(aggregation.input_field,),
@@ -537,24 +585,6 @@ def _aggregate_value(
             else None
         )
     raise RelationEngineError(f"unsupported aggregation {function}")
-
-
-def _join_match(
-    left: Row,
-    right: Row,
-    join_keys: Iterable[JoinKey],
-    left_types: dict[str, str],
-    right_types: dict[str, str],
-) -> bool:
-    return all(
-        declared_equal(
-            _field(left, key.left),
-            left_types.get(key.left),
-            _field(right, key.right),
-            right_types.get(key.right),
-        )
-        for key in join_keys
-    )
 
 
 def _merge_rows(
@@ -641,3 +671,17 @@ class _Descending:
 
 
 __all__ = tuple(name for name in globals() if not name.startswith("__"))
+
+
+def _expression_input_proofs(operation, scalar_proofs, node_output_proofs):
+    from fervis.lookup.answer_program.operations import operation_expression_references
+    refs = []
+    for expression_refs in operation_expression_references(operation.spec):
+        for item in (*expression_refs.parameters, *expression_refs.constants):
+            refs.extend(scalar_proofs.get(expression_input_id(item), ()))
+        for item in expression_refs.outputs:
+            producer = node_output_proofs.get(item.node_id, {})
+            if item.output_id not in producer:
+                raise RelationEngineError('A derived operation input has no producer proof')
+            refs.extend(producer[item.output_id])
+    return tuple(dict.fromkeys(refs))

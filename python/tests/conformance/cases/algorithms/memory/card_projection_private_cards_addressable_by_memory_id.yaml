@@ -5,7 +5,6 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
-  current_question: What about those sales?
   conversation_context:
     factArtifacts:
       - artifactId: turn_1
@@ -32,4 +31,3 @@ expect:
         address: entity.staff.alice
       turn_1.relation.sales:
         address: relation.sales
-

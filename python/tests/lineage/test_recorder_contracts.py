@@ -227,11 +227,6 @@ def test_recorder_contract_accepts_requested_fact_memory_without_addresses() -> 
             "sourceKind": "requested_fact",
             "artifactId": "memory_requested_fact_1",
             "outcome": "answered",
-            "provenance": {
-                "question_contract": {
-                    "answer_requests": [{"id": "fact_1", "answer_fact": "store count"}]
-                }
-            },
         },
     )
 

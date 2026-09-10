@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from decimal import Decimal
-from typing import Any
+from typing import Any, Mapping
 
 from fervis.lookup.outcomes.model import (
     AnswerResult,
@@ -206,12 +206,7 @@ def _result_fields_by_relation(
     fields: dict[str, set[str]] = {}
     for relation_output in outcome.result_projection.relation_outputs:
         fields.setdefault(relation_output.relation_id, set()).update(
-            tuple(
-                component.field_id
-                for component in relation_output.entity_key.components
-            )
-            if relation_output.entity_key is not None
-            else (relation_output.field_id,)
+            relation_output.value_field_ids
         )
     return {
         relation_id: frozenset(field_refs) for relation_id, field_refs in fields.items()
@@ -257,21 +252,23 @@ def _memory_answer_values(
                 answer_output_ids=(output.id,),
             )
             continue
-        if isinstance(value, (dict, list)) or value in ("", None):
-            continue
-        field_id = output.field_id
-        existing = values.get(field_id)
-        if existing is not None:
-            values[field_id] = replace(
-                existing,
-                answer_output_ids=(*existing.answer_output_ids, output.id),
+        if output.record_fields:
+            if not isinstance(value,Mapping):
+                raise ValueError('record memory requires an object projection')
+            fields = tuple((field_id,value[name]) for name,field_id in output.record_fields.items())
+        else:
+            fields = ((output.field_id,value),)
+        for field_id, field_value in fields:
+            if isinstance(field_value, (dict,list)) or not output.record_fields and field_value in ("",None):
+                continue
+            existing = values.get(field_id)
+            if existing is not None:
+                values[field_id] = replace(existing, answer_output_ids=(*existing.answer_output_ids, output.id))
+                continue
+            values[field_id] = FactAddressValue(
+                type=_relation_field_type(relation, field_id, field_value),
+                value=field_value, answer_output_ids=(output.id,),
             )
-            continue
-        values[field_id] = FactAddressValue(
-            type=_relation_field_type(relation, field_id, value),
-            value=value,
-            answer_output_ids=(output.id,),
-        )
     return values
 
 

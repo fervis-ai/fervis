@@ -1,66 +1,23 @@
 from __future__ import annotations
 
-import importlib
-
 import json
-
-import os
-
-import subprocess
-
-import sys
-
 import threading
-
-import time
-
-from io import StringIO
-
 from pathlib import Path
 
-from types import SimpleNamespace
-
-import pytest
-
-from fervis.interfaces.agent.actions import (
-    inspect_question_action,
-    provide_clarification_action,
-)
-
-from fervis.interfaces.cli.contracts import (
-    FervisCliPorts,
-    FervisCommandKind,
-    FervisCommandResult,
-    FervisViewKind,
-)
-
-from fervis.interfaces.cli.dispatch import (
-    evaluate_fervis,
-    run_fervis,
-)
-
-from fervis.interfaces.cli.rendering import render_fervis_result
-
-from fervis.interfaces.cli.runtime_ask import RuntimeAskEventStream
+from fervis.interfaces.cli.contracts import FervisCliPorts
 from fervis.interfaces.common.admission import ConfiguredModelPolicy
-
 from fervis.lineage.enums import (
     ArtifactKind,
     ModelCallStatus,
     ModelUsageKind,
     ModelUsageUnit,
-    RunTriggerKind,
     RunStepKey,
 )
-
 from fervis.lineage.step_summary import (
     StepSummaryDetail,
     StepSummaryItem,
     step_summary_json,
 )
-
-from fervis.lineage.views.detail import LineageRenderDetail
-
 from fervis.observability.query import (
     ObservabilityArtifact,
     ObservabilityArtifactContent,
@@ -70,16 +27,12 @@ from fervis.observability.query import (
     ObservabilityRun,
     ObservabilityUsage,
 )
-
 from fervis.observability.prompt_captures import (
     ModelTurnPromptCapture,
     PromptCaptureQueryPort,
 )
-
 from fervis.questions import AskRequestLimits, AskResult
-
 from fervis.project import ProjectInspection
-
 from tests.testkit.algorithms.lineage import fixture_lineage_query
 from tests.testkit.execution_proof_graph import (
     proof_graph_payload,
@@ -305,7 +258,7 @@ def _lineage_dataset() -> dict[str, object]:
                 "produced_by_step_id": "step_source_binding",
                 "fact_key": "fact_1",
                 "description": "staff member who earned the most compensation",
-                "answer_expression_family": "ranked_groups",
+                "requested_fact_fingerprint": "fingerprint-1",
             }
         ],
         "fact_results": [
@@ -762,8 +715,8 @@ def _anthropic_model_call() -> ObservabilityModelCall:
     return ObservabilityModelCall(
         model_call_id="call_2",
         run_id="run_1",
-        step_id="step_fact_planning",
-        step_key=RunStepKey.FACT_PLANNING,
+        step_id="step_plan_selection",
+        step_key=RunStepKey.PLAN_SELECTION,
         step_sequence=3,
         call_index=1,
         provider="anthropic",
@@ -783,6 +736,3 @@ def _anthropic_model_call() -> ObservabilityModelCall:
             ),
         ),
     )
-
-
-__all__ = [name for name in globals() if not name.startswith("__")]

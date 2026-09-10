@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from dataclasses import replace
+from fervis.host_api.contracts.request_origin import origin_from_request_url
 
 from fervis.host_api.adapters.http import (
     execute_http_read,
@@ -50,7 +52,12 @@ class FlaskHostApiAdapter:
         )
 
     def capture_read_context(self, request: Any) -> ReadContextRef:
-        return capture_flask_read_context(self.auth_schema, request=request)
+        context = capture_flask_read_context(self.auth_schema, request=request)
+        if getattr(request, "host_url", None) is not None:
+            context = replace(
+                context, origin=origin_from_request_url(str(request.host_url))
+            )
+        return context
 
     def capture_delegated_credential(
         self,
@@ -92,6 +99,7 @@ class FlaskHostApiAdapter:
                 None if invocation.page_policy is None else dict(invocation.page_policy)
             ),
             principal_override=principal_override,
+            origin=authority.read_context_ref.origin,
             transport_overlay=credential_overlay_from_auth_schema(
                 schema=self.auth_schema,
                 credential=authority.delegated_credential,

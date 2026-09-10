@@ -1,0 +1,175 @@
+id: distinct_related_identity_roles_share_candidate_domain
+description: Distinct related identity predicates combine at their shared candidate
+  row without an illegal Cartesian evaluation domain.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts:
+  - How many transfers went from Account A to Account B?
+  frame_payload:
+    decision_basis: Count transfers with the supplied source and destination accounts.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+      - return_request_basis: Return the transfer count.
+        relational_shape_basis: The requested relational shape is ordinary.
+        request:
+          relational_shape: ordinary
+          result_grain_basis: The requested result grain is one_value_for_population.
+          result:
+            kind: one_value_for_population
+            population_rows:
+              instance_kind: transfer occurrences
+              origin:
+                kind: question
+            returned_meanings:
+            - meaning_ref: r1
+              meaning: transfer count
+              origin:
+                kind: question
+            result_order:
+              ordering_request_basis: The question requests no ordering.
+              ordering:
+                kind: no_ordering_requested
+              selection:
+                kind: all_results
+      supplied_values:
+        selection_limits: []
+        operands:
+        - meaning: source account
+          denotation_basis: Account A identifies the source account.
+          answer_request_numbers: [1]
+          entity_reference:
+            instance_kind: account
+            value:
+              kind: single_identity
+              identity_value:
+                kind: literal
+                value: Account A
+              origin:
+                kind: question
+        - meaning: destination account
+          denotation_basis: Account B identifies the destination account.
+          answer_request_numbers: [1]
+          entity_reference:
+            instance_kind: account
+            value:
+              kind: single_identity
+              identity_value:
+                kind: literal
+                value: Account B
+              origin:
+                kind: question
+      question_input_inventory_check:
+        all_input_like_phrases_declared: true
+  payload:
+    decision_basis: Both related account identities qualify the same transfer candidate.
+    outcome:
+      kind: question_contract
+      answer_requests:
+      - requested_fact_ref: fact_1
+        origin:
+          source: question_context
+          meaning: transfer count
+          resolved_input_ref: null
+        candidate_set:
+          instance_kind: transfer occurrences
+          instance_interpretation: resource_population
+        set_graph:
+          identity_input_relations:
+            i1:
+              association:
+                id: a1
+                origin:
+                  source: question_context
+                  meaning: transfer source account
+                  resolved_input_ref: null
+              set:
+                id: s2
+                instance_kind: account
+                origin:
+                  source: question_context
+                  meaning: source account
+                  resolved_input_ref: null
+              related_sets: []
+            i2:
+              association:
+                id: a2
+                origin:
+                  source: question_context
+                  meaning: transfer destination account
+                  resolved_input_ref: null
+              set:
+                id: s3
+                instance_kind: account
+                origin:
+                  source: question_context
+                  meaning: destination account
+                  resolved_input_ref: null
+              related_sets: []
+          requested_output_relations: {}
+          other_related_sets: []
+        qualification:
+          kind: and
+          arguments:
+          - kind: input_comparison
+            input:
+              kind: input_ref
+              input_ref: i1
+              operand_meaning: source account
+              instance_kind: account
+            operator: equals
+            fact:
+              kind: fact
+              identity_path:
+                kind: related_instance
+                association_ref: a1
+              origin:
+                source: question_context
+                meaning: source account identity
+                resolved_input_ref: null
+          - kind: input_comparison
+            input:
+              kind: input_ref
+              input_ref: i2
+              operand_meaning: destination account
+              instance_kind: account
+            operator: equals
+            fact:
+              kind: fact
+              identity_path:
+                kind: related_instance
+                association_ref: a2
+              origin:
+                source: question_context
+                meaning: destination account identity
+                resolved_input_ref: null
+        grouping: []
+        ordering: []
+        selection: null
+        distinct_by: []
+        outputs:
+          result_key_outputs: []
+          requested_value_outputs:
+          - output_ref: r1
+            expression:
+              kind: aggregate
+              function: count
+              argument:
+                kind: set_ref
+                set_ref: s1
+              distinct_argument: false
+expect:
+  result_contains:
+    input_refs:
+    - i1
+    - i2
+    requested_facts:
+    - id: fact_1
+      result_grain: singleton
+      input_use_refs:
+      - i1
+      - i2
+      identity_input_refs:
+      - i1
+      - i2

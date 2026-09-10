@@ -1,0 +1,41 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Each answer request writes result_kind, candidate_kind,\ngrouping_meanings, and returned_candidate_identity for qualifying instances.",
+      "new": "Each answer request writes result_grain_basis, result_kind, candidate_kind, grouping_meanings, and returned_candidate_identity for qualifying instances. result_grain_basis states which rows qualify before grouping and what one result row represents.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_frame",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/oneOf/3/properties/result_grain_basis",
+      "value": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    {
+      "tool_name": "submit_question_frame",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/oneOf/3/required/0",
+      "value": "result_grain_basis"
+    },
+    {
+      "tool_name": "submit_question_frame",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/oneOf/9/properties/result_grain_basis",
+      "value": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    {
+      "tool_name": "submit_question_frame",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/oneOf/9/required/0",
+      "value": "result_grain_basis"
+    }
+  ]
+}

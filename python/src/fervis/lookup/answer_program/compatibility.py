@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing_extensions import assert_never
 
-from fervis.lookup.answer_program.codec import canonical_contract_fingerprint
+from fervis.lookup.contract_codec import canonical_contract_fingerprint
 from fervis.lookup.answer_program.model import (
     ANSWER_PROGRAM_SCHEMA_REVISION,
     AnswerProgram,
@@ -18,11 +18,11 @@ from fervis.lookup.answer_program.relations import (
     RelationSource,
     SourceKind,
 )
-from fervis.lookup.fact_plan.row_sources.builder import (
+from fervis.lookup.relation_catalog.row_sources.builder import (
     build_row_source_catalog,
     memory_row_source_id,
 )
-from fervis.lookup.fact_plan.row_sources.model import (
+from fervis.lookup.relation_catalog.row_sources.model import (
     CALENDAR_ROW_SOURCE_ID,
     RowSourceCatalog,
 )
@@ -31,8 +31,10 @@ from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.relation_catalog import RelationCatalog
 
 
-ANSWER_PROGRAM_COMPILER_VERSION = "fervis.answer_program.compiler@1"
-FUNCTION_SEMANTIC_VERSION = "1"
+from .versions import (
+    ANSWER_PROGRAM_COMPILER_VERSION as ANSWER_PROGRAM_COMPILER_VERSION,
+    FUNCTION_SEMANTIC_VERSION as FUNCTION_SEMANTIC_VERSION,
+)
 
 
 @dataclass(frozen=True)
@@ -86,9 +88,7 @@ def compatibility_requirements(
 def build_program_compatibility(
     program: AnswerProgram,
     *,
-    catalog: RelationCatalog,
     row_sources: RowSourceCatalog,
-    memory_relations: tuple[RelationRows, ...],
 ) -> ProgramCompatibility:
     """Pin the exact current contracts required by a program graph."""
 
@@ -109,9 +109,8 @@ def build_program_compatibility(
                 source_id=key.source_id,
                 fingerprint=_current_source_fingerprint(
                     key,
-                    catalog=catalog,
                     row_sources=row_sources,
-                    memory_relations=memory_relations,
+                    program=program,
                 ),
             )
             for key in requirements.source_keys
@@ -150,9 +149,8 @@ def verify_program_compatibility(
         try:
             current_fingerprint = _current_source_fingerprint(
                 SourceContractKey(kind=pin.kind, source_id=pin.source_id),
-                catalog=catalog,
                 row_sources=row_sources,
-                memory_relations=memory_relations,
+                program=program,
             )
         except (KeyError, StopIteration) as exc:
             raise VerificationError("incompatible_source_contract") from exc
@@ -187,7 +185,7 @@ def _source_contract_key(source: RelationSource) -> SourceContractKey:
     if source.kind is SourceKind.API_READ:
         return SourceContractKey(
             kind=SourceContractKind.CATALOG_READ,
-            source_id=source.read_id,
+            source_id=source.row_source_id,
         )
     if source.kind is SourceKind.GENERATED_CALENDAR:
         return SourceContractKey(
@@ -205,20 +203,24 @@ def _source_contract_key(source: RelationSource) -> SourceContractKey:
 def _current_source_fingerprint(
     key: SourceContractKey,
     *,
-    catalog: RelationCatalog,
     row_sources: RowSourceCatalog,
-    memory_relations: tuple[RelationRows, ...],
+    program: AnswerProgram,
 ) -> str:
+    source = row_sources.source(key.source_id)
     if key.kind is SourceContractKind.CATALOG_READ:
-        return canonical_contract_fingerprint(catalog.read(key.source_id))
-    elif key.kind is SourceContractKind.GENERATED_SOURCE:
-        return canonical_contract_fingerprint(row_sources.source(key.source_id))
-    elif key.kind is SourceContractKind.MEMORY_RELATION:
-        relation = next(
-            relation
-            for relation in memory_relations
-            if memory_row_source_id(relation.id) == key.source_id
+        required_fields = {
+            field.field_id
+            for relation in program.relations
+            if relation.source.row_source_id == key.source_id
+            for field in relation.fields
+        }
+        # Pin the executable projection, not unrelated observed columns or
+        # generated display labels. Keep invocation and identity contracts.
+        source = replace(
+            source,
+            fields=tuple(
+                field for field in source.fields if field.id in required_fields
+            ),
+            label="",
         )
-        return canonical_contract_fingerprint(relation)
-    else:
-        assert_never(key.kind)
+    return canonical_contract_fingerprint(source)

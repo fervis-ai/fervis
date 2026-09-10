@@ -22,6 +22,7 @@ class ModelPricing:
     thinking_cost_per_million_tokens: float
     pricing_version: str
     cost_source: str
+    cached_input_cost_per_million_tokens: float | None = None
 
     @property
     def priced(self) -> bool:
@@ -55,6 +56,7 @@ def resolve_model_pricing(*, provider: str, model_key: str) -> ModelPricing:
     cost = _dict(model.get("cost"))
     input_cost = _cost_rate(cost.get("input"))
     output_cost = _cost_rate(cost.get("output"))
+    cached_input_cost = _cost_rate(cost.get("cache_read"))
     if input_cost is None or output_cost is None:
         return ModelPricing.unpriced(pricing_version=version)
     return ModelPricing(
@@ -63,6 +65,7 @@ def resolve_model_pricing(*, provider: str, model_key: str) -> ModelPricing:
         thinking_cost_per_million_tokens=float(output_cost),
         pricing_version=version,
         cost_source=CostSource.MODELS_DEV,
+        cached_input_cost_per_million_tokens=float(cached_input_cost) if cached_input_cost is not None else None,
     )
 
 

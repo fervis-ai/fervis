@@ -28,6 +28,9 @@ uv --directory "$PYTHON_DIR" run mypy src
 echo "==> Fervis tests"
 uv --directory "$PYTHON_DIR" run pytest
 
+echo "==> Python distribution"
+"$SCRIPT_DIR/verify-python-distribution.sh"
+
 if [ ! -d "$DESKTOP_DIR/node_modules" ]; then
   echo "==> Desktop dependencies"
   npm --prefix "$DESKTOP_DIR" ci

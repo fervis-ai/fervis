@@ -1,18 +1,22 @@
 schema_revision: 1
 programs:
   canonical_a:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
         fact_template:
           $tuple: []
         fulfillment:
           $tuple: []
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: plan.limit
               role:
                 $enum: ParameterRole
@@ -20,12 +24,15 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: number
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple: []
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.place
               role:
                 $enum: ParameterRole
@@ -33,6 +40,8 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: string
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple:
@@ -53,25 +62,29 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
+            schema_revision: 23
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   canonical_b:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
         fact_template:
           $tuple: []
         fulfillment:
           $tuple: []
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: plan.limit
               role:
                 $enum: ParameterRole
@@ -79,12 +92,15 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: number
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple: []
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.place
               role:
                 $enum: ParameterRole
@@ -92,6 +108,8 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: string
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple:
@@ -108,17 +126,19 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
+            schema_revision: 23
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   compile_catalog_default:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
         fact_template:
           $tuple: []
         fulfillment:
@@ -128,10 +148,12 @@ programs:
               requested_fact_id: fact_1
               answer_output_id: answer_1
               result_output_id: answer_1
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -139,6 +161,8 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: identity_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple: []
@@ -153,11 +177,12 @@ programs:
               source:
                 $type: RelationSource
                 fields:
+                  argument_relation_id: ""
                   kind:
                     $enum: SourceKind
                     value: api_read
                   read_id: sales
-                  row_source_id: ''
+                  row_source_id: rs_c9f84da27ca2f8d1
                   calendar_id: ''
                   memory_relation_id: ''
                   param_bindings:
@@ -176,10 +201,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  population_choices:
-                    $tuple: []
-                  population_binding: null
-                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -234,6 +255,8 @@ programs:
               $tuple:
               - $type: RelationResultOutput
                 fields:
+                  display_field_id: ''
+                  record_fields: {$map: []}
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
@@ -245,17 +268,19 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
+            schema_revision: 23
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   compile_hidden_value:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
         fact_template:
           $tuple: []
         fulfillment:
@@ -265,10 +290,12 @@ programs:
               requested_fact_id: fact_1
               answer_output_id: answer_1
               result_output_id: answer_1
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -276,6 +303,8 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: identity_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple: []
@@ -290,6 +319,7 @@ programs:
               source:
                 $type: RelationSource
                 fields:
+                  argument_relation_id: ""
                   kind:
                     $enum: SourceKind
                     value: api_read
@@ -315,10 +345,6 @@ programs:
                         parameter_id: ''
                         proof_refs:
                           $tuple: []
-                  population_choices:
-                    $tuple: []
-                  population_binding: null
-                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -373,6 +399,8 @@ programs:
               $tuple:
               - $type: RelationResultOutput
                 fields:
+                  display_field_id: ''
+                  record_fields: {$map: []}
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
@@ -384,62 +412,94 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
+            schema_revision: 23
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   invocation:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
-        fact_template:
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: &semantic_fact_template
           $tuple:
           - $type: RequestedFact
             fields:
               id: fact_1
-              description: sales for a store
-              answer_expression: null
-              answer_subject: null
-              answer_population: null
-              answer_outputs:
+              origin: &semantic_fact_origin
+                $type: SourceOrigin
+                fields:
+                  source: {$enum: SourceOriginKind, value: question_context}
+                  meaning: answer rows
+                  resolved_input_ref: null
+              sets:
                 $tuple:
-                - $type: RequestedFactAnswerOutput
+                - $type: SetTerm
+                  fields:
+                    id: s1
+                    origin: *semantic_fact_origin
+              associations: {$tuple: []}
+              facts: {$tuple: []}
+              expressions: {$tuple: []}
+              subject:
+                $type: Subject
+                fields:
+                  set_ref: s1
+                  instance_interpretation: {$enum: InstanceInterpretation, value: resource_population}
+              qualification_ref: null
+              grouping_refs: {$tuple: []}
+              outputs:
+                $tuple:
+                - $type: RequestedOutput
                   fields:
                     id: answer_1
-                    description: answer_1
-                    role: ANSWER_VALUE
-              known_inputs:
-                $tuple:
-                - $type: RequestedFactLiteralInput
-                  fields:
-                    id: store_ids
-                    source: {$enum: KnownInputSource, value: question_context}
-                    role: {$enum: LiteralInputRole, value: reference_value}
-                    text: Acacia Mall
-                    resolved_value_text: Acacia Mall
-                    field_label_text: mall
-                    value_meaning_hint: mall identity
-                    resolved_input_ref: ''
-                    occurrence: 1
-              input_refs:
-                $tuple: [store_ids]
-              required_for: ''
-              population_constraints:
-                $tuple: []
-        fulfillment:
+                    expression_ref: s1
+                    origin: *semantic_fact_origin
+              ordering: {$tuple: []}
+              selection: {$type: AllResults, fields: {}}
+              distinct_by: {$tuple: []}
+        fulfillment: &invocation_fulfillment
           $tuple:
           - $type: FactFulfillment
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
               result_output_id: answer_1
-        parameters:
+        relation_guarantees: &invocation_relation_guarantees
+          $tuple:
+          - $type: RelationGuaranteeDeclaration
+            fields:
+              relation_id: sales_rows
+              qualification:
+                $type: QualificationGuarantee
+                fields:
+                  requested_fact_id: fact_1
+                  formula:
+                    $type: QualificationDNF
+                    fields:
+                      clauses:
+                        $tuple:
+                        - $type: QualificationClause
+                          fields:
+                            clause_ref: fact_1:qualification_clause:1
+                            atom_refs: {$tuple: []}
+                  atom_proofs: {$tuple: []}
+              subject:
+                $type: SubjectGuarantee
+                fields:
+                  requested_fact_id: fact_1
+                  subject_set_ref: fact_1:set:s1
+                  interpretation: ResourcePopulation
+                  proof_refs: {$tuple: [sales]}
+        parameters: &invocation_parameters
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -447,12 +507,15 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: identity_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple: []
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.sale_states
               role:
                 $enum: ParameterRole
@@ -460,6 +523,8 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: string_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple:
@@ -468,7 +533,7 @@ programs:
               semantic_control_ref: sales.state_population
         capabilities:
           $tuple: []
-        relations:
+        relations: &invocation_relations
           $tuple:
           - $type: Relation
             fields:
@@ -476,11 +541,12 @@ programs:
               source:
                 $type: RelationSource
                 fields:
+                  argument_relation_id: ""
                   kind:
                     $enum: SourceKind
                     value: api_read
                   read_id: sales
-                  row_source_id: ''
+                  row_source_id: rs_c9f84da27ca2f8d1
                   calendar_id: ''
                   memory_relation_id: ''
                   param_bindings:
@@ -499,10 +565,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: [known_input:store_ids]
-                  population_choices:
-                    $tuple: []
-                  population_binding: null
-                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -557,6 +619,8 @@ programs:
               $tuple:
               - $type: RelationResultOutput
                 fields:
+                  display_field_id: ''
+                  record_fields: {$map: []}
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
@@ -568,38 +632,38 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 23
+            compiler_version: fervis.answer_program.compiler@49
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -607,15 +671,82 @@ programs:
                   kind:
                     $enum: SourceContractKind
                     value: catalog_read
-                  source_id: sales
-                  fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
-  memory_backed:
-    schema_revision: 6
+                  source_id: rs_c9f84da27ca2f8d1
+                  fingerprint: a300dd00f7839e833148b3572b431db2cc8341e126e3d888589886697d65a886
+  direct_invocation:
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: *semantic_fact_template
+        fulfillment: *invocation_fulfillment
+        relation_guarantees: *invocation_relation_guarantees
+        parameters: *invocation_parameters
+        capabilities: {$tuple: []}
+        relations: *invocation_relations
+        operations: {$tuple: []}
+        result_projection:
+          $type: ResultProjection
+          fields:
+            relation_outputs:
+              $tuple:
+              - $type: RelationResultOutput
+                fields:
+                  display_field_id: ''
+                  record_fields: {$map: []}
+                  id: answer_1
+                  relation_id: sales_rows
+                  field_id: ''
+                  entity_key:
+                    $type: EntityKeyProjection
+                    fields:
+                      entity_kind: sale
+                      key_id: primary_key
+                      components:
+                        $tuple:
+                        - $type: EntityKeyProjectionComponent
+                          fields: {component_id: sale_id, field_id: sale_id}
+                  label: ''
+                  role: answer_value
+            scalar_outputs: {$tuple: []}
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 23
+            compiler_version: fervis.answer_program.compiler@49
+            function_semantics:
+              $tuple:
+              - $type: FunctionSemanticVersion
+                fields: {function_key: answer.classify, version: '3'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: answer.materialize, version: '3'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: fact.materialize, version: '3'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: proof.construct, version: '3'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: source.instantiate_read, version: '3'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: source.read_relation, version: '3'}
+            source_contracts:
+              $tuple:
+              - $type: SourceContractPin
+                fields:
+                  kind: {$enum: SourceContractKind, value: catalog_read}
+                  source_id: rs_c9f84da27ca2f8d1
+                  fingerprint: a300dd00f7839e833148b3572b431db2cc8341e126e3d888589886697d65a886
+  memory_backed:
+    schema_revision: 23
+    program:
+      $type: AnswerProgram
+      fields:
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
         fact_template: {$tuple: []}
         fulfillment: {$tuple: []}
+        relation_guarantees: {$tuple: []}
         parameters: {$tuple: []}
         capabilities: {$tuple: []}
         relations:
@@ -626,15 +757,13 @@ programs:
               source:
                 $type: RelationSource
                 fields:
+                  argument_relation_id: ""
                   kind: {$enum: SourceKind, value: memory_read}
                   read_id: ''
                   row_source_id: ''
                   calendar_id: ''
                   memory_relation_id: prior_sales
                   param_bindings: {$tuple: []}
-                  population_choices: {$tuple: []}
-                  population_binding: null
-                  population_coverage_claims: {$tuple: []}
                   proof_refs: {$tuple: [memory:prior_sales]}
               fields:
                 $tuple:
@@ -649,18 +778,18 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 23
+            compiler_version: fervis.answer_program.compiler@49
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.classify, version: '1'}
+                fields: {function_key: answer.classify, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.materialize, version: '1'}
+                fields: {function_key: answer.materialize, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: fact.materialize, version: '1'}
+                fields: {function_key: fact.materialize, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: proof.construct, version: '1'}
+                fields: {function_key: proof.construct, version: '3'}
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -669,33 +798,13 @@ programs:
                   source_id: mem_fe7f674c7ac59e4a
                   fingerprint: 8a2f05f7e1f6c2aee3b39cb8f1d4572306d28bfbd81a671f099af87d915638f2
   population_required:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
-        fact_template: &population_fact_template
-          $tuple:
-          - $type: RequestedFact
-            fields:
-              id: fact_1
-              description: sales for selected stores
-              answer_expression: null
-              answer_subject: null
-              answer_population: null
-              answer_outputs:
-                $tuple:
-                - $type: RequestedFactAnswerOutput
-                  fields:
-                    id: answer_1
-                    description: answer_1
-                    role: ANSWER_VALUE
-              known_inputs:
-                $tuple: []
-              input_refs:
-                $tuple: []
-              required_for: ''
-              population_constraints:
-                $tuple: []
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: *semantic_fact_template
         fulfillment: &population_fulfillment
           $tuple:
           - $type: FactFulfillment
@@ -703,11 +812,13 @@ programs:
               requested_fact_id: fact_1
               answer_output_id: answer_1
               result_output_id: answer_1
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - &population_question_parameter
             $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -715,12 +826,15 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: identity_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple: []
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.store_population
               role:
                 $enum: ParameterRole
@@ -728,6 +842,8 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: string_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple:
@@ -744,6 +860,7 @@ programs:
               source:
                 $type: RelationSource
                 fields:
+                  argument_relation_id: ""
                   kind:
                     $enum: SourceKind
                     value: api_read
@@ -767,10 +884,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  population_choices:
-                    $tuple: []
-                  population_binding: null
-                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -800,14 +913,14 @@ programs:
                 $type: FilterSpec
                 fields:
                   input_relation: sales_rows__source
-                  predicate:
-                    $type: Predicate
+                  condition:
+                    $type: BinaryExpression
                     fields:
                       left:
                         $type: FieldRef
                         fields: {field_id: store_id}
                       operator:
-                        $enum: PredicateOperator
+                        $enum: ExpressionBinaryOperator
                         value: in
                       right:
                         $type: ParameterRef
@@ -854,6 +967,8 @@ programs:
               $tuple:
               - $type: RelationResultOutput
                 fields:
+                  display_field_id: ''
+                  record_fields: {$map: []}
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
@@ -865,42 +980,42 @@ programs:
         compatibility: &population_compatibility
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 23
+            compiler_version: fervis.answer_program.compiler@49
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.filter
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -911,17 +1026,21 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   population_scalar_invalid:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
-        fact_template: *population_fact_template
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: *semantic_fact_template
         fulfillment: *population_fulfillment
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - *population_question_parameter
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.store_population
               role: {$enum: ParameterRole, value: semantic_control}
               value_type: {$enum: ParameterValueType, value: string}
@@ -934,17 +1053,21 @@ programs:
         result_projection: *population_result_projection
         compatibility: *population_compatibility
   population_plan_control_invalid:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
-        fact_template: *population_fact_template
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: *semantic_fact_template
         fulfillment: *population_fulfillment
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - *population_question_parameter
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.store_population
               role: {$enum: ParameterRole, value: plan_control}
               value_type: {$enum: ParameterValueType, value: string_set}
@@ -957,33 +1080,13 @@ programs:
         result_projection: *population_result_projection
         compatibility: *population_compatibility
   population_optional:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
-        fact_template:
-          $tuple:
-          - $type: RequestedFact
-            fields:
-              id: fact_1
-              description: sales for selected stores
-              answer_expression: null
-              answer_subject: null
-              answer_population: null
-              answer_outputs:
-                $tuple:
-                - $type: RequestedFactAnswerOutput
-                  fields:
-                    id: answer_1
-                    description: answer_1
-                    role: ANSWER_VALUE
-              known_inputs:
-                $tuple: []
-              input_refs:
-                $tuple: []
-              required_for: ''
-              population_constraints:
-                $tuple: []
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: *semantic_fact_template
         fulfillment:
           $tuple:
           - $type: FactFulfillment
@@ -991,10 +1094,12 @@ programs:
               requested_fact_id: fact_1
               answer_output_id: answer_1
               result_output_id: answer_1
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -1002,12 +1107,15 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: identity_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple: []
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.store_population
               role:
                 $enum: ParameterRole
@@ -1015,6 +1123,8 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: string_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: false
               allowed_values:
                 $tuple:
@@ -1031,6 +1141,7 @@ programs:
               source:
                 $type: RelationSource
                 fields:
+                  argument_relation_id: ""
                   kind:
                     $enum: SourceKind
                     value: api_read
@@ -1139,6 +1250,8 @@ programs:
               $tuple:
               - $type: RelationResultOutput
                 fields:
+                  display_field_id: ''
+                  record_fields: {$map: []}
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
@@ -1150,42 +1263,42 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 23
+            compiler_version: fervis.answer_program.compiler@49
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.row_filter
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1196,33 +1309,13 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   capability:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
-        fact_template:
-          $tuple:
-          - $type: RequestedFact
-            fields:
-              id: fact_1
-              description: sales for selected channels
-              answer_expression: null
-              answer_subject: null
-              answer_population: null
-              answer_outputs:
-                $tuple:
-                - $type: RequestedFactAnswerOutput
-                  fields:
-                    id: answer_1
-                    description: answer_1
-                    role: ANSWER_VALUE
-              known_inputs:
-                $tuple: []
-              input_refs:
-                $tuple: []
-              required_for: ''
-              population_constraints:
-                $tuple: []
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: *semantic_fact_template
         fulfillment:
           $tuple:
           - $type: FactFulfillment
@@ -1230,10 +1323,12 @@ programs:
               requested_fact_id: fact_1
               answer_output_id: answer_1
               result_output_id: answer_1
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -1241,6 +1336,8 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: identity_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple: []
@@ -1253,6 +1350,7 @@ programs:
               parameter:
                 $type: ParameterDeclaration
                 fields:
+                  fixed_value_fingerprint: ''
                   id: semantic.sale_channels
                   role:
                     $enum: ParameterRole
@@ -1260,6 +1358,8 @@ programs:
                   value_type:
                     $enum: ParameterValueType
                     value: string_set
+                  input_ref: ""
+                  input_use_refs: {$tuple: []}
                   required: true
                   allowed_values:
                     $tuple:
@@ -1269,7 +1369,7 @@ programs:
               relation_id: sales_rows
               field_id: channel
               operator:
-                $enum: PredicateOperator
+                $enum: ExpressionBinaryOperator
                 value: in
               requested_fact_ids:
                 $tuple:
@@ -1277,7 +1377,7 @@ programs:
               proof_refs:
                 $tuple:
                 - capability:sales.channel
-              function_semantics_version: '1'
+              function_semantics_version: '3'
               kind:
                 $enum: CapabilityKind
                 value: narrow_population
@@ -1289,6 +1389,7 @@ programs:
               source:
                 $type: RelationSource
                 fields:
+                  argument_relation_id: ""
                   kind:
                     $enum: SourceKind
                     value: api_read
@@ -1312,10 +1413,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  population_choices:
-                    $tuple: []
-                  population_binding: null
-                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -1377,6 +1474,8 @@ programs:
               $tuple:
               - $type: RelationResultOutput
                 fields:
+                  display_field_id: ''
+                  record_fields: {$map: []}
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
@@ -1388,46 +1487,46 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 23
+            compiler_version: fervis.answer_program.compiler@49
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: program.capability.narrow_population
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: program.capability.narrow_population
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1438,33 +1537,13 @@ programs:
                   source_id: sales
                   fingerprint: e7351d0771a04bb0704b7babf7f953eb634c0b1f8a0e9d88dffbf3ed981ab612
   incompatible_compiler:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
-        fact_template:
-          $tuple:
-          - $type: RequestedFact
-            fields:
-              id: fact_1
-              description: sales for a store
-              answer_expression: null
-              answer_subject: null
-              answer_population: null
-              answer_outputs:
-                $tuple:
-                - $type: RequestedFactAnswerOutput
-                  fields:
-                    id: answer_1
-                    description: answer_1
-                    role: ANSWER_VALUE
-              known_inputs:
-                $tuple: []
-              input_refs:
-                $tuple: []
-              required_for: ''
-              population_constraints:
-                $tuple: []
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: *semantic_fact_template
         fulfillment:
           $tuple:
           - $type: FactFulfillment
@@ -1472,10 +1551,12 @@ programs:
               requested_fact_id: fact_1
               answer_output_id: answer_1
               result_output_id: answer_1
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -1483,12 +1564,15 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: identity_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple: []
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.sale_states
               role:
                 $enum: ParameterRole
@@ -1496,6 +1580,8 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: string_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple:
@@ -1512,6 +1598,7 @@ programs:
               source:
                 $type: RelationSource
                 fields:
+                  argument_relation_id: ""
                   kind:
                     $enum: SourceKind
                     value: api_read
@@ -1535,10 +1622,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  population_choices:
-                    $tuple: []
-                  population_binding: null
-                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -1593,6 +1676,8 @@ programs:
               $tuple:
               - $type: RelationResultOutput
                 fields:
+                  display_field_id: ''
+                  record_fields: {$map: []}
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
@@ -1604,38 +1689,38 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
-            compiler_version: incompatible.compiler@1
+            schema_revision: 23
+            compiler_version: incompatible.compiler@48
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1646,33 +1731,13 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   incompatible_function:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
-        fact_template:
-          $tuple:
-          - $type: RequestedFact
-            fields:
-              id: fact_1
-              description: sales for a store
-              answer_expression: null
-              answer_subject: null
-              answer_population: null
-              answer_outputs:
-                $tuple:
-                - $type: RequestedFactAnswerOutput
-                  fields:
-                    id: answer_1
-                    description: answer_1
-                    role: ANSWER_VALUE
-              known_inputs:
-                $tuple: []
-              input_refs:
-                $tuple: []
-              required_for: ''
-              population_constraints:
-                $tuple: []
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: *semantic_fact_template
         fulfillment:
           $tuple:
           - $type: FactFulfillment
@@ -1680,10 +1745,12 @@ programs:
               requested_fact_id: fact_1
               answer_output_id: answer_1
               result_output_id: answer_1
+        relation_guarantees: {$tuple: []}
         parameters:
           $tuple:
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: question.store_ids
               role:
                 $enum: ParameterRole
@@ -1691,12 +1758,15 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: identity_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple: []
               semantic_control_ref: ''
           - $type: ParameterDeclaration
             fields:
+              fixed_value_fingerprint: ''
               id: semantic.sale_states
               role:
                 $enum: ParameterRole
@@ -1704,6 +1774,8 @@ programs:
               value_type:
                 $enum: ParameterValueType
                 value: string_set
+              input_ref: ""
+              input_use_refs: {$tuple: []}
               required: true
               allowed_values:
                 $tuple:
@@ -1720,6 +1792,7 @@ programs:
               source:
                 $type: RelationSource
                 fields:
+                  argument_relation_id: ""
                   kind:
                     $enum: SourceKind
                     value: api_read
@@ -1743,10 +1816,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  population_choices:
-                    $tuple: []
-                  population_binding: null
-                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -1801,6 +1870,8 @@ programs:
               $tuple:
               - $type: RelationResultOutput
                 fields:
+                  display_field_id: ''
+                  record_fields: {$map: []}
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
@@ -1812,8 +1883,8 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 23
+            compiler_version: fervis.answer_program.compiler@49
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
@@ -1823,27 +1894,27 @@ programs:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '1'
+                  version: '3'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '1'
+                  version: '3'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1854,27 +1925,13 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   compute_versioned_constant:
-    schema_revision: 6
+    schema_revision: 23
     program:
       $type: AnswerProgram
       fields:
-        fact_template:
-          $tuple:
-          - $type: RequestedFact
-            fields:
-              id: fact_1
-              description: scaled amount
-              answer_expression: null
-              answer_subject: null
-              answer_population: null
-              answer_outputs:
-                $tuple:
-                - $type: RequestedFactAnswerOutput
-                  fields: {id: answer_1, description: answer_1, role: ANSWER_VALUE}
-              known_inputs: {$tuple: []}
-              input_refs: {$tuple: []}
-              required_for: ''
-              population_constraints: {$tuple: []}
+        inputs: {$tuple: []}
+        input_denotations: {$tuple: []}
+        fact_template: *semantic_fact_template
         fulfillment:
           $tuple:
           - $type: FactFulfillment
@@ -1882,6 +1939,7 @@ programs:
               requested_fact_id: fact_1
               answer_output_id: answer_1
               result_output_id: answer_1
+        relation_guarantees: {$tuple: []}
         parameters: {$tuple: []}
         capabilities: {$tuple: []}
         relations: {$tuple: []}
@@ -1964,20 +2022,20 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 6
-            compiler_version: fervis.answer_program.compiler@1
+            schema_revision: 23
+            compiler_version: fervis.answer_program.compiler@49
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.classify, version: '1'}
+                fields: {function_key: answer.classify, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.materialize, version: '1'}
+                fields: {function_key: answer.materialize, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: fact.materialize, version: '1'}
+                fields: {function_key: fact.materialize, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: proof.construct, version: '1'}
+                fields: {function_key: proof.construct, version: '3'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: relation.compute, version: '1'}
+                fields: {function_key: relation.compute, version: '3'}
             source_contracts: {$tuple: []}
 binding_sets:
   invocation:

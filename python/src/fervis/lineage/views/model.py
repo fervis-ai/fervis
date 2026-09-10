@@ -122,15 +122,18 @@ class SemanticResolverCandidateView:
 
 
 @dataclass(frozen=True)
-class SemanticGroundingResultView:
+class SemanticResourceRecallView:
+    input_use_ref: str
+    resource_name: str
+
+
+@dataclass(frozen=True)
+class SemanticIdentitySelectionView:
     input_id: str
-    input_text: str
-    resolver_read_id: str
-    resolver_label: str
-    entity_kind: str
-    matched_field: str
-    matched_value: str
-    matched_label: str
+    canonical_option_id: str
+    resolver_route_id: str
+    basis: str
+    outcome: str
 
 
 @dataclass(frozen=True)
@@ -154,8 +157,9 @@ class SemanticConversationClauseView:
 class StepSemanticView:
     requested_facts: tuple[SemanticRequestedFactView, ...] = ()
     known_inputs: tuple[SemanticKnownInputView, ...] = ()
+    resource_recalls: tuple[SemanticResourceRecallView, ...] = ()
     resolver_candidates: tuple[SemanticResolverCandidateView, ...] = ()
-    grounding_results: tuple[SemanticGroundingResultView, ...] = ()
+    identity_selections: tuple[SemanticIdentitySelectionView, ...] = ()
     interpreted_inputs: tuple[SemanticInterpretedInputView, ...] = ()
     conversation_clauses: tuple[SemanticConversationClauseView, ...] = ()
 
@@ -273,6 +277,9 @@ class ExecutionProofView:
     applied_inputs: tuple[ProofAppliedInputView, ...]
     source_reads: tuple[SourceReadView, ...] = ()
 
+    required_source_read_ids: tuple[str, ...] = ()
+    execute_step_id: str | None = None
+
 
 @dataclass(frozen=True)
 class AnswerOutputView:
@@ -352,6 +359,7 @@ class FactResultView:
     proof: ExecutionProofView | None = None
     memory_artifacts: tuple[MemoryArtifactView, ...] = ()
 
+    terminal_payload: dict[str, object] | None = None
 
 @dataclass(frozen=True)
 class RequestedFactView:

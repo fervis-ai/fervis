@@ -8,23 +8,17 @@ from typing import TypeAlias, TypeVar
 from typing_extensions import assert_never
 
 from fervis.types.enums import StrEnum
+from fervis.lookup.expression_operators import (
+    ExpressionBinaryOperator,
+    ExpressionUnaryOperator,
+)
 
 from .values import ConstantRef, EnvironmentRef, NodeOutputRef, ParameterRef
 
 
-class ExpressionUnaryOperator(StrEnum):
-    NEGATE = "negate"
-
-
-class ExpressionBinaryOperator(StrEnum):
-    ADD = "add"
-    SUBTRACT = "subtract"
-    MULTIPLY = "multiply"
-    DIVIDE = "divide"
-
-
 class ExpressionFunction(StrEnum):
     TEMPORAL_BUCKET = "temporal_bucket"
+    ROW_NUMBER = "row_number"
 
 
 @dataclass(frozen=True)
@@ -55,8 +49,9 @@ class FunctionExpression:
     arguments: tuple[Expression, ...]
 
     def __post_init__(self) -> None:
-        if not self.arguments:
-            raise ValueError("function expression requires arguments")
+        required_arity = {ExpressionFunction.TEMPORAL_BUCKET:3, ExpressionFunction.ROW_NUMBER:0}[self.function]
+        if len(self.arguments) != required_arity:
+            raise ValueError("function expression has invalid arity")
 
 
 Expression: TypeAlias = (
@@ -167,8 +162,14 @@ def expression_input_id(expression: ParameterRef | ConstantRef) -> str:
     """Return the stable materialized-input ID for one scalar expression leaf."""
 
     if isinstance(expression, ParameterRef):
-        return f"parameter:{expression.parameter_id}"
-    return f"constant:{expression.constant_id}@{expression.version_ref}"
+        source_id = f"parameter:{expression.parameter_id}"
+    else:
+        source_id = f"constant:{expression.constant_id}@{expression.version_ref}"
+    component = (
+        "" if expression.component == "value" else f".{expression.component}"
+    )
+    item = "" if expression.item_index is None else f"[{expression.item_index}]"
+    return f"{source_id}{component}{item}"
 
 
 def _merge_references(

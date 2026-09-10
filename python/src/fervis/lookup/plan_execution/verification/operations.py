@@ -1,5 +1,6 @@
-"""Operation reference checks for fact-plan verification."""
+"""Operation reference checks for answer-program verification."""
 
+from fervis.lookup.answer_program.model import RelationProgram
 from ._shared import (
     AggregateSpec,
     AggregationFunction,
@@ -19,14 +20,22 @@ from ._shared import (
 from .contract_types import RelationContract, _contract, _field_roles
 from .scalars import _operation_scalar_inputs
 from fervis.lookup.answer_program.operations import (
-    Predicate,
     RelationRoleRef,
     operation_scalar_output_ids,
 )
-from fervis.lookup.answer_program.expressions import FieldRef, expression_references
+from fervis.lookup.answer_program.expressions import (
+    Expression,
+    FieldRef,
+    expression_references,
+)
 
 
 def _verify_answer_uses_evidence_input(answer: AnswerProgram) -> None:
+    projected_relations = {
+        output.relation_id for output in answer.result_projection.relation_outputs
+    }
+    if projected_relations.intersection(relation.id for relation in answer.relations):
+        return
     if any(_operation_input_refs(operation) for operation in answer.operations):
         return
     if any(_operation_scalar_inputs(operation) for operation in answer.operations):
@@ -44,7 +53,9 @@ def _compute_uses_direct_value(operation: Operation) -> bool:
     return bool(references.parameters or references.constants)
 
 
-def _verify_operation_references(answer: AnswerProgram) -> None:
+def _verify_operation_references(answer: RelationProgram) -> None:
+    from fervis.lookup.answer_program.dependencies import execution_schedule
+    execution_schedule(answer)
     available = {item.id for item in answer.relations}
     operation_ids: set[str] = set()
     scalar_outputs: set[str] = _operation_field_outputs(answer.operations)
@@ -89,11 +100,11 @@ def _operation_field_outputs(operations: tuple[Operation, ...]) -> set[str]:
         elif isinstance(spec, ProjectSpec):
             outputs.update(output.output_field for output in spec.outputs)
         elif isinstance(spec, ProjectToKeySpec):
-            outputs.update(spec.key_fields)
+            outputs.update((*spec.key_fields, *spec.carry_fields))
     return outputs
 
 
-def _verify_compute_scalar_availability(answer: AnswerProgram) -> None:
+def _verify_compute_scalar_availability(answer: RelationProgram) -> None:
     available_outputs = {
         f"parameter:{parameter.id}": {parameter.id} for parameter in answer.parameters
     }
@@ -144,7 +155,7 @@ def _operation_input_refs(operation: Operation) -> tuple[str, ...]:
 
 
 def _verify_coverage_operation_relation_contracts(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     relation_contracts: dict[str, RelationContract],
 ) -> None:
@@ -249,14 +260,7 @@ def _verify_coverage_operation_relation_contracts(
                     contract=observation,
                     fields=tuple(
                         item.field_id
-                        for item in expression_references(
-                            spec.predicate.left,
-                            *(
-                                (spec.predicate.right,)
-                                if spec.predicate.right is not None
-                                else ()
-                            ),
-                        ).fields
+                        for item in expression_references(spec.condition).fields
                     ),
                     expected_role=FieldBindingRole.PREDICATE,
                     role="universal_condition.observation",
@@ -273,16 +277,16 @@ def _verify_coverage_operation_relation_contracts(
 
 
 def _verify_operation_field_references(
-    answer: AnswerProgram,
+    answer: RelationProgram,
     *,
     relation_contracts: dict[str, RelationContract],
 ) -> None:
     for operation in answer.operations:
         spec = operation.spec
         if isinstance(spec, FilterSpec):
-            _verify_predicate_fields(
+            _verify_condition_fields(
                 contract=_contract(relation_contracts, spec.input_relation),
-                predicate=spec.predicate,
+                condition=spec.condition,
                 label="filter",
             )
         elif isinstance(spec, JoinSpec):
@@ -296,33 +300,39 @@ def _verify_operation_field_references(
             for field in spec.group_by:
                 _field_roles(source, field, "aggregate")
             for aggregation in spec.aggregations:
-                if aggregation.function != AggregationFunction.COUNT:
+                if aggregation.grain_fields:
+                    _verify_role_relation_fields(contract=source, fields=aggregation.grain_fields,
+                        expected_role=FieldBindingRole.IDENTITY, role="aggregate observation grain")
+                if aggregation.input_field:
                     _field_roles(source, aggregation.input_field, "aggregate")
+                if aggregation.filter is not None:
+                    _verify_condition_fields(
+                        contract=source,
+                        condition=aggregation.filter,
+                        label="aggregate filter",
+                    )
         elif isinstance(spec, OrderSpec):
             source = _contract(relation_contracts, spec.input_relation)
             for sort_key in spec.order_by:
                 _field_roles(source, sort_key.field, "order")
         elif isinstance(spec, UniversalConditionSpec):
-            _verify_predicate_fields(
+            _verify_condition_fields(
                 contract=_contract(
                     relation_contracts,
                     spec.observation.relation_id,
                 ),
-                predicate=spec.predicate,
+                condition=spec.condition,
                 label="universal_condition",
             )
 
 
-def _verify_predicate_fields(
+def _verify_condition_fields(
     *,
     contract: RelationContract,
-    predicate: Predicate,
+    condition: Expression,
     label: str,
 ) -> None:
-    references = expression_references(
-        predicate.left,
-        *((predicate.right,) if predicate.right is not None else ()),
-    )
+    references = expression_references(condition)
     for field in references.fields:
         _field_roles(contract, field.field_id, label)
 

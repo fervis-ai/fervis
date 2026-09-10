@@ -17,9 +17,13 @@ def bootstrap_default_providers() -> None:
     from fervis.model_io.providers.openai_compatible_adapter import (
         register_openai_compatible_providers,
     )
+    from fervis.model_io.providers.openai_responses_adapter import (
+        register_openai_responses_provider,
+    )
 
     register_anthropic_provider()
     register_openai_compatible_providers()
+    register_openai_responses_provider()
     _BOOTSTRAPPED = True
 
 

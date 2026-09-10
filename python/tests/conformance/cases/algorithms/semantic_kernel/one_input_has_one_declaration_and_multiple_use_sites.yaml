@@ -1,0 +1,165 @@
+id: one_input_has_one_declaration_and_multiple_use_sites
+description: Repeated uses of one supplied operand become one canonical input without model-authored bookkeeping.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts:
+  - Give the event count and total amount for April 2026.
+  frame_payload:
+    decision_basis: The question asks for two scalar facts over the same supplied period.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+      - return_request_basis: Return the event count.
+        relational_shape_basis: The requested relational shape is ordinary.
+        request:
+          relational_shape: ordinary
+          result_grain_basis: The requested result grain is one_value_for_population.
+          result:
+            kind: one_value_for_population
+            population_rows:
+              instance_kind: events
+              origin:
+                kind: question
+            returned_meanings:
+            - meaning_ref: r1
+              meaning: event count
+              origin:
+                kind: question
+            result_order:
+              ordering_request_basis: The question requests no ordering.
+              ordering:
+                kind: no_ordering_requested
+              selection:
+                kind: all_results
+      - return_request_basis: Return the total amount.
+        relational_shape_basis: The requested relational shape is ordinary.
+        request:
+          relational_shape: ordinary
+          result_grain_basis: The requested result grain is one_value_for_population.
+          result:
+            kind: one_value_for_population
+            population_rows:
+              instance_kind: events
+              origin:
+                kind: question
+            returned_meanings:
+            - meaning_ref: r1
+              meaning: total amount
+              origin:
+                kind: question
+            result_order:
+              ordering_request_basis: The question requests no ordering.
+              ordering:
+                kind: no_ordering_requested
+              selection:
+                kind: all_results
+      supplied_values:
+        selection_limits: []
+        operands:
+        - meaning: the reporting period
+          denotation_basis: April 2026 is a period applied to event occurrences.
+          answer_request_numbers: [1, 2]
+          non_entity_value:
+            kind: temporal_scope
+            value:
+              operands:
+              - April 2026
+              origin:
+                kind: question
+      question_input_inventory_check:
+        all_input_like_phrases_declared: true
+  payload:
+    decision_basis: The question asks for two scalar facts over the same supplied period.
+    outcome:
+      kind: question_contract
+      answer_requests:
+      - requested_fact_ref: fact_1
+        origin: &id001
+          source: question_context
+          meaning: April 2026 event results
+          resolved_input_ref: null
+        candidate_set:
+          instance_kind: events
+          instance_interpretation: resource_population
+        set_graph:
+          identity_input_relations: {}
+          requested_output_relations: {}
+          other_related_sets: []
+        qualification:
+          kind: within
+          value:
+            kind: fact
+            observed_for_ref: s1
+            origin: &id002
+              source: question_context
+              meaning: event date
+              resolved_input_ref: null
+          scope:
+            kind: input_ref
+            input_ref: i1
+        grouping: []
+        ordering: []
+        selection: null
+        distinct_by: []
+        outputs:
+          result_key_outputs: []
+          requested_value_outputs:
+          - output_ref: r1
+            expression:
+              kind: aggregate
+              function: count
+              argument:
+                kind: set_ref
+                set_ref: s1
+              distinct_argument: false
+      - requested_fact_ref: fact_2
+        origin: *id001
+        candidate_set:
+          instance_kind: events
+          instance_interpretation: resource_population
+        set_graph:
+          identity_input_relations: {}
+          requested_output_relations: {}
+          other_related_sets: []
+        qualification:
+          kind: within
+          value:
+            kind: fact
+            observed_for_ref: s1
+            origin: *id002
+          scope:
+            kind: input_ref
+            input_ref: i1
+        grouping: []
+        ordering: []
+        selection: null
+        distinct_by: []
+        outputs:
+          result_key_outputs: []
+          requested_value_outputs:
+          - output_ref: r1
+            expression:
+              kind: aggregate
+              function: sum
+              argument:
+                kind: fact
+                observed_for_ref: s1
+                origin:
+                  source: question_context
+                  meaning: amount
+                  resolved_input_ref: null
+              distinct_argument: false
+expect:
+  result_contains:
+    input_refs:
+    - i1
+    requested_facts:
+    - id: fact_1
+      result_grain: singleton
+      input_use_refs:
+      - i1
+    - id: fact_2
+      result_grain: singleton
+      input_use_refs:
+      - i1

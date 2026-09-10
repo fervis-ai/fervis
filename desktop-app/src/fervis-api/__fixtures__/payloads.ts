@@ -28,8 +28,9 @@ export const conversationListFixture = {
 export const emptyStepSemanticFixture = {
   requestedFacts: [],
   knownInputs: [],
+  resourceRecalls: [],
   resolverCandidates: [],
-  groundingResults: [],
+  identitySelections: [],
   interpretedInputs: [],
   conversationClauses: []
 } as const;
@@ -44,28 +45,29 @@ const salesQuestionContractStepFixture = {
   semantic: {
     requestedFacts: [
       {
-        requestedFactId: "rf_sales_count",
-        description: "sales at ABC Mall this month"
+        requestedFactId: "fact_1",
+        description: "The question asks for the number of sales."
       }
     ],
     knownInputs: [
       {
         inputId: "input_store",
         text: "ABC Mall",
-        kind: "reference",
-        description: "store or location",
+        kind: "IDENTITY_REFERENCE",
+        description: "the location named by ABC Mall",
         lookupText: "ABC Mall"
       },
       {
         inputId: "input_period",
         text: "this month",
-        kind: "time",
-        description: "reporting period",
+        kind: "NON_IDENTITY_SCALAR",
+        description: "the requested reporting period",
         lookupText: "this month"
       }
     ],
+    resourceRecalls: [],
     resolverCandidates: [],
-    groundingResults: [],
+    identitySelections: [],
     interpretedInputs: [],
     conversationClauses: []
   }
@@ -81,21 +83,18 @@ const salesQueryEnrichmentStepFixture = {
   semantic: {
     requestedFacts: [],
     knownInputs: [],
-    resolverCandidates: [
+    resourceRecalls: [
       {
-        inputId: "input_store",
-        resolverReadId: "list_location_list",
-        resolverLabel: "List Location List",
-        basis: "location can identify ABC Mall because target meaning is store or location."
+        inputUseRef: "fact_1:identity:input_store",
+        resourceName: "location"
       },
       {
-        inputId: "input_store",
-        resolverReadId: "list_store_list",
-        resolverLabel: "List Store List",
-        basis: "store can identify ABC Mall because target meaning is store or location."
+        inputUseRef: "fact_1:identity:input_store",
+        resourceName: "store"
       }
     ],
-    groundingResults: [],
+    resolverCandidates: [],
+    identitySelections: [],
     interpretedInputs: [],
     conversationClauses: []
   }
@@ -111,6 +110,7 @@ const salesGroundingStepFixture = {
   semantic: {
     requestedFacts: [],
     knownInputs: [],
+    resourceRecalls: [],
     resolverCandidates: [
       {
         inputId: "input_store",
@@ -119,18 +119,7 @@ const salesGroundingStepFixture = {
         basis: "The resolver can search location records by lookup text and return a canonical location identity."
       }
     ],
-    groundingResults: [
-      {
-        inputId: "input_store",
-        inputText: "ABC Mall",
-        resolverReadId: "list_location_list",
-        resolverLabel: "List Location List",
-        entityKind: "location",
-        matchedField: "location_id",
-        matchedValue: "60606060-0000-0000-0001-000000000001",
-        matchedLabel: "ABC Mall"
-      }
-    ],
+    identitySelections: [],
     interpretedInputs: [
       {
         inputId: "input_period",

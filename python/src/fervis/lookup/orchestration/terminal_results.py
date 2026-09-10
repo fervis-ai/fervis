@@ -1,385 +1,327 @@
-"""Terminal-result assembly for lookup runtime."""
+"""Terminal-result assembly owned by the semantic lookup runtime."""
 
-from typing import Any
+from hashlib import sha256
+from dataclasses import replace
+from fervis.lookup.question_contract.grounding_context import grounding_fact_context
 
-from fervis.lookup.errors import ErrorCode
-from fervis.lookup.grounding.model import (
-    GroundingCandidate,
-    GroundingIssue,
-    GroundingTerminalKind,
-)
-from fervis.lookup.outcomes.model import (
-    FactResult,
-    NeedsClarification,
-    OutcomeKind,
-)
 from fervis.lookup.clarification import (
-    Clarification,
-    ClarificationEvidence,
-    ClarificationEvidenceKind,
+    ClarificationCause,
     ClarificationOption,
-    MissingAnswerMetric,
+    CatalogInputTarget,
     MissingCatalogChoice,
     MissingCatalogRequiredValue,
+    MissingAnswerMetric,
+    SourceBindingCatalogInputContinuation,
     TargetReferenceAmbiguous,
     TargetReferenceNotFound,
     TargetReferenceUnsupported,
     clarify,
 )
-from fervis.lookup.clarification.model import (
-    CatalogInputTarget,
-    ClarificationOwner,
-    FactPlanningCatalogInputContinuation,
-    SourceBindingCatalogInputContinuation,
+from fervis.lookup.canonical_data import (
+    EntityKeyValue,
+    canonical_runtime_json,
+    entity_key_to_payload,
 )
-from fervis.lookup.fact_plan.row_sources import build_row_source_catalog
-from fervis.lookup.fact_plan.fact_plan import (
-    MissingCatalogChoiceInput,
-    MissingCatalogRequiredInput,
-    PlanClarification,
+from fervis.lookup.grounding import (
+    IdentityExecutionClarification,
+    IdentityExecutionFailureReason,
 )
-from fervis.lookup.fact_planning.required_inputs import (
-    clarifiable_required_inputs,
-)
-from fervis.lookup.fact_plan.row_sources import required_input_evidence_ref
-from fervis.lookup.question_contract import (
+from fervis.lookup.outcomes.model import FactResult, NeedsClarification
+from fervis.lookup.question_contract import QuestionContract, QueryQuestionContract
+from fervis.lookup.question_contract.model import IntentQuestionContract
+from fervis.lookup.question_contract.clarification import (
     IncompleteFactualRequestKind,
     QuestionContractNeedsClarification,
 )
-from fervis.lookup.orchestration.request import (
-    LookupRequest,
-    LookupRuntimePorts,
-)
-from fervis.lookup.orchestration.result import LookupResult, RunStatus
-from fervis.lookup.plan_execution.errors import VerificationError
-from fervis.observability.event_contracts import EventPayloadKey
-
-from fervis.lookup.lineage.results import record_runtime_error_lineage
-from fervis.lookup.lineage.steps import (
-    lineage_error_json,
-    record_execution_step,
-)
-
-
-def _grounding_issue_fact_result(
-    issues: tuple[GroundingIssue, ...],
-) -> FactResult:
-    clarifications = tuple(
-        clarify(_grounding_issue_cause(group))
-        for group in _grounding_issue_groups(issues)
-    )
-    return FactResult(outcome=NeedsClarification(clarifications=clarifications))
-
-
-def _grounding_issue_groups(
-    issues: tuple[GroundingIssue, ...],
-) -> tuple[tuple[GroundingIssue, ...], ...]:
-    grouped: dict[tuple[str, str], list[GroundingIssue]] = {}
-    for issue in issues:
-        grouped.setdefault(
-            (issue.requested_fact_id, issue.known_input_id),
-            [],
-        ).append(issue)
-    return tuple(tuple(group) for group in grouped.values())
-
-
-def _grounding_issue_proof_refs(issue: GroundingIssue) -> tuple[str, ...]:
-    return (*issue.proof_refs, f"grounding:{issue.kind.value}")
-
-
-def _grounding_issue_cause(
-    issues: tuple[GroundingIssue, ...],
-) -> TargetReferenceNotFound | TargetReferenceAmbiguous | TargetReferenceUnsupported:
-    issue = issues[0]
-    clarification_id = f"clarify_{issue.known_input_id}_grounding"
-    source_text = str(issue.known_input_text or "")
-    target_label = _grounding_issue_target_label(issue)
-    evidence = tuple(
-        dict.fromkeys(
-            evidence
-            for grouped_issue in issues
-            for evidence in _grounding_issue_structured_evidence(grouped_issue)
-        )
-    )
-    proof_refs = tuple(
-        dict.fromkeys(
-            proof_ref
-            for grouped_issue in issues
-            for proof_ref in _grounding_issue_proof_refs(grouped_issue)
-        )
-    )
-    ambiguous = tuple(
-        grouped_issue
-        for grouped_issue in issues
-        if grouped_issue.kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE
-    )
-    if ambiguous:
-        return TargetReferenceAmbiguous(
-            clarification_id=clarification_id,
-            requested_fact_id=issue.requested_fact_id,
-            known_input_id=issue.known_input_id,
-            source_text=source_text,
-            target_label=target_label,
-            evidence=evidence,
-            proof_refs=proof_refs,
-            options=tuple(
-                dict.fromkeys(
-                    _clarification_option_from_grounding_candidate(candidate)
-                    for grouped_issue in ambiguous
-                    for candidate in grouped_issue.candidate_options
-                )
-            ),
-        )
-    if any(
-        grouped_issue.kind == GroundingTerminalKind.UNRESOLVED_REFERENCE
-        for grouped_issue in issues
-    ):
-        return TargetReferenceNotFound(
-            clarification_id=clarification_id,
-            requested_fact_id=issue.requested_fact_id,
-            known_input_id=issue.known_input_id,
-            source_text=source_text,
-            target_label=target_label,
-            evidence=evidence,
-            proof_refs=proof_refs,
-        )
-    return TargetReferenceUnsupported(
-        clarification_id=clarification_id,
-        requested_fact_id=issue.requested_fact_id,
-        known_input_id=issue.known_input_id,
-        source_text=source_text,
-        target_label=target_label,
-        evidence=evidence,
-        proof_refs=proof_refs,
-    )
-
-
-def _grounding_issue_target_label(issue: GroundingIssue) -> str:
-    if issue.kind == GroundingTerminalKind.TIME_RESOLUTION_FAILED:
-        return "date range"
-    return str(issue.known_input_description or "entity").strip().lower()
-
-
-def _grounding_issue_structured_evidence(
-    issue: GroundingIssue,
-) -> tuple[ClarificationEvidence, ...]:
-    if not issue.resolver_read_id:
-        return ()
-    return (
-        ClarificationEvidence(
-            kind=ClarificationEvidenceKind.RESOLVER_READ,
-            id=f"read:{issue.resolver_read_id}",
-            read_id=issue.resolver_read_id,
-            endpoint_name=issue.resolver_endpoint_name,
-            field_id=issue.resolver_field_id,
-            identity_field=issue.identity_field,
-        ),
-    )
-
-
-def _clarification_option_from_grounding_candidate(
-    candidate: GroundingCandidate,
-) -> ClarificationOption:
-    return ClarificationOption(
-        id=candidate.id,
-        label=candidate.label,
-        value=candidate.matched_value,
-        key=candidate.key,
-        matched_label=candidate.matched_label,
-        matched_field=candidate.matched_field,
-        matched_value=candidate.matched_value,
-        resolver_read_id=candidate.resolver_read_id,
-        resolver_label=candidate.resolver_label,
-    )
+from fervis.lookup.read_eligibility import NoCanonicalInterpretation, NoResolverRoute
+from fervis.lookup.source_binding import SourceBindingClarification
 
 
 def _question_contract_clarification_fact_result(
     outcome: QuestionContractNeedsClarification,
 ) -> FactResult:
-    clarifications: list[Clarification] = []
+    clarifications = []
     for index, item in enumerate(outcome.missing, start=1):
         if (
             item.missing_kind
             is IncompleteFactualRequestKind.UNRESOLVED_PRIOR_TURN_REFERENCE
         ):
             known_input_id = f"question_contract:{item.source_text}"
-            clarifications.append(
-                clarify(
-                    TargetReferenceNotFound(
-                        clarification_id=f"clarify_question_contract_{index}",
-                        requested_fact_id="question_contract",
-                        known_input_id=known_input_id,
-                        source_text=item.source_text,
-                        target_label=item.target_label,
-                        proof_refs=(
-                            f"known_input:{known_input_id}",
-                            "question_contract:needs_clarification",
-                        ),
-                    )
-                )
+            cause: ClarificationCause = TargetReferenceNotFound(
+                clarification_id=f"clarify_question_contract_{index}",
+                requested_fact_id="question_contract",
+                known_input_id=known_input_id,
+                source_text=item.source_text,
+                target_label=item.target_label,
+                proof_refs=(
+                    f"known_input:{known_input_id}",
+                    "question_contract:needs_clarification",
+                ),
             )
-            continue
-        clarifications.append(
-            clarify(
-                MissingAnswerMetric(
-                    clarification_id=f"clarify_question_contract_{index}",
-                    requested_fact_id="question_contract",
-                    source_text=item.source_text,
-                    metric_needed=item.why_question_is_incomplete,
-                    proof_refs=(
-                        "requested_fact:question_contract",
-                        "question_contract:needs_clarification",
+        else:
+            cause = MissingAnswerMetric(
+                clarification_id=f"clarify_question_contract_{index}",
+                requested_fact_id="question_contract",
+                source_text=item.source_text,
+                metric_needed=item.why_question_is_incomplete,
+                proof_refs=(
+                    "requested_fact:question_contract",
+                    "question_contract:needs_clarification",
+                ),
+            )
+        clarifications.append(clarify(cause))
+    return FactResult(outcome=NeedsClarification(clarifications=tuple(clarifications)))
+
+
+def semantic_clarification_fact_result(
+    cause: object,
+    *,
+    contract: QuestionContract | QueryQuestionContract | IntentQuestionContract | None,
+) -> FactResult:
+    if isinstance(cause, QuestionContractNeedsClarification):
+        return _question_contract_clarification_fact_result(cause)
+    if isinstance(cause, SourceBindingClarification):
+        causes = _source_binding_causes(cause)
+    elif isinstance(
+        cause,
+        (IdentityExecutionClarification, NoCanonicalInterpretation, NoResolverRoute),
+    ):
+        if contract is None:
+            raise ValueError("identity clarification requires a question contract")
+        causes = (_identity_cause(cause, contract=contract),)
+    else:
+        raise TypeError(f"unsupported semantic clarification: {type(cause).__name__}")
+    return FactResult(
+        outcome=NeedsClarification(
+            clarifications=tuple(clarify(item) for item in causes)
+        )
+    )
+
+
+def _identity_cause(
+    cause: IdentityExecutionClarification | NoCanonicalInterpretation | NoResolverRoute,
+    *,
+    contract: QuestionContract | QueryQuestionContract | IntentQuestionContract,
+) -> ClarificationCause:
+    task_ref = cause.task_ref
+    input_ref, use_refs = _identity_subject(cause, contract=contract)
+    input_term = next(item for item in contract.inputs if item.id == input_ref)
+    denotation = next(
+        item for item in contract.input_denotations if item.input_ref == input_ref
+    )
+    requested_fact_id = _requested_fact_id(contract, use_refs=use_refs)
+    source_text = (
+        input_term.operand
+        if isinstance(input_term.operand, str)
+        else ", ".join(input_term.operand)
+    )
+    clarification_id = f"clarify_identity:{task_ref}"
+    proof_refs = tuple(cause.evidence_refs)
+    if not isinstance(cause, IdentityExecutionClarification):
+        return TargetReferenceUnsupported(
+            clarification_id=clarification_id,
+            requested_fact_id=requested_fact_id,
+            known_input_id=input_ref,
+            source_text=source_text,
+            target_label=denotation.operand_meaning,
+            proof_refs=proof_refs,
+        )
+    if cause.reason is IdentityExecutionFailureReason.NOT_FOUND:
+        return TargetReferenceNotFound(
+            clarification_id=clarification_id,
+            requested_fact_id=requested_fact_id,
+            known_input_id=input_ref,
+            source_text=source_text,
+            target_label=denotation.operand_meaning,
+            proof_refs=proof_refs,
+        )
+    if cause.reason is IdentityExecutionFailureReason.AMBIGUOUS_RESULT:
+        return TargetReferenceAmbiguous(
+            clarification_id=clarification_id,
+            requested_fact_id=requested_fact_id,
+            known_input_id=input_ref,
+            source_text=source_text,
+            target_label=denotation.operand_meaning,
+            proof_refs=proof_refs,
+            options=tuple(
+                ClarificationOption(
+                    id=_identity_option_id(candidate.key),
+                    label=candidate.display_value,
+                    key=candidate.key,
+                    matched_field=candidate.matched_field_path,
+                    matched_value=candidate.display_value,
+                    resolver_read_id=candidate.resolver_read_id,
+                )
+                for candidate in cause.candidates
+            ),
+        )
+    return TargetReferenceUnsupported(
+        clarification_id=clarification_id,
+        requested_fact_id=requested_fact_id,
+        known_input_id=input_ref,
+        source_text=source_text,
+        target_label=denotation.operand_meaning,
+        proof_refs=proof_refs,
+    )
+
+
+def _identity_subject(
+    cause: IdentityExecutionClarification | NoCanonicalInterpretation | NoResolverRoute,
+    *,
+    contract: QuestionContract | QueryQuestionContract | IntentQuestionContract,
+) -> tuple[str, tuple[str, ...]]:
+    if isinstance(cause, IdentityExecutionClarification):
+        return cause.input_ref, cause.use_refs
+    for fact in contract.requested_facts:
+        index = grounding_fact_context(
+            fact,
+            inputs={item.id: item for item in contract.inputs},
+            input_denotations={
+                item.input_ref: item for item in contract.input_denotations
+            },
+        )
+        for use in index.input_use_sites:
+            if cause.task_ref.startswith(f"{use.use_ref}:"):
+                return use.input_ref, (use.use_ref,)
+    raise ValueError("identity clarification task has no question input")
+
+
+def _requested_fact_id(
+    contract: QuestionContract | QueryQuestionContract | IntentQuestionContract,
+    *,
+    use_refs: tuple[str, ...],
+) -> str:
+    use_ref_set = set(use_refs)
+    for fact in contract.requested_facts:
+        index = grounding_fact_context(
+            fact,
+            inputs={item.id: item for item in contract.inputs},
+            input_denotations={
+                item.input_ref: item for item in contract.input_denotations
+            },
+        )
+        if use_ref_set.intersection(item.use_ref for item in index.input_use_sites):
+            return fact.id
+    raise ValueError("identity clarification has no requested fact")
+
+
+def _identity_option_id(key: EntityKeyValue) -> str:
+    fingerprint = sha256(
+        canonical_runtime_json(entity_key_to_payload(key)).encode("utf-8")
+    ).hexdigest()
+    return f"identity_option:{fingerprint}"
+
+
+def _source_binding_causes(
+    cause: SourceBindingClarification,
+) -> tuple[ClarificationCause, ...]:
+    output: list[ClarificationCause] = []
+    for missing in cause.missing_catalog_values:
+        target = CatalogInputTarget(
+            row_source_id=missing.source_ref,
+            param_id=missing.parameter_id,
+            param_ref=missing.target_ref,
+            value_type=missing.value_type,
+            choices=missing.allowed_values,
+        )
+        continuation = SourceBindingCatalogInputContinuation(
+            requested_fact_id=cause.requested_fact_id,
+            target=target,
+        )
+        if missing.allowed_values:
+            output.append(
+                MissingCatalogChoice(
+                    clarification_id=missing.catalog_input_ref,
+                    requested_fact_id=cause.requested_fact_id,
+                    label=missing.label,
+                    continuation=continuation,
+                    proof_refs=missing.evidence_refs,
+                    required_choice_input_id=(
+                        f"{missing.source_ref}.{missing.parameter_id}"
+                    ),
+                    options=tuple(
+                        ClarificationOption(id=value, label=value, value=value)
+                        for value in missing.allowed_values
                     ),
                 )
             )
-        )
-    return FactResult(outcome=NeedsClarification(clarifications=tuple(clarifications)))
-
-
-def _plan_clarification_fact_result(
-    outcome: PlanClarification,
-    *,
-    owner: ClarificationOwner,
-    catalog,
-    memory_relations,
-) -> FactResult:
-    row_sources = build_row_source_catalog(catalog, memory_relations=memory_relations)
-    required_inputs = {
-        item.id: item for item in clarifiable_required_inputs(row_sources)
-    }
-    clarifications: list[Clarification] = []
-    for item in outcome.missing_catalog_inputs:
-        if isinstance(item, MissingCatalogRequiredInput):
-            required = required_inputs[item.required_catalog_input_id]
-            clarifications.append(
-                clarify(
-                    MissingCatalogRequiredValue(
-                        clarification_id=item.id,
-                        requested_fact_id=item.requested_fact_id,
-                        required_input_id=item.required_catalog_input_id,
-                        label=required.param_label or required.param_id,
-                        continuation=_catalog_continuation(
-                            owner=owner,
-                            requested_fact_id=item.requested_fact_id,
-                            planning_requirement_id=item.id,
-                            required=required,
-                        ),
-                        proof_refs=(
-                            required_input_evidence_ref(
-                                required_input_id=item.required_catalog_input_id,
-                            ),
-                        ),
-                    )
+        else:
+            output.append(
+                MissingCatalogRequiredValue(
+                    clarification_id=missing.catalog_input_ref,
+                    requested_fact_id=cause.requested_fact_id,
+                    label=missing.label,
+                    continuation=continuation,
+                    proof_refs=missing.evidence_refs,
+                    required_input_id=f"{missing.source_ref}.{missing.parameter_id}",
                 )
             )
-            continue
-        if isinstance(item, MissingCatalogChoiceInput):
-            required = required_inputs[item.required_catalog_choice_input_id]
-            choice_labels = dict(required.choice_labels or {})
-            clarifications.append(
-                clarify(
-                    MissingCatalogChoice(
-                        clarification_id=item.id,
-                        requested_fact_id=item.requested_fact_id,
-                        required_choice_input_id=item.required_catalog_choice_input_id,
-                        label=required.param_label or required.param_id,
-                        options=tuple(
-                            ClarificationOption(
-                                id=choice,
-                                label=choice_labels.get(choice, choice),
-                            )
-                            for choice in required.choices
+    return tuple(output)
+
+
+def reference_clarification_fact_result(issue, *, contract):
+    """Use the normal identity clarification contract for an executed subplan."""
+    from fervis.lookup.grounding import IdentityExecutionCandidate
+
+    failure = issue.reference
+    if failure is None or contract is None:
+        raise ValueError("Reference clarification requires its input contract")
+    uses = tuple(
+        use.use_ref
+        for fact in contract.requested_facts
+        for use in grounding_fact_context(
+            fact,
+            inputs={item.id: item for item in contract.inputs},
+            input_denotations={
+                item.input_ref: item for item in contract.input_denotations
+            },
+        ).input_use_sites
+        if use.input_ref == failure.input_ref
+    )
+    if not uses:
+        raise ValueError("Reference clarification has no declared question input")
+    cause = IdentityExecutionClarification(
+        task_ref=f"executed_reference:{failure.input_ref}",
+        input_ref=failure.input_ref,
+        use_refs=uses,
+        reason=failure.reason,
+        evidence_refs=issue.proof_refs,
+        candidates=tuple(
+            IdentityExecutionCandidate(
+                key=key,
+                display_value=canonical_runtime_json(key.component_values()),
+                matched_field_ref="",
+                matched_field_path="",
+                resolver_read_id="",
+            )
+            for key in failure.candidates
+        ),
+    )
+    result = semantic_clarification_fact_result(cause, contract=contract)
+    if failure.operand:
+        term = next(item for item in contract.inputs if item.id == failure.input_ref)
+        if not isinstance(term.operand, tuple) or failure.operand not in term.operand:
+            raise ValueError("Reference operand is not a member of its declared input")
+        result = replace(
+            result,
+            outcome=replace(
+                result.outcome,
+                clarifications=tuple(
+                    replace(
+                        item,
+                        id=item.id
+                        + ":"
+                        + sha256(failure.operand.encode()).hexdigest()[:16],
+                        continuation=replace(
+                            item.continuation, reference_operand=failure.operand
                         ),
-                        continuation=_catalog_continuation(
-                            owner=owner,
-                            requested_fact_id=item.requested_fact_id,
-                            planning_requirement_id=item.id,
-                            required=required,
-                        ),
-                        proof_refs=(
-                            required_input_evidence_ref(
-                                required_input_id=item.required_catalog_choice_input_id,
-                            ),
+                        subjects=tuple(
+                            replace(subject, source_text=failure.operand)
+                            for subject in item.subjects
                         ),
                     )
-                )
-            )
-    return FactResult(outcome=NeedsClarification(clarifications=tuple(clarifications)))
-
-
-def _catalog_continuation(
-    *,
-    owner: ClarificationOwner,
-    requested_fact_id: str,
-    planning_requirement_id: str,
-    required,
-) -> SourceBindingCatalogInputContinuation | FactPlanningCatalogInputContinuation:
-    target = CatalogInputTarget(
-        row_source_id=required.row_source_id,
-        param_id=required.param_id,
-        param_ref=required.param_ref,
-        value_type=required.param_type,
-        choices=tuple(required.choices),
-    )
-    if owner is ClarificationOwner.SOURCE_BINDING:
-        return SourceBindingCatalogInputContinuation(
-            requested_fact_id=requested_fact_id,
-            target=target,
+                    for item in result.outcome.clarifications
+                ),
+            ),
         )
-    if owner is ClarificationOwner.FACT_PLANNING:
-        return FactPlanningCatalogInputContinuation(
-            requested_fact_id=requested_fact_id,
-            planning_requirement_id=planning_requirement_id,
-            target=target,
-        )
-    raise ValueError("catalog clarification requires source-binding or fact-planning owner")
-
-
-def _plan_validation_failed_result(
-    *,
-    request: LookupRequest,
-    ports: LookupRuntimePorts,
-    usage: dict[str, Any],
-    exc: VerificationError,
-) -> LookupResult:
-    payload = _execution_failure_payload(
-        request=request,
-        error_code=ErrorCode.PLAN_VALIDATION_FAILED,
-        exc=exc,
-    )
-    failed_step = record_execution_step(
-        ports,
-        error_json=lineage_error_json(payload),
-    )
-    record_runtime_error_lineage(
-        request=request,
-        ports=ports,
-        failed_step_id=failed_step.step_id if failed_step is not None else None,
-        error_code=ErrorCode.PLAN_VALIDATION_FAILED,
-        message=str(exc),
-    )
-    return LookupResult(
-        status=RunStatus.FAILED,
-        error=ErrorCode.PLAN_VALIDATION_FAILED,
-        usage=usage,
-    )
-
-
-def _execution_failure_payload(
-    *,
-    request: LookupRequest,
-    error_code: str,
-    exc: Exception,
-) -> dict[str, Any]:
-    return {
-        EventPayloadKey.RUN_ID: request.run_id,
-        EventPayloadKey.ERROR_CODE: error_code,
-        EventPayloadKey.ERROR_CLASS: exc.__class__.__name__,
-        EventPayloadKey.ERROR_CONTEXT: str(exc),
-    }
-
-
-def _status_for_fact_result(result: FactResult) -> str:
-    if result.outcome.kind == OutcomeKind.NEEDS_CLARIFICATION:
-        return RunStatus.NEEDS_CLARIFICATION
-    return RunStatus.COMPLETED
+    return result

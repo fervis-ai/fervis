@@ -8,7 +8,7 @@ from typing import Any
 
 from fervis.lookup.canonical_data import canonical_runtime_json
 from fervis.lookup.relation_catalog import RowCardinality
-from fervis.lookup.fact_plan.row_sources.model import RowSource
+from fervis.lookup.relation_catalog.row_sources.model import RowSource
 
 
 MISSING = object()
@@ -109,7 +109,7 @@ def endpoint_response_body(result: dict[str, Any], *, endpoint_name: str) -> Any
 def extract_row_source_rows(
     body: Any, *, row_source: RowSource
 ) -> tuple[dict[str, Any], ...]:
-    if not row_source.parent_row_path:
+    if not row_source.parent_row_path and row_source.parent_row_cardinality is None:
         return extract_response_rows(
             body,
             row_source.row_path,
@@ -210,6 +210,8 @@ def relative_response_path(field_path: str, row_path: str) -> str:
 
 
 def _path_part_value(value: Any, part: str, *, missing: object = None) -> Any:
+    if value is None:
+        return None
     if isinstance(value, dict):
         return value[part] if part in value else missing
     if isinstance(value, list):

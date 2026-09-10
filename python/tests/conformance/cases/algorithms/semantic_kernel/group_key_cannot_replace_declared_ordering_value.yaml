@@ -1,0 +1,102 @@
+id: group_key_cannot_replace_declared_ordering_value
+description: A grouped result cannot substitute its group key for the distinct non-key value declared to determine ordering.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts:
+  - Which courier completed the most deliveries?
+  frame_payload:
+    decision_basis: The result returns courier identities ordered by delivery count.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+      - return_request_basis: Return the courier with the greatest delivery count.
+        relational_shape_basis: The requested relational shape is ordinary.
+        request:
+          relational_shape: ordinary
+          result_grain_basis: The requested result grain is one_result_per_group.
+          result:
+            kind: one_result_per_group
+            grouping_meanings:
+            - group_ref: g1
+              grouping_basis: One qualifying row contributes courier to this group.
+              meaning: courier
+              origin:
+                kind: question
+              grouping_kind: related_entity_identity
+            grouped_observation_rows:
+              instance_kind: delivery occurrences
+              origin:
+                kind: question
+            projection:
+              projection_basis: Return the group key.
+              returned_grouping_keys: all
+              explicitly_requested_values: []
+            result_order:
+              ordering_request_basis: The declared ordering values determine result order.
+              ordering:
+                kind: ordered_by
+                values:
+                - ownership_basis: Delivery count orders couriers but is absent from returned meanings.
+                  kind: unreturned_ordering_meaning
+                  meaning: delivery count
+                  origin:
+                    kind: question
+              selection:
+                kind: first_rank_with_ties
+      supplied_values:
+        selection_limits: []
+        operands: []
+      question_input_inventory_check:
+        all_input_like_phrases_declared: true
+  payload:
+    decision_basis: Order courier groups by the courier group key.
+    outcome:
+      kind: question_contract
+      answer_requests:
+      - requested_fact_ref: fact_1
+        origin:
+          source: question_context
+          meaning: courier with most deliveries
+          resolved_input_ref: null
+        candidate_set:
+          instance_interpretation: resource_population
+        set_graph:
+          related_sets:
+          - association:
+              id: a1
+              origin:
+                source: question_context
+                meaning: delivery belongs to courier
+                resolved_input_ref: null
+            set:
+              id: s2
+              origin:
+                source: question_context
+                meaning: courier
+                resolved_input_ref: null
+            related_sets: []
+        qualification: null
+        grouping:
+        - id: g1
+          grouping_basis: courier
+          kind: related_instance_identity
+          set_ref: s2
+        ordering:
+        - ordering_basis: Compare courier groups by delivery count, not courier identity.
+          expression:
+            kind: group_ref
+            ref: g1
+          direction: descending
+        selection:
+          kind: first_rank_with_ties
+        distinct_by: []
+        outputs:
+          result_key_outputs:
+          - expression:
+              kind: group_ref
+              ref: g1
+          requested_value_outputs: []
+expect:
+  result_contains:
+    status: rejected

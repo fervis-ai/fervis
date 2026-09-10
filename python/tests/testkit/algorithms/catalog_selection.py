@@ -2,40 +2,51 @@ from __future__ import annotations
 
 from typing import Any
 
+from fervis.lookup.relation_catalog.selection.model import CatalogSelectionResult
 from fervis.lookup.relation_catalog.selection import (
-    AnswerOutputResourceLineage,
-    CatalogSelectionRequest,
-    EntityTargetCatalogSearchTerms,
-    RequestedFactResourceNameMatches,
-    ResolverCatalogSelectionRequest,
-    select_resolver_relation_catalog,
-    select_relation_catalog,
+    relation_catalog_for_read_ids,
+    select_resolver_reads,
+    selected_read_ids_from_fact_selections,
+)
+from fervis.lookup.relation_catalog.selection.selector.fact_selection import (
+    select_resource_name_groups,
 )
 from tests.testkit.assertions import exact_mismatches, subset_mismatches
 from tests.testkit.catalog import catalog_from_payload
-from tests.testkit.question_contract import requested_fact_from_payload
-from tests.testkit.values import fact_value_from_payload
 
 
 def run_catalog_selection_case(payload: dict[str, Any]) -> list[str]:
     input_payload = payload["input"]
-    result = select_relation_catalog(
-        CatalogSelectionRequest(
-            relation_catalog=catalog_from_payload(input_payload["catalog"]),
-            requested_facts=tuple(
-                requested_fact_from_payload(item)
-                for item in input_payload.get("requested_facts") or ()
+    catalog = catalog_from_payload(input_payload["catalog"])
+    fact_ids = tuple(str(item["id"]) for item in input_payload["requested_facts"])
+    raw_matches = tuple(input_payload.get("resource_name_matches") or ())
+    matches_by_fact = {str(item["requested_fact_id"]): item for item in raw_matches}
+    if len(matches_by_fact) != len(raw_matches) or set(matches_by_fact) != set(
+        fact_ids
+    ):
+        raise ValueError("resource-name recall must cover every requested fact once")
+    selections = tuple(
+        select_resource_name_groups(
+            requested_fact_id=fact_id,
+            resource_name_groups=tuple(
+                tuple(lineage.get("matching_resource_names") or ())
+                for lineage in matches_by_fact[fact_id].get(
+                    "answer_output_resource_lineage"
+                )
+                or ()
             ),
-            resource_name_matches=tuple(
-                _resource_name_matches(item)
-                for item in input_payload.get("resource_name_matches") or ()
-            ),
-            available_values=tuple(
-                fact_value_from_payload(item)
-                for item in input_payload.get("available_values") or ()
-            ),
+            relation_catalog=catalog,
             max_reads_per_fact=int(input_payload["max_reads_per_fact"]),
         )
+        for fact_id in fact_ids
+    )
+    selected_read_ids = selected_read_ids_from_fact_selections(selections)
+    result = CatalogSelectionResult(
+        relation_catalog=relation_catalog_for_read_ids(
+            catalog, read_ids=selected_read_ids
+        ),
+        requested_fact_selections=selections,
+        selected_read_ids=selected_read_ids,
     )
     actual = {
         "selected_read_ids": list(result.selected_read_ids),
@@ -83,34 +94,33 @@ def run_catalog_selection_case(payload: dict[str, Any]) -> list[str]:
 
 def run_resolver_catalog_selection_case(payload: dict[str, Any]) -> list[str]:
     input_payload = payload["input"]
-    result = select_resolver_relation_catalog(
-        ResolverCatalogSelectionRequest(
-            relation_catalog=catalog_from_payload(input_payload["catalog"]),
-            entity_target_catalog_search_terms=tuple(
-                EntityTargetCatalogSearchTerms(
-                    target_id=str(item["target_id"]),
-                    catalog_search_terms=tuple(item.get("catalog_search_terms") or ()),
-                )
-                for item in input_payload.get("entity_targets") or ()
+    catalog = catalog_from_payload(input_payload["catalog"])
+    selections = tuple(
+        (
+            str(item["target_id"]),
+            tuple(item.get("catalog_search_terms") or ()),
+            select_resolver_reads(
+                catalog,
+                catalog_search_terms=tuple(item.get("catalog_search_terms") or ()),
+                limit=int(input_payload["max_reads_per_target"]),
             ),
-            max_reads_per_target=int(input_payload["max_reads_per_target"]),
         )
+        for item in input_payload.get("entity_targets") or ()
+    )
+    selected_read_ids = tuple(
+        dict.fromkeys(read.id for _, _, reads in selections for read in reads)
     )
     actual = {
-        "selected_read_ids": list(result.selected_read_ids),
-        "selected_read_membership": {
-            read_id: True for read_id in result.selected_read_ids
-        },
+        "selected_read_ids": list(selected_read_ids),
+        "selected_read_membership": {read_id: True for read_id in selected_read_ids},
         "entity_target_selections": [
             {
-                "target_id": item.target_id,
-                "catalog_search_terms": list(item.catalog_search_terms),
-                "selected_read_ids": list(item.selected_read_ids),
-                "selected_read_membership": {
-                    read_id: True for read_id in item.selected_read_ids
-                },
+                "target_id": target_id,
+                "catalog_search_terms": list(search_terms),
+                "selected_read_ids": [read.id for read in reads],
+                "selected_read_membership": {read.id: True for read in reads},
             }
-            for item in result.entity_target_selections
+            for target_id, search_terms, reads in selections
         ],
     }
     if "result_equals" in payload["expect"]:
@@ -120,23 +130,4 @@ def run_resolver_catalog_selection_case(payload: dict[str, Any]) -> list[str]:
     return subset_mismatches(
         actual=actual,
         expected_subset=payload["expect"]["result_contains"],
-    )
-
-
-def _resource_name_matches(
-    payload: dict[str, Any],
-) -> RequestedFactResourceNameMatches:
-    return RequestedFactResourceNameMatches(
-        requested_fact_id=str(payload["requested_fact_id"]),
-        answer_output_resource_lineage=tuple(
-            AnswerOutputResourceLineage(
-                answer_output_id=str(item["answer_output_id"]),
-                support_role=str(item["support_role"]),
-                source_text=str(item["source_text"]),
-                matching_resource_names=tuple(
-                    item.get("matching_resource_names") or ()
-                ),
-            )
-            for item in payload.get("answer_output_resource_lineage") or ()
-        ),
     )

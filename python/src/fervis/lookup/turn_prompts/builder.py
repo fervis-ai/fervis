@@ -60,7 +60,7 @@ class TurnPromptBuilder:
         sections.extend(turn.prompt_sections(self))
         prompt_text = "\n\n".join(section.render(self.renderer) for section in sections)
         return ModelPromptPayload(
-            system_prompt=self.system_prompt(),
+            system_prompt=turn.system_prompt(self.context),
             prompt_text=prompt_text,
             sections=tuple(sections),
         )

@@ -1,0 +1,100 @@
+id: same_related_row_uses_one_graph_node
+description: Two relationships to one related instance are evaluated against the same related row.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts:
+  - Which employees are both assigned to and manage the same project?
+  frame_payload:
+    decision_basis: The result is employees related to one project through both stated relationships.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+      - return_request_basis: Return the qualifying employee identities.
+        relational_shape_basis: The requested relational shape is same_related_row.
+        request:
+          relational_shape: same_related_row
+          result_grain_basis: The requested result grain is one_result_per_qualifying_row.
+          result:
+            kind: one_result_per_qualifying_row
+            result_candidates:
+              instance_kind: employees
+              origin:
+                kind: question
+            projection:
+              projection_basis: Return the qualifying candidate identity.
+              candidate_identity: returned
+              explicitly_requested_values: []
+            result_order:
+              ordering_request_basis: The question requests no ordering.
+              ordering:
+                kind: no_ordering_requested
+              selection:
+                kind: all_results
+      supplied_values:
+        selection_limits: []
+        operands: []
+      question_input_inventory_check:
+        all_input_like_phrases_declared: true
+  payload:
+    decision_basis: One project row must have both relationships to an employee.
+    outcome:
+      kind: question_contract
+      answer_requests:
+      - requested_fact_ref: fact_1
+        origin:
+          source: question_context
+          meaning: employees assigned to and managing one project
+          resolved_input_ref: null
+        candidate_set:
+          instance_kind: employees
+          instance_interpretation: resource_population
+        set_graph:
+          identity_input_relations: {}
+          requested_output_relations: {}
+          other_related_sets:
+          - associations:
+            - id: a1
+              origin:
+                source: question_context
+                meaning: employee assigned to project
+                resolved_input_ref: null
+            - id: a2
+              origin:
+                source: question_context
+                meaning: employee manages project
+                resolved_input_ref: null
+            set:
+              id: s2
+              instance_kind: project
+              origin:
+                source: question_context
+                meaning: project
+                resolved_input_ref: null
+            related_sets: []
+        grouping: []
+        qualification:
+          kind: related_row
+          set_ref: s2
+          condition: null
+        ordering: []
+        selection: null
+        distinct_by: []
+        outputs:
+          result_key_outputs:
+          - expression:
+              kind: set_ref
+              set_ref: s1
+          requested_value_outputs: []
+expect:
+  result_contains:
+    requested_facts:
+    - id: fact_1
+      result_grain: subject_rows
+      population_atoms:
+      - fact_1:expression:e1
+      source_requirement_refs:
+      - fact_1:association:a1
+      - fact_1:association:a2
+      - fact_1:set:s1
+      - fact_1:set:s2

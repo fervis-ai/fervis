@@ -1,7 +1,22 @@
-"""Catalog-blind prompt projection for question-contract decisions."""
+"""Normative model-facing semantics for the relational Question Contract."""
 
 from __future__ import annotations
 
+from fervis.lookup.question_contract.request import QuestionContractRequest
+from fervis.lookup.question_contract.schema import (
+    build_semantic_question_contract_schema_for_meaning,
+    build_semantic_question_frame_schema,
+)
+from fervis.lookup.question_contract.parser import (
+    ParsedSemanticQuestionMeaning,
+)
+from fervis.lookup.semantic_types import (
+    CollectionType,
+    SourceOrigin,
+    ValueType,
+    value_type_kind,
+)
+from fervis.lookup.question_contract.tools import QUESTION_CONTRACT_TOOL_NAME
 from fervis.lookup.turn_prompts import (
     ProviderResponseContract,
     ProviderToolContract,
@@ -9,334 +24,499 @@ from fervis.lookup.turn_prompts import (
     TurnPromptBase,
     TurnPromptBuilder,
 )
-from fervis.lookup.question_contract.model import QuestionContractRequest
-from fervis.lookup.question_contract.schema import (
-    build_question_contract_decisions_schema,
-)
-from fervis.lookup.question_contract.tools import (
-    QUESTION_CONTRACT_TOOL_NAME,
-)
+from fervis.lookup.turn_prompts.context import TurnPromptContext
 from fervis.model_io.structured_output.specs import required_tool_spec
 
 
-class QuestionContractTurnPrompt(TurnPromptBase):
-    turn_name = "question contract"
-    turn_task = (
-        "author the catalog-blind answer request contract for the factual API question"
-    )
+SEMANTIC_QUESTION_CONTRACT_INSTRUCTIONS = """\
+Definitions
+
+A set is one question-local kind of candidate instance or occurrence.
+
+A fact is one value observed for a set instance or through a declared
+association. Its meaning names that observed value, rather than the row or
+relationship containing it. The expression using the fact states the capability
+required of its future source field: sum and average require summable values;
+minimum and maximum require orderable values; within requires temporal values;
+Boolean conditions require Boolean values. Source Binding later verifies that
+the selected catalog field provides that capability.
+
+An identifier fact means which exact instance of a declared set is involved.
+It is semantic identity even when the supplied input is a human-readable name;
+a value shared by many instances is a property fact.
+
+An association is the question-local relation of occurrences connecting
+instances of two sets. Its cardinality is unspecified. It is independent of
+physical sources, fields, and joins.
+
+An input_ref names one fixed supplied value shown with the question meaning.
+Expressions use that ref wherever the supplied value participates.
+
+When a supplied time period limits which occurrences qualify, declare a Date
+or DateTime fact observed for the qualifying set and compare that fact with the
+TemporalScope input using within.
+
+Authoring order
+
+Write one answer_requests item for every shown requested_fact_ref. The shown
+result kind fixes its result grain. The shown grouping, ordering, and output
+meanings fix their exact counts, order, and origins. Within each item, write
+candidate_set and set_graph before grouping.
+
+Requested-fact boundaries
+
+Each shown requested_fact_ref is one fixed answer-request boundary.
+
+Semantic structure
+
+Use s1 for the shown candidate set. In set_graph, each identity input first
+chooses null when unused by this request or declares its related association
+and entity set. Each related output declares its association and entity set.
+other_related_sets contains only relationships owned by neither fixed role.
+
+Each identity_input_relations and requested_output_relations entry starts at
+s1. At the top level of other_related_sets, the parent set is s1. Each
+related_sets item
+declares a relationship from that parent set to the item's set. Inside an item's
+nested related_sets, the parent is that item's set; each nested relationship
+starts there, never at an earlier ancestor. Every graph set writes its id,
+instance_kind, and origin. A related-identity grouping copies the referenced
+graph set's id as set_ref.
+
+Declare each non-candidate set and each association exactly once in set_graph.
+A related-identity grouping references its graph set by set_ref. The graph alone
+declares the set and the association that reaches it. Facts, qualifications,
+ordering expressions, and outputs reference declared graph terms. In a fact,
+observed_for_ref names the set or association where the value is observed.
+Set-valued expressions use set_ref.
+Structurally identical fact leaves denote one fact.
+
+A relationship used to assign qualifying rows to a shown grouping is fully
+represented by set_graph and grouping. It contributes no separate qualification
+or aggregate filter.
+
+The fixed candidate set is the set whose instances are tested by qualification
+and then grouped or aggregated. A requested group label is separate from it
+when qualifying instances are aggregated by that label.
+
+RESOURCE_POPULATION means instances of the requested API resource. Do not
+add implicit lifecycle, activity, cancellation, deletion, or test-data restrictions.
+Any restriction must be explicitly represented by the question requirements. RAW_DATA_RECORD means persisted records, rows, logs,
+audit entries, raw data, database entries, or another explicitly requested data
+artifact. Use RAW_DATA_RECORD only when the question explicitly requests that
+data artifact.
+
+A value defined over a supplied time scope is derived from observations in
+that scope. The observations are qualifying rows, the supplied period is an
+input, and the scoped aggregate is a result expression.
+
+When returned entities are compared by an aggregate over related occurrences,
+use the occurrences as the qualifying set, connect the grouped entity at its
+actual depth in set_graph, reference that entity's graph set from the
+related_instance_identity grouping, and aggregate an occurrence-owned fact.
+
+Reference candidate_set when the result returns its instances. When a
+result groups exact candidate instances, use candidate_instance_identity. When
+it groups exact related instances, use related_instance_identity with set_ref
+naming the entity set declared by set_graph. The
+grouped output references the grouping entry by its group_ref. A set may also
+be the argument of count; it is the row-domain reference used by count.
+
+Qualification is exactly the user-stated true-or-false conditions that decide
+whether a candidate qualifies. Identity inputs filling one role as alternatives
+combine with OR. Identity inputs filling different simultaneous roles combine
+with AND. instance_kind is a question-local nominal entity type. Equal
+instance_kind values mean the same entity type; different values mean different
+entity types. A fixed entity reference is represented by its input_ref. Compare
+that input_ref with an Identifier fact of the same instance_kind. Each identity
+input_comparison copies its input_ref, operand_meaning, and instance_kind. When
+it uses related_instance, write association_ref naming the declared relationship
+from the current row to the identified entity. candidate_instance identifies
+the current row itself. In a quantifier condition the current row is the
+quantified set, so the relationship must start at that set. One supplied identity
+can be compared through different relationships at different use sites; each
+comparison names its own relationship. Declare additional relationships in
+other_related_sets as needed. Each related entity output copies its fixed
+instance_kind and references a graph set of that same type.
+An aggregate's filter applies only to
+that aggregate. A Boolean output contains the requested Boolean expression.
+value_comparison compares two observed or computed values.
+
+A quantifier with association_refs traverses those associations from the
+current row to related rows. With association_refs=[], it quantifies over the
+whole over_set_ref and returns one population-level Boolean. Use exists or
+not_exists to test whether any rows satisfy condition, and forall to test
+whether every row satisfies it. Put the tested row condition inside that
+quantifier; it may itself quantify related rows. A presence or absence result
+uses this Boolean operation directly, without a count comparison or an
+invented constant fact. Use coverage when every candidate must have an
+observation for every member of a separate required-dimension set.
+
+related_row means that one row from set_ref is connected to the current row
+through every association declared on that set's graph node. condition is
+evaluated once for that related row, or is null when those relationships alone
+are the condition.
+
+Coverage asks whether, for one candidate, every qualifying required member has
+at least one qualifying observation. candidate_condition applies to the
+candidate row, or is null when every candidate is eligible.
+required_member_condition applies to one required-member row, or is null when
+the whole required-member set applies. observation declares its set_ref and
+condition together; its condition applies to one observation row. The
+association graph supplies one unambiguous path from the candidate and one
+from the required member to the observation.
+
+aggregate summarizes all rows retained by qualification. filtered_aggregate
+adds one condition that applies only to that aggregate's argument rows.
+count returns the number of qualifying argument rows. sum returns the total of
+an observed value. distinct_argument states whether repeated argument values
+count once; neither aggregate-local choice changes the outer candidate
+population.
+
+Each ordering entry writes ordering_basis before expression. ordering_basis
+states exactly what value is compared across result rows and whether it is
+obtained by counting rows or aggregating an observed value. Then write the
+expression that computes that value.
+
+A requested proportion, ratio, share, or percentage is divide(part, whole).
+When part and whole summarize rows, give each its own
+aggregate and filter only the part.
+
+An aggregate summarizes qualifying-set rows. With grouping, it produces
+one value per grouping tuple; without grouping, it produces one value for the
+whole qualifying population.
+
+A Percentage input is normalized to its ratio value before arithmetic. Use
+the supplied Percentage directly as the arithmetic operand.
+
+Each grouping entry writes grouping_basis before kind. grouping_basis states
+what value one qualifying row contributes to the group. Use
+candidate_instance_identity for shown qualifying_row_identity,
+related_instance_identity for shown related_entity_identity, and value for
+shown non_identity_value. A value grouping writes the expression fixed by the
+shown grouping_value: observed_value writes the recorded fact directly, computed_value writes per-row arithmetic, condition writes a Boolean condition, and temporal_bucket
+writes a temporal_bucket over a fact and copies the shown grain. Grouped
+outputs and ordering use group_ref for grouping values; aggregate expressions
+compute values over each group. Grouping assigns a key to every qualifying row.
+Qualification selects the requested keys. When supplied identity inputs name
+requested groups, qualification compares the grouping identity fact with those
+input refs, using OR for alternatives. The per-row identity remains the grouping
+value.
+
+Each result_key_meaning identifies a result row. Write its expression in
+result_key_outputs. A grouped result key returns its group_ref; an ungrouped
+result key returns a set_ref or an identifier fact with identity_path.
+
+Each requested_value_meaning is another result the answer must state. Copy its
+value_ref to output_ref in requested_value_outputs. For value_kind=value, write
+its value expression. For value_kind=related_entity, the output writes
+output_ref; its fixed requested_output_relations entry owns the returned entity
+set.
+Preserve the shown order within each output list. Ordering names the
+value that determines order. Selection states which ordered rows survive.
+
+Express a highest, lowest, first, or last result through ordering and selection.
+Qualification retains its population meaning. FirstRankWithTies keeps every row
+tied at the first ordered value.
+
+distinct_by is empty unless the question explicitly requests distinct result
+rows. When present, it equals the complete output-reference tuple. Grouping,
+ranking, and ordinary result identity remain in their dedicated structures.
+
+Inputs
+
+Every shown input_ref is used wherever its supplied value changes
+qualification, grouping, computation, ordering, or selection. The shown
+operand, type, meaning, and denotation remain fixed.
+
+Authority boundary
+
+This contract contains semantic sets, associations, facts, inputs, and
+expressions. Preserve the requested meaning independently of available APIs,
+resources, endpoints, fields, parameters, tables, resolver routes, or
+executable operations.
+"""
+
+
+SEMANTIC_QUESTION_FRAME_TOOL_NAME = "submit_question_frame"
+
+_MISSING_REQUESTED_FACT_INSTRUCTION = (
+    "Return kind=missing_requested_fact when the requested factual result "
+    "itself is not identifiable. The kind of thing counted or returned is stated "
+    "by the question or supplied by prior context. A population or set named by "
+    "its business role is identifiable; its member rows are retrieved as data."
+)
+_UNRESOLVED_PRIOR_REFERENCE_INSTRUCTION = (
+    "Return kind=unresolved_prior_turn_references when the factual result is "
+    "identifiable and a required person, object, time, or value is expressed "
+    "only by a pronoun or dependent phrase whose antecedent is absent. "
+    "A self-contained reference to an entity by name, code, or role description remains a supplied entity "
+    "reference; it does not require prior conversation merely because its "
+    "identifier must be resolved from API data."
+)
+
+
+SEMANTIC_QUESTION_FRAME_INSTRUCTIONS = """\
+Authoring order
+
+Write decision_basis first. For a complete question, write every answer_request,
+then supplied_values.
+
+decision_basis inventories the independent requested results and the
+references and literal values that constrain or compute them. Candidate-population nouns
+belong to requested meaning. Concrete names, codes, identifiers, times, and
+property values that restrict those candidates belong to supplied_values.
+A pre-existing definite entity description used to restrict other rows is also
+a supplied entity reference. Its identifier may need to be obtained from API
+data; a configured role or a particular relationship is not a candidate-kind
+modifier merely because no literal name is given.
+
+Answer requests
+
+Write one answer_request for each independent factual result. Values that the
+question asks the answer to state and that describe the same result row or group
+under one ordering and selection are columns of that one answer_request.
+
+A row or group request writes return_request_basis first. It states exactly
+what the answer must state, independently of relational mechanics. The result
+branch later writes projection from that basis. For one-per-candidate results,
+projection writes projection_basis, then candidate_identity=returned when the
+answer identifies each candidate row or candidate_identity=omitted when it
+states only requested related or property values. For grouped results, write
+returned_grouping_keys=all. explicitly_requested_values contains only answer
+values besides those returned grouping keys. Ordering
+and selection do not make a value part of the answer. Candidate identity is
+part of the answer when the question asks which candidates or pairs requested
+values with them. Candidate rows used only to produce one requested related or
+property value per row omit candidate identity. A result key is the candidate
+identity for one row per qualifying candidate, or the grouping tuple for one
+row per group. grouping_kind states whether each group key is an entity identity
+or a non-identity value. Each explicitly_requested_values item writes value_ref,
+then value_kind_basis, value_kind, meaning, and origin once. value_kind_basis
+states whether the requested answer states a related entity or a value.
+related_entity means the answer states which related person, organization,
+place, product, or other entity is involved. value means the answer states an
+attribute, measurement, status, time, quantity, or computed value without
+identifying an entity. A population scalar retains
+return_request_basis and its one returned meaning. Then write
+relational_shape_basis, then request. Inside request write relational_shape,
+result_grain_basis, then result. Each result branch owns its row source. Inside
+result, result_order writes ordering_request_basis, ordering, then selection.
+ordering_request_basis states whether the question asks to arrange or rank the
+result rows. ordering is no_ordering_requested when it does not, or ordered_by
+with the values that determine the requested order. When an existing grouping
+key determines order, use group_ref and copy that grouping's group_ref.
+supplied_values later
+declares each concrete non-selection operand once.
+
+population_rows names rows aggregated into one scalar. result_candidates names
+the instances that identify one-per-candidate result rows.
+grouped_observation_rows names occurrences aggregated into groups. Each field's
+instance_kind is unqualified. Concrete identities, properties, and times that
+restrict those rows are supplied values.
+
+result_grain_basis states what one result row represents after qualification
+and grouping. Then result selects one closed grain branch. Use
+one_value_for_population for an aggregate or Boolean proposition over the
+qualifying population, one_result_per_qualifying_row for properties or related
+values of each qualifying row, and one_result_per_group with grouping_meanings
+for one result per grouping tuple. Grain describes the computation, not the
+number of values expected today. A property of one identified instance still
+uses one_result_per_qualifying_row: the identity restricts the candidate rows,
+and projection omits candidate_identity unless the answer must state it.
+
+A request for the first, last, or top N qualifying occurrences uses
+one_result_per_qualifying_row. When entities are ranked by an aggregate over
+related occurrences, grouped_observation_rows names those occurrences and
+result is one_result_per_group with the entity as a grouping meaning.
+
+ordering lists meanings compared to arrange candidate or group rows before
+selection, in priority order. An ordering meaning varies across those rows; a
+shared time scope constrains them through supplied_values. Write
+ownership_basis stating whether the ordering meaning is one of projection's
+returned values. When it is, use requested_value_ref and copy value_ref.
+unreturned_ordering_meaning declares a meaning absent from projection.
+Ranking words such as first, last, highest, lowest, and top N select result
+rows.
+“Which A has the greatest B?” returns the group or candidate identity and uses
+an unreturned ordering meaning for B. “Which A has the greatest B, and what is
+B?” returns the identity and B, then orders by B's value_ref.
+
+For result kind one_value_for_population, returned_meanings contains exactly
+the one unknown value requested by the question and ordering is
+no_ordering_requested.
+Relationships used for qualification do not determine result grain. Preserve
+whether the requested answer is one scalar, individual rows, or grouped rows.
+A question asking whether something exists or is true requests one Boolean
+value for the population. Return member identities only when requested.
+
+For result_rows kind one_result_per_group, each grouping_meaning names one
+value that varies across result rows and defines one grouping dimension. It
+writes grouping_basis, meaning, origin, then grouping_kind. A
+non_identity_value grouping then writes grouping_value. Use observed_value for a recorded grouping value. Use computed_value for a per-row arithmetic grouping value. Use condition for a Boolean grouping condition. Use temporal_bucket with day, week,
+month, quarter, or year when rows are grouped into calendar periods.
+related_entity_identity identifies another entity related to each qualifying
+row, and non_identity_value identifies no entity. A result per qualifying row
+uses one_result_per_qualifying_row instead of grouping by that row's identity.
+A grouping dimension is a value carried by each qualifying row and
+identifies one requested result group. Shared qualifications and time scopes
+constrain the rows. An ordinal such as first two belongs to selection over
+ordered candidate rows.
+
+selection is all_results when every qualifying result is requested,
+first_rank_with_ties for a singular first, last, highest, or lowest request,
+and take_with_boundary_ties for an explicit positive number of ordered results.
+supplied_values.selection_limits declares that positive integer once and writes
+the one-based answer_request_number of the request it limits.
+
+relational_shape is ordinary for ordinary qualification,
+every_related_row when every related row must satisfy a condition,
+every_required_member_has_observation when each candidate is tested for whether every member of
+one required set has a matching observation from a different set. For this
+shape, result.coverage_candidates.instance_kind is the kind being tested and
+returned; required members and observations are later relational sets.
+same_related_row when one related row must participate in two or more stated
+relationships to the candidate.
+
+Each requested scalar value is one answer request. Sharing a candidate set or
+time scope does not merge scalar values. A requested row or group result is one
+answer request and may contain several columns or selected rows at that result
+grain. One request owns the returned meanings, ordering, and selection for a
+bounded subset. A repeated measure over a specified key set is one grouped
+requested fact, not one fact per key.
+
+Supplied values
+
+supplied_values contains entity references and literal operand values given
+by the question. A reference may identify its entity by a name, a code, or a
+definite description; its resolved identifier is obtained later from data. Candidate kinds, requested unknowns, grouping meanings, and observed
+or computed ordering meanings remain in answer_requests. A selection limit is
+declared only in supplied_values.selection_limits.
+
+A business subject or requested unknown belongs to the answer request.
+Entity references and values used by a condition or computation each belong to
+one supplied_values.operands item. Each operand declares answer_request_numbers:
+the one-based numbers of every answer request it constrains or computes. A shared
+condition belongs to every request that retains it, including a reference to those
+same qualifying rows. Independent requests keep their separate operands. Never
+assign an operand to a request merely because both occur in the question.
+Result counts belong to selection_limits.
+
+A business modifier may define the result row source when it names the
+business population, or a supplied scalar when it is independently compared.
+That meaning has one owner.
+
+A supplied value is an entity reference or literal value provided by the
+question for a comparison, arithmetic, time scope, or collection. Qualifying rows
+and required sets are owned by the result row-source field or relational_shape.
+A bounded result count is declared once in selection_limits for its answer
+request. Requested unknowns are owned by the answer request.
+
+One supplied value item owns one independent operand role. Alternatives filling
+the same role share one item. A value shared by several answer requests appears
+once.
+
+After supplied_values, set
+question_input_inventory_check.all_input_like_phrases_declared=true only when
+every condition or computation operand has exactly one supplied_values.operands item and
+every bounded result count has exactly one selection_limits item.
+
+supplied_values.operands contains one item for each independent supplied operand
+role. Each item writes meaning and denotation_basis, then chooses exactly one
+closed branch.
+
+entity_reference denotes a particular referent, or individually specified alternatives,
+whose existence and uniqueness the question presupposes. The reference may be a
+name, code, identifier, or definite description. Do not choose this branch merely
+because a supplied value appears in a name, code, or identifier property. A property
+condition that selects every matching row is a non_entity_value, even when that
+property is a name; it permits zero or many matching records. A reference to one
+entity requires resolution and ambiguity checks. Decide by the duplicate-value counterfactual: if two different records share this value, should both contribute, or would the user need to disambiguate the referent? The former is a property value; the latter is an entity reference. An entity reference introduced as the entity named X still has literal value X; introducing words do not turn a supplied name into a description. Description is reserved for a role or relationship whose actual identifying name, code, or ID is not supplied. Write instance_kind, then value. value is
+single_identity with one identity_value, or identity_alternatives with distinct
+identity_values that fill the same role. Each identity operand declares kind
+literal for an explicitly supplied name or code, or description for a role or
+relational description. A literal value contains the name or code itself; the
+surrounding words that introduce it belong to meaning. A description value
+contains the complete description. Preserve each member's form independently.
+For conversation_resolution origin,
+identity_value copies the shown resolved_value_text; resolved_input_ref is copied
+only into origin.
+
+non_entity_value is a supplied category, status, time, quantity, Boolean,
+duration, shared classification, or ordinary property-comparison value. It
+qualifies all matching rows rather than selecting one referent. Names and codes
+can be property-comparison values when the question requests the matching
+population. Write kind, then value. kind is
+categorical_value for a category, status, or shared classification;
+temporal_scope for a date, time, interval, or relative period; number for a
+numeric operand; boolean for true or false; or duration for an elapsed amount
+with a unit. Each value contains only the copied operands and their origin.
+"""
+
+
+class SemanticQuestionFrameTurnPrompt(TurnPromptBase):
+    turn_name = "question frame"
+    turn_task = "author requested results and supplied values"
 
     def __init__(self, request: QuestionContractRequest) -> None:
         self.request = request
 
-    def data_sections(
-        self,
-        builder: TurnPromptBuilder,
-    ) -> tuple[PromptSection, ...]:
-        resolution_payload = (
-            self.request.conversation_resolution.to_prompt_payload()
-            if self.request.conversation_resolution is not None
-            else {}
-        )
-        sections: list[PromptSection] = []
-        if resolution_payload:
-            sections.append(
-                builder.json_section(
-                    "Conversation resolution context:",
-                    resolution_payload,
-                    indent=2,
-                )
-            )
-        responses = self.request.clarification_responses
-        if responses:
-            sections.append(
-                builder.json_section(
-                    "Attributed clarification responses:",
-                    {
-                        "responses": [
-                            {
-                                "response_id": response.source.response_id,
-                                "clarification_id": response.source.clarification_id,
-                                "exact_user_text": response.source.exact_user_text,
-                                "missing_item_id": response.missing_item_id,
-                                "expected_value_kind": response.expected_value_kind,
-                            }
-                            for response in responses
-                        ]
-                    },
-                    indent=2,
-                )
-            )
-        return tuple(sections)
+    def system_prompt(self, context: TurnPromptContext) -> str:
+        return _semantic_question_system_prompt(context)
+
+    def data_sections(self, builder: TurnPromptBuilder) -> tuple[PromptSection, ...]:
+        return _conversation_resolution_sections(self.request, builder=builder)
 
     def instruction_sections(
-        self,
-        builder: TurnPromptBuilder,
+        self, builder: TurnPromptBuilder
     ) -> tuple[PromptSection, ...]:
         return (
-            builder.instruction_block(
-                "Decision Scope",
-                (
-                    "Interpret the factual intent expressed by the current question and its typed conversation-resolution context.",
-                    "Author the requested facts and the exact question inputs that apply to each requested fact.",
-                    "Set answer_requests_count to the number of complete requested facts in the current question plus annotations.",
-                    "Each answer_request describes exactly one complete requested fact.",
-                    "A repeated measure over a specified key set is one grouped requested fact, not one fact per key.",
-                    "Do not output implementation IDs, API details, calculations, or execution plans.",
-                    "Do not decide API feasibility, data availability, safety, endpoints, fields, operation decomposition, or execution.",
-                ),
+            builder.text_section(
+                "Question frame rules:", SEMANTIC_QUESTION_FRAME_INSTRUCTIONS
             ),
             builder.instruction_block(
-                "Question Boundary",
+                "Outcome",
                 (
-                    "Author the contract for the complete factual intent in the current question.",
-                    "The current question preserves the user's demand and discourse structure; conversation-resolution values supply context-dependent meaning.",
-                    "When active_clarification is present, interpret its original_question and ordered exchanges together, then author a new question contract from scratch.",
-                    "An active clarification supplies question context, not a prior question contract.",
-                    "Treat each resolved value as a binding meaning commitment for its current clause.",
-                    "Declared resolved question inputs are authoritative; copy them exactly when they constrain an answer request.",
-                    "Do not reconstruct additional prior-turn inputs from conversation history.",
-                    "Use only the current question and typed conversation-resolution context as question context.",
-                    "Return a clarification outcome only when visible context is insufficient to author one complete factual question contract.",
-                ),
-            ),
-            builder.instruction_block(
-                "Relational Ownership",
-                (
-                    "answer_subject: Kind of candidate instance to which answer_expression applies.",
-                    "answer_population: Candidate instances qualifying independently, before cross-instance operations.",
-                    "answer_expression: The base operation over qualifying candidates, plus any requested ordering and result selection.",
-                    "answer_outputs: Values or facts projected from the result.",
-                ),
-            ),
-            builder.instruction_block(
-                "Answer Requests",
-                (
-                    "answer_fact concisely and completely describes the requested factual result, including any user-stated ordering, comparison, or selection.",
-                    "answer_expression.family is required and classifies the catalog-blind answer shape, not API execution.",
-                    "Choose family for the base result.",
-                    "Use list_rows when each result is one qualifying candidate row. Use grouped_aggregate when an aggregate is computed separately for each candidate or group; each candidate is then its own group, including when ordering or selection keeps only the highest or lowest aggregate. Use scalar_value for one direct value; scalar_aggregate for one aggregate over all qualifying candidates; computed_scalar for arithmetic over facts or values; and set_difference, coverage_check, existence_check, and comparison_check for their stated set or comparison operations.",
-                    "Ordering and result selection are separate from family.",
-                    "Use scalar_aggregate for count answers only when the requested result is one scalar count for the whole requested population, such as how many X, number of X, or count of X.",
-                    "If the question asks for counts per group, by group, or for each specified key, use grouped_aggregate.",
-                    "For grouped_aggregate, set answer_expression.group_key.",
-                    "answer_expression.group_key.description names the result key or grouping dimension, such as region, period, category, or supplied key.",
-                    "Use value_source.kind=source_value when an existing source value is the group key.",
-                    "Use value_source.kind=temporal_bucket with grain when source times are divided into calendar groups.",
-                    "Use value_source.kind=specified_question_inputs for concrete supplied group members.",
-                    "For a repeated measure over specified inputs, put one measure/count result column in answer_outputs, not one output per key value.",
-                    "Use scalar_value only for one direct requested value, not for row/population counts.",
-                    "Choose answer_expression.family from the requested answer shape, not endpoints, fields, APIs, or a single keyword.",
-                    "answer_subject is required. It names the kind of candidate instance to which answer_expression applies, not the grammatical subject, a concrete entity restricting those instances, or a property returned through answer_outputs. For grouped_aggregate, answer_subject is the repeated fact-bearing instance being aggregated; group_key is the dimension that partitions those instances and is not answer_subject.",
-                    "Before classifying question inputs, write answer_subject.subject_text as the complete singular catalog-blind business kind being counted, listed, or measured. Preserve compound nouns that name the kind; exclude independently testable property modifiers.",
-                    "answer_subject.instance_interpretation.kind is required.",
-                    "Use NORMAL_BUSINESS_INSTANCE for ordinary business reporting questions over the subject as business users normally understand it.",
-                    "Use RAW_DATA_RECORD only when the user explicitly asks for persisted records, rows, logs, audit entries, raw data, database entries, or another data artifact.",
-                    "answer_population is required. It defines candidate instances qualifying independently, before cross-instance ordering, comparison, selection, or aggregation.",
-                    "answer_population.membership_tests contains only explicit user-stated predicates that qualify candidates independently. Candidate identity comes from answer_subject.",
-                    "Each membership test asks one predicate about one candidate property. Create separate EXPLICIT_USER_CONSTRAINT tests for different properties, even when they consume the same input; omit predicates already enforced by answer_expression.",
-                    "For each EXPLICIT_USER_CONSTRAINT, copy the exact question phrase that supplies its required value as the appropriate POPULATION_TESTS input. Property-value phrases use predicate_value; time phrases retain time_value. One copied phrase may supply several tests; each test references only inputs whose values answer that test.",
-                    "Within answer_population, question inputs are predicate operands, not separate tests; the number of inputs does not determine the number of tests.",
-                    "Within answer_population, when multiple inputs are alternative values for the same predicate, create one membership test for that predicate.",
-                    "Multiple MUST_PASS tests mean the candidate must satisfy every test. Create separate MUST_PASS tests only when that conjunction matches the question.",
-                    "The backend derives the applicable normal-instance or raw-record guard from answer_subject.instance_interpretation.",
-                    "Each membership test has polarity MUST_PASS unless the user explicitly asks to exclude matching instances, in which case use MUST_FAIL.",
-                    "On a threshold_value question input, comparison_operator states the candidate-to-boundary test: gt for above, gte for at least, lt for below, and lte for at most.",
-                    "Do not decide which API values, enum options, endpoints, fields, or params pass answer_population tests in this turn.",
-                    "answer_requests_count must equal the number of answer_requests.",
-                    "Do not put API details, endpoint names, field names, params, enum values, or execution operations in answer_subject.",
-                    "Do not include caveats, proof, data availability checks, endpoint/API terms, execution instructions, or underlying calculation support unless the user explicitly asks for that support as an answer part.",
-                ),
-            ),
-            builder.instruction_block(
-                "Ordering And Selection",
-                (
-                    "ordering states what result value determines order and which direction it uses.",
-                    "ordering.basis describes that value without naming an API field.",
-                    "Use direction=ascending when smaller or earlier values come first.",
-                    "Use direction=descending when larger or later values come first.",
-                    "For list_rows and grouped_aggregate, selection states which results survive.",
-                    "all_results keeps every result; take_one keeps every result tied for the first ordering value; take keeps the first explicit number of ordered results plus any later results tied with the last one kept.",
-                    "take_one and take require ordering. all_results may be ordered or unordered.",
-                    "Use take_one for a singular first, last, highest, or lowest request; tied results are co-results. Do not create a result_limit input for take_one.",
-                    "Use take only when the question explicitly supplies a positive result count.",
-                    "The result_limit input owns that count through RESULT_LIMIT; do not copy its input_ref into answer_expression.",
-                ),
-            ),
-            builder.instruction_block(
-                "Answer Outputs",
-                (
-                    "answer_outputs contain the values or facts projected from the result that the user asked to receive for that answer_fact.",
-                    "Each answer_output describes one requested result output, not one output per result instance.",
-                    "Set answer_output.role whenever the requested output matches one of these roles.",
-                    "Use ROW_COUNT for a count/cardinality output over the requested subject instances, such as sales count or number of orders.",
-                    "Use MEASURED_VALUE for a numeric measured output, such as sales total, average amount, max duration, or payroll total.",
-                    "Use ANSWER_VALUE for a direct requested value that is not a row count or measured numeric aggregate.",
-                    "Use POPULATION_SCOPE only when the user explicitly asks to return the population or scope itself as an answer output.",
-                    "Declared resolved inputs clarify referenced inputs, not answer_outputs.",
-                    "For list or table questions with multiple requested columns about the same rows or groups, use one answer_request and put each requested column in answer_outputs.",
-                ),
-            ),
-            builder.instruction_block(
-                "Question Inputs Overview",
-                (
-                    "answer_requests is declared before question_inputs.",
-                    "question_inputs declares each literal value or resolved row-set reference once.",
-                    "Create question_inputs for concrete values supplied by the question or conversation resolution that a population predicate, time constraint, compute expression, result limit, or closed set of explicitly named group members consumes.",
-                    "Do not create a question_inputs item for answer_subject.subject_text itself.",
-                ),
-            ),
-            builder.instruction_block(
-                "Literal Reference Inputs",
-                (
-                    "A reference_value is a supplied name, code, or identifier that refers to one particular person, place, organization, object, or record, including when answer_subject instances relate to it.",
-                    "A value used to compare candidates with one another or select them by position belongs to answer_expression. A boundary tested independently against each candidate is a threshold_value.",
-                    "A reference_value is required when the requested fact depends on that concrete value being grounded or directly verified before compilation.",
-                    "Do not use reference_value for answer_subject.subject_text, a generic resource class, answer category, grouping label, pronoun, or question word unless conversation resolution emits that pronoun as a resolved literal_text input.",
-                    "Use one literal_text reference_value item per separately addressable value, even when multiple values appear in one coordinated phrase.",
-                    "value_source_text is the smallest verbatim question span that supplies the value; exclude the subject and surrounding grammar.",
-                    "operand_text is the question-level operand after language/context resolution, not a Fervis-verified catalog value or canonical identity.",
-                    "operand_text contains only the operand. Remove subject words and grammatical material that states how the operand constrains the subject.",
-                    "For user-supplied names, codes, UUIDs, IDs, or other identifiers, copy the supplied value itself; grounding decides whether it is a verified canonical identity, resolver lookup, direct binding, or clarification.",
-                    "When the question or conversation-resolution context gives an attribute-like qualifier for the value, set field_label_text to the closest catalog-blind approximation of that attribute name; omit it only when no such qualifier exists.",
-                    "field_label_text helps grounding choose or verify the intended attribute; it is not a catalog field decision.",
-                    "value_meaning_hint briefly describes what kind of value this is, such as location, account, or code.",
-                    "Do not replace operand_text with a resolver result, API value, synonym, or different business object that was not supplied by the user or conversation context.",
-                ),
-            ),
-            builder.instruction_block(
-                "Predicate Values",
-                (
-                    "A predicate_value is a supplied non-identity value expressed as an independently testable property modifier of answer_subject instances. Status, state, category, type, and channel values are property modifiers even when written adjectivally; a compound noun that names answer_subject is not.",
-                    "Copy the user's property-value phrase without inferring catalog field boundaries. One phrase may supply several membership tests.",
-                ),
-            ),
-            builder.instruction_block(
-                "Threshold Values",
-                (
-                    "Use threshold_value when a supplied number is the boundary in a predicate evaluated independently for each candidate, such as 1000 in 'records with a measured value over 1000.'",
-                    "Copy only the boundary into operand_text. The population test states what is measured and whether it must be above, below, at least, or at most that boundary. Do not select an API field or parameter in this turn.",
-                ),
-            ),
-            builder.instruction_block(
-                "Literal Time Inputs",
-                (
-                    "Use kind=literal_text with role=time_value only for values that identify a calendar or clock instant, interval, or relative period; an ordinal position in an ordered result set is not a time value.",
-                    "For each time input, copy only the exact value span into value_source_text from the question context or declared resolved inputs.",
-                    "Set operand_text to the copied time phrase or resolved conversation text, without compiling it into dates.",
-                    "When a time input constrains an answer_request, assign it one POPULATION_TESTS use_id and reference that use_id from the applicable EXPLICIT_USER_CONSTRAINT.",
-                    "Do not compile date ranges, calendar dates, relative offsets, or time shapes in this turn.",
-                    "Use separate time inputs when the user asks for separate dates or periods. Use one range input when the user asks for one combined range.",
-                ),
-            ),
-            builder.instruction_block(
-                "Formula Values",
-                (
-                    "Use formula_value when a supplied literal is an arithmetic operand used to compute the returned answer, such as 10% in '10% of the total measured value.'",
-                    "A formula_value is not a population predicate and does not determine which candidates qualify.",
-                ),
-            ),
-            builder.instruction_block(
-                "Result Limits",
-                (
-                    "A result_limit is an explicit positive count, written in digits or words, stating how many ordered results to return.",
-                    "The positive integer in 'which N', 'top N', or 'first N' is a result_limit.",
-                    "Use kind=literal_text with role=result_limit for every supplied result_limit; it is a question input, not merely answer-shape wording.",
-                    "Set operand_text to canonical positive integer digits for that copied integer.",
-                    "Assign a result_limit through one RESULT_LIMIT question_input_uses record on the answer_request.",
-                    "Do not infer a result limit from singular or plural grammar, ordering, or superlative language.",
-                ),
-            ),
-            builder.instruction_block(
-                "Question Input Inventory",
-                (
-                    "Before finalizing question_inputs, actively inventory every word or phrase that is a reference value, predicate value, time value, threshold value, formula value, result limit, or resolved row-set reference.",
-                    "Declare exactly one question_inputs item for every inventoried phrase.",
-                    "Question-input identity comes from the copied occurrence, not from the predicate or field that consumes it. One copied occurrence remains one input when several predicates consume it.",
-                    "Each question_inputs item must include inventory_check.why_this_is_an_input explaining which input category it belongs to and why it constrains an answer request or supplies a value.",
-                    "A grouping dimension or temporal grain is answer_expression structure, not a question_input.",
-                    "Result-shape and result-axis inputs belong to answer_expression, not answer_population membership tests.",
-                    "Use answer_population membership_tests only for predicates that narrow subject instances independently of answer_expression's result axis.",
-                    "question_inputs declares concrete user/context values that those predicates, time predicates, or result limits depend on and that downstream stages must ground, compile, verify, or bind.",
-                    "Do not use answer_fact or membership-test prose as the only carrier for a concrete value that affects the requested fact.",
-                    "When one input constrains multiple requested facts, declare it once in question_inputs; each applicable answer_request gives it one fact-local question_input_uses record.",
-                    "Set question_input_inventory_check.all_input_like_phrases_declared=true only when every input-like word or phrase has a question_inputs item.",
-                ),
-            ),
-            builder.instruction_block(
-                "Clarification Boundary",
-                (
-                    "Write decision_basis first. First state whether the current wording identifies a requested fact and whether any required referent can only be identified from an earlier utterance.",
-                    "Then list every reference_value, predicate_value, time_value, threshold_value, formula_value, and result_limit the question contains and outcome must declare without assigning owners or predicates.",
-                    "Relational structure belongs in outcome; do not assess grounding, time compilation, or execution in decision_basis.",
-                    "Do not use a clarification outcome when visible context is sufficient to author a complete factual question contract.",
-                    "Use kind=missing_requested_fact only when explicit wording states no business fact, property, measure, relationship, comparison, or row set to return.",
-                    "Use missing_requested_fact only when no answer_fact can be authored from explicit question wording; an unresolved subject or input does not erase a stated answer_fact.",
-                    "If a required referent can only be identified from an earlier utterance and typed conversation resolution does not supply it, return kind=unresolved_prior_turn_references instead of a question_contract.",
-                    "A named property requested for a subject is a complete answer definition; its unknown value is the requested answer, not missing context.",
-                    "An explicitly named factual measure or business result is a sufficient answer definition; do not request a narrower metric merely because several API fields or calculations might later implement it.",
-                    "An explicit name, code, key, date, number, or other value is sufficient to author a question input; grounding determines whether it exists or resolves uniquely.",
-                    "A self-contained relative time expression is an explicit time value, not an unresolved conversation reference.",
-                    "For each unresolved prior-turn reference, copy source_text verbatim from the current question or visible context and set target_label to a concise catalog-blind category without copying or paraphrasing source_text.",
-                    "For missing_requested_fact, copy the incomplete request text into source_text.",
-                    "Set why_question_is_incomplete to the specific information needed to form a factual request.",
-                ),
-            ),
-            builder.instruction_block(
-                "Question Input Ownership",
-                (
-                    "Within each answer_request, author answer_expression, then question_input_uses, then answer_subject, answer_population, and answer_outputs.",
-                    "question_input_uses assigns each input used by this answer_request to exactly one semantic owner kind.",
-                    "Create exactly one question_input_uses record for each fact-local input_ref. When several population tests consume that input, they reuse its one use_id; do not create one use record per test.",
-                    "Use GROUP_KEY for the concrete question inputs that are members of a value_source.kind=specified_question_inputs closed group set.",
-                    "GROUP_KEY inputs are not candidate-row predicates; create no EXPLICIT_USER_CONSTRAINT for them.",
-                    "Use POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests, and give that use a unique use_id.",
-                    "Use COMPUTE_EXPRESSION when a formula_value is an operand in the requested computed_scalar expression.",
-                    "Use RESULT_LIMIT when the input supplies answer_expression's requested result limit.",
-                    "Each EXPLICIT_USER_CONSTRAINT lists the use_id of every POPULATION_TESTS operand it consumes in population_use_refs.",
-                    "One population test may reference several POPULATION_TESTS uses, and one POPULATION_TESTS use may be referenced by several tests.",
-                    "GROUP_KEY, COMPUTE_EXPRESSION, and RESULT_LIMIT inputs are never population_use_refs.",
-                    "An input identifying a related entity uses POPULATION_TESTS unless GROUP_KEY owns it as a specified group member.",
-                ),
-            ),
-            builder.instruction_block(
-                "Question Input Sources",
-                (
-                    "Use source=question_context for inputs copied directly from the current question.",
-                    "Use source=conversation_resolution only for declared resolved question inputs.",
-                    "Every value_source_text or reference_text must be copied verbatim from the current question or declared resolved inputs.",
-                ),
-            ),
-            builder.instruction_block(
-                "Conversation Resolution Inputs",
-                (
-                    "Conversation resolution has already classified each declared input. "
-                    "There is no input-kind or role decision in this turn.",
-                    "For every resolved input used by an answer_request, copy its "
-                    "declared kind, role, value text, resolved operand, and input_ref "
-                    "exactly into the corresponding question_input fields.",
-                    "When a declared resolved input has kind=row_set_reference and constrains an answer_request, copy it as a row_set_reference input with the same value_source_text and input_ref as resolved_input_ref.",
-                    "When a declared resolved input has kind=literal_text and constrains an answer_request, copy value_source_text, its resolved value as operand_text, role, input_ref as resolved_input_ref, and any field_label_text or value_meaning_hint.",
-                ),
-            ),
-            builder.instruction_block(
-                "Retained Prior Shape",
-                (
-                    "retained_frame_parts are fixed prior question meanings that "
-                    "conversation resolution selected for this clause.",
-                    "Use their typed kind and answer_shape together with the raw current "
-                    "question. Explicit current meaning remains authoritative; text in "
-                    "a retained part does not restore a subject or grouping that the "
-                    "current question replaced.",
-                ),
-            ),
-            builder.instruction_block(
-                "Output",
-                (
-                    "Before returning a complete contract, verify that each copied question occurrence has one fact-local owner, group-member and compute-expression inputs appear in no population test, and every POPULATION_TESTS input is referenced by at least one EXPLICIT_USER_CONSTRAINT.",
+                    "Return kind=question_meaning when the visible context specifies a complete factual request.",
+                    _MISSING_REQUESTED_FACT_INSTRUCTION,
+                    _UNRESOLVED_PRIOR_REFERENCE_INSTRUCTION,
                     "Return exactly one provider-native tool call.",
-                    "Set kind=question_contract when visible context is sufficient to author complete answer requests.",
-                    "Set kind=missing_requested_fact only when no complete factual result is identifiable.",
-                    "Set kind=unresolved_prior_turn_references only when a complete factual result is identifiable but required prior-turn references remain unresolved.",
+                ),
+            ),
+            builder.instruction_block(
+                "Grouping ownership",
+                (
+                    "A restriction shared by all groups remains a qualification unless the question also explicitly requests it as a grouping dimension.",
+                    "Comparison operators and arithmetic operations are structural relations, not supplied text operands. Copy their operand values only; a word is an operand when the question uses it as data.",
+                ),
+            ),
+            builder.instruction_block(
+                "Temporal operands",
+                (
+                    "A temporal_scope operand is one complete interval expression, including both boundaries when supplied. Copy the whole interval as one operand; its endpoints are not alternative values. Separate temporal scopes have separate supplied-value items.",
+                ),
+            ),
+            builder.instruction_block(
+                "Quantified relationship",
+                (
+                    "every_required_member_has_observation requires two different related row sets: every member of an independently required set must have at least one matching row from the observation set.",
+                    "An absence condition asks whether matching observations do not exist. It uses ordinary relational shape even when the search domain includes all stores or locations.",
+                    "every_related_row tests a property directly on each existing related row. An amount or another field on that row is not a separate observation set. Determine the logical requirement rather than treating a broad search domain as positive coverage.",
+                ),
+            ),
+            builder.instruction_block(
+                "Ordinal selection",
+                (
+                    "Use position_with_ties when the question requests one explicit ordered position, such as second, third, or position five. It retains only rows tied at that one-based position, excluding rows before that boundary.",
+                    "Declare that positive integer position once in supplied_values.selection_limits, with the answer_request_number it belongs to. The selection kind distinguishes an ordinal position from a requested number of results.",
+                    "Use take_with_boundary_ties for the first specified number of ordered rows, and first_rank_with_ties for a highest or lowest result without another explicit position.",
+                ),
+            ),
+            builder.instruction_block(
+                "Group result grain",
+                (
+                    "A grouped result returns its grouping keys and aggregate values. An individual related entity is a grouping key or a row-level result, not an aggregate value.",
+                    "When a question lists individual entities with their related entities or attributes, retain one result per qualifying row. Organizing a list by a related entity does not require aggregating away the listed entities.",
                 ),
             ),
         )
@@ -344,28 +524,299 @@ class QuestionContractTurnPrompt(TurnPromptBase):
     def response_contract(self) -> ProviderResponseContract:
         return ProviderResponseContract(
             provider_schema={
-                QUESTION_CONTRACT_TOOL_NAME: self._question_contract_outcome_schema(),
+                SEMANTIC_QUESTION_FRAME_TOOL_NAME: (
+                    build_semantic_question_frame_schema(
+                        conversation_input_refs=self._conversation_input_refs()
+                    )
+                )
             }
         )
 
     def tool_contract(self) -> ProviderToolContract:
+        schema = build_semantic_question_frame_schema(
+            conversation_input_refs=self._conversation_input_refs()
+        )
         return ProviderToolContract(
             tool_specs=(
                 required_tool_spec(
-                    tool_name=QUESTION_CONTRACT_TOOL_NAME,
+                    tool_name=SEMANTIC_QUESTION_FRAME_TOOL_NAME,
                     tool_description=(
-                        "Submit the catalog-blind question-contract outcome."
+                        "Submit the requested-result frame and supplied values."
                     ),
-                    input_schema=self._question_contract_outcome_schema(),
+                    input_schema=schema,
                 ),
             )
         )
 
-    def _question_contract_outcome_schema(self) -> dict[str, object]:
-        return build_question_contract_decisions_schema(
-            conversation_inputs=(
-                self.request.conversation_resolution.inputs
-                if self.request.conversation_resolution is not None
-                else ()
+    def _conversation_input_refs(self) -> tuple[str, ...]:
+        return _conversation_input_refs(self.request)
+
+
+class SemanticQuestionContractTurnPrompt(TurnPromptBase):
+    """Author the relational contract from the canonical question frame."""
+
+    turn_name = "question contract"
+    turn_task = "author the semantic relational contract"
+
+    def __init__(
+        self,
+        request: QuestionContractRequest,
+        *,
+        meaning: ParsedSemanticQuestionMeaning,
+    ) -> None:
+        self.request = request
+        self.meaning = meaning
+
+    def system_prompt(self, context: TurnPromptContext) -> str:
+        return _semantic_question_system_prompt(context)
+
+    def data_sections(self, builder: TurnPromptBuilder) -> tuple[PromptSection, ...]:
+        return (
+            *_conversation_resolution_sections(self.request, builder=builder),
+            builder.json_section(
+                "Fixed question meaning:",
+                _question_meaning_payload(self.meaning),
+                indent=2,
             ),
         )
+
+    def instruction_sections(
+        self, builder: TurnPromptBuilder
+    ) -> tuple[PromptSection, ...]:
+        origin_rules = [
+            "For every semantic origin, meaning states the local semantic meaning and source cites where that meaning came from.",
+            "Use source=question_context with resolved_input_ref=null for current-question meaning.",
+        ]
+        if self._conversation_input_refs():
+            origin_rules.append(
+                "Use source=conversation_resolution with its shown resolved_input_ref for resolved context text."
+            )
+        return (
+            builder.instruction_block(
+                "Origins",
+                tuple(origin_rules),
+            ),
+            builder.text_section(
+                "Question Contract rules:",
+                SEMANTIC_QUESTION_CONTRACT_INSTRUCTIONS,
+            ),
+            builder.instruction_block(
+                "Outcome",
+                (
+                    "Return kind=question_contract when the visible context specifies a complete factual request.",
+                    _MISSING_REQUESTED_FACT_INSTRUCTION,
+                    _UNRESOLVED_PRIOR_REFERENCE_INSTRUCTION,
+                    "Return exactly one provider-native tool call.",
+                ),
+            ),
+            builder.instruction_block(
+                "Operand ownership",
+                (
+                    "An input_comparison is fact OPERATOR input, in that order. The operator states how the observed fact compares with the supplied input.",
+                    "Write the requested arithmetic directly. Do not add neutral, cancelling, or repeated operations. A constant uses a supplied input_ref; it is never an observed fact.",
+                ),
+            ),
+            builder.instruction_block(
+                "Input references",
+                (
+                    "Every supplied input must be referenced by an input_ref in the executable semantic structure. Repeating its meaning in instance_kind or origin text does not use that input.",
+                    "When a supplied value identifies a class, category, or state of the candidate population, express that restriction as a qualification using the supplied input_ref. Retain it even when the population description already mentions the same class.",
+                ),
+            ),
+        )
+
+    def response_contract(self) -> ProviderResponseContract:
+        return ProviderResponseContract(
+            provider_schema={QUESTION_CONTRACT_TOOL_NAME: self._schema()}
+        )
+
+    def tool_contract(self) -> ProviderToolContract:
+        schema = self._schema()
+        return ProviderToolContract(
+            tool_specs=(
+                required_tool_spec(
+                    tool_name=QUESTION_CONTRACT_TOOL_NAME,
+                    tool_description="Submit the semantic relational Question Contract outcome.",
+                    input_schema=schema,
+                ),
+            )
+        )
+
+    def _conversation_input_refs(self) -> tuple[str, ...]:
+        return _conversation_input_refs(self.request)
+
+    def _schema(self) -> dict[str, object]:
+        return build_semantic_question_contract_schema_for_meaning(
+            self.meaning,
+            conversation_input_refs=self._conversation_input_refs(),
+        )
+
+
+def _semantic_question_system_prompt(context: TurnPromptContext) -> str:
+    organization_name = context.host.organization_name.strip()
+    organization_context = f" for {organization_name}" if organization_name else ""
+    return (
+        "You are authoring the semantic meaning of a factual "
+        f"business or operational question{organization_context}. The question "
+        "and declared conversation resolution are the complete semantic authority. "
+        "The result is independent of APIs, storage, fields, sources, and executable "
+        "operations."
+    )
+
+
+def _question_meaning_payload(
+    meaning: ParsedSemanticQuestionMeaning,
+) -> dict[str, object]:
+    denotation_by_input_ref = {
+        item.input_ref: item for item in meaning.input_denotations
+    }
+    return {
+        "answer_requests": [
+            {
+                "requested_fact_ref": item.requested_fact_id,
+                "return_request_basis": item.return_request_basis,
+                "relational_shape_basis": item.relational_shape_basis,
+                "result_grain_basis": item.result_grain_basis,
+                "ordering_request_basis": item.ordering_request_basis,
+                "result_kind": item.result_kind,
+                "candidate_kind": _origin_payload(item.candidate_set_origin),
+                "grouping_meanings": [
+                    {
+                        "group_ref": group_ref,
+                        **_origin_payload(origin),
+                        "grouping_kind": grouping_kind,
+                        **(
+                            {"grouping_value": _grouping_value_payload(value_shape)}
+                            if value_shape is not None
+                            else {}
+                        ),
+                    }
+                    for group_ref, origin, grouping_kind, value_shape in zip(
+                        item.grouping_refs,
+                        item.grouping_origins,
+                        item.grouping_kinds,
+                        item.grouping_value_shapes,
+                        strict=True,
+                    )
+                ],
+                "ordering_meanings": [
+                    {
+                        **_origin_payload(origin),
+                        **({"group_ref": group_ref} if group_ref is not None else {}),
+                        **({"value_ref": value_ref} if value_ref is not None else {}),
+                    }
+                    for origin, group_ref, value_ref in zip(
+                        item.ordering_origins,
+                        item.ordering_group_refs,
+                        item.ordering_value_refs,
+                        strict=True,
+                    )
+                ],
+                "result_key_meanings": [
+                    {
+                        **_origin_payload(origin),
+                        "key_kind": output_kind,
+                    }
+                    for origin, output_kind in zip(
+                        item.output_origins[: item.result_key_count],
+                        item.output_kinds[: item.result_key_count],
+                        strict=True,
+                    )
+                ],
+                "requested_value_meanings": [
+                    {
+                        "value_ref": value_ref,
+                        "value_kind": output_kind,
+                        **_origin_payload(origin),
+                    }
+                    for value_ref, origin, output_kind in zip(
+                        item.requested_value_refs,
+                        item.output_origins[item.result_key_count :],
+                        item.output_kinds[item.result_key_count :],
+                        strict=True,
+                    )
+                ],
+                "selection": {
+                    "kind": item.selection_kind,
+                    "limit_input_ref": item.selection_limit_input_ref,
+                },
+                "relational_shape": item.relational_shape,
+            }
+            for item in meaning.answer_requests
+        ],
+        "inputs": [
+            {
+                "input_ref": item.id,
+                "operand": item.operand,
+                "value_type": _value_type_label(item.value_type),
+                "origin": _origin_payload(item.origin),
+                "operand_meaning": denotation_by_input_ref[item.id].operand_meaning,
+                "denotation_basis": denotation_by_input_ref[item.id].denotation_basis,
+                "denoted_instance_kind": denotation_by_input_ref[
+                    item.id
+                ].denoted_instance_kind,
+                "input_kind": denotation_by_input_ref[item.id].kind.value,
+            }
+            for item in meaning.inputs
+        ],
+    }
+
+
+def _origin_payload(origin: SourceOrigin) -> dict[str, object]:
+    return {
+        "source": origin.source.value,
+        "meaning": origin.meaning,
+        "resolved_input_ref": origin.resolved_input_ref,
+    }
+
+
+def _grouping_value_payload(
+    shape: tuple[str, str | None],
+) -> dict[str, str]:
+    kind, grain = shape
+    if kind in {"observed_value", "computed_value", "condition"} and grain is None:
+        return {"kind": kind}
+    if kind == "temporal_bucket" and grain is not None:
+        return {"kind": kind, "grain": grain}
+    raise ValueError("invalid grouping value shape")
+
+
+def _value_type_label(value_type: ValueType) -> object:
+    if isinstance(value_type, CollectionType):
+        return {
+            "kind": "collection",
+            "element_kind": value_type_kind(value_type.element_type),
+        }
+    return {"kind": value_type_kind(value_type)}
+
+
+def _conversation_resolution_sections(
+    request: QuestionContractRequest,
+    *,
+    builder: TurnPromptBuilder,
+) -> tuple[PromptSection, ...]:
+    resolution = request.conversation_resolution
+    if resolution is None:
+        return ()
+    payload = resolution.to_prompt_payload()
+    if not payload:
+        return ()
+    return (
+        builder.json_section("Conversation resolution context:", payload, indent=2),
+    )
+
+
+def _conversation_input_refs(request: QuestionContractRequest) -> tuple[str, ...]:
+    resolution = request.conversation_resolution
+    if resolution is None:
+        return ()
+    return tuple(item.input_ref for item in resolution.inputs)
+
+
+__all__ = [
+    "SEMANTIC_QUESTION_CONTRACT_INSTRUCTIONS",
+    "SEMANTIC_QUESTION_FRAME_INSTRUCTIONS",
+    "SEMANTIC_QUESTION_FRAME_TOOL_NAME",
+    "SemanticQuestionContractTurnPrompt",
+    "SemanticQuestionFrameTurnPrompt",
+]

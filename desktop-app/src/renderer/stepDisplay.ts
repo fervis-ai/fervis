@@ -56,14 +56,28 @@ export function semanticStepSignalsFor(
   }
   if (stepKey === "query_enrichment") {
     return compactSignals([
-      ...semantic.resolverCandidates.map((candidate) =>
-        semanticSignal("Resolver", resolverCandidateText(candidate))
+      signalFromValues(
+        semantic.resourceRecalls.length === 1
+          ? "Resource recall"
+          : "Resource recalls",
+        semantic.resourceRecalls.map((recall) => titleWords(recall.resourceName)),
+        5
       )
     ]);
   }
   if (stepKey === "grounding") {
     return compactSignals([
-      groundingInputsSignal(semantic)
+      ...semantic.resolverCandidates.map((candidate) =>
+        semanticSignal("Resolver candidate", resolverCandidateText(candidate))
+      ),
+      interpretedInputsSignal(semantic)
+    ]);
+  }
+  if (stepKey === "read_eligibility") {
+    return compactSignals([
+      ...semantic.identitySelections.map((selection) =>
+        semanticSignal("Identity selection", identitySelectionText(selection))
+      )
     ]);
   }
   return [];
@@ -262,11 +276,10 @@ function resolverCandidateText(candidate: StepSemantic["resolverCandidates"][num
   return `${resolver}: ${formatEvidenceText(candidate.basis)}`;
 }
 
-function groundingInputsSignal(semantic: StepSemantic): StepSignal | null {
-  const inputs = [
-    ...semantic.interpretedInputs.map(interpretedInputItem),
-    ...semantic.groundingResults.map(groundingResultInputItem)
-  ].filter((input): input is StepInputItem => input !== null);
+function interpretedInputsSignal(semantic: StepSemantic): StepSignal | null {
+  const inputs = semantic.interpretedInputs
+    .map(interpretedInputItem)
+    .filter((input): input is StepInputItem => input !== null);
   if (inputs.length === 0) {
     return null;
   }
@@ -291,47 +304,17 @@ function interpretedInputItem(
   };
 }
 
-function groundingResultInputItem(
-  result: StepSemantic["groundingResults"][number]
-): StepInputItem | null {
-  const source = result.inputText || result.matchedLabel;
-  const entity = titleWords(result.entityKind);
-  const matchedIdentity = groundedIdentityText(result);
-  const summary = groundedInputSummary(entity, matchedIdentity);
-  if (source === "" || summary === "") {
-    return null;
-  }
-  return {
-    sourceText: source,
-    summary
-  };
-}
-
-function groundedInputSummary(entity: string, matchedIdentity: string): string {
-  if (entity !== "" && matchedIdentity !== "") {
-    return `${entity} (${matchedIdentity})`;
-  }
-  return entity || matchedIdentity;
-}
-
-function groundedIdentityText(
-  result: StepSemantic["groundingResults"][number]
+function identitySelectionText(
+  selection: StepSemantic["identitySelections"][number]
 ): string {
-  const fieldValue = groundedIdentityFieldValue(result);
-  const resolver = result.resolverLabel || titleWords(result.resolverReadId);
-  if (fieldValue === "") {
-    return resolver === "" ? "" : `via ${resolver}`;
+  const route = titleWords(selection.resolverRouteId);
+  const option = titleWords(selection.canonicalOptionId);
+  const selected = [option, route].filter((value) => value !== "").join(" via ");
+  const basis = formatEvidenceText(selection.basis);
+  if (selected === "") {
+    return basis || titleWords(selection.outcome);
   }
-  return resolver === "" ? fieldValue : `${fieldValue} via ${resolver}`;
-}
-
-function groundedIdentityFieldValue(
-  result: StepSemantic["groundingResults"][number]
-): string {
-  if (result.matchedField === "" || result.matchedValue === "") {
-    return "";
-  }
-  return `${result.matchedField}: ${result.matchedValue}`;
+  return basis === "" ? selected : `${selected}: ${basis}`;
 }
 
 function conversationClauseSignals(

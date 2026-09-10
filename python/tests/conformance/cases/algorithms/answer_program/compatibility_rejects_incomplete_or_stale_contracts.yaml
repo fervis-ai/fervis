@@ -1,0 +1,95 @@
+id: compatibility_rejects_incomplete_or_stale_contracts
+kind: algorithm
+algorithm: answer_program.instantiate
+description: Incomplete, incompatible, or stale program contracts reject before source reads.
+input:
+  schema_revision: 1
+  attempts:
+    - &base_attempt
+      id: missing_function
+      program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/invocation}
+      catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
+      environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/invocation}
+      bindings: &bindings
+        - parameter_id: question.store_ids
+          value: {kind: identity_set, entity_kind: store, key_id: primary_key, key_component_id: store_id, values: [store_1]}
+          provenance: {kind: question_input}
+        - parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [COMPLETED]}
+          provenance: {kind: semantic_choice}
+      compatibility: &missing_function
+        schema_revision: 23
+        compiler_version: fervis.answer_program.compiler@49
+        function_semantics:
+          - {function_key: answer.materialize, version: '3'}
+          - {function_key: fact.materialize, version: '3'}
+          - {function_key: proof.construct, version: '3'}
+          - {function_key: relation.project, version: '3'}
+          - {function_key: source.instantiate_read, version: '3'}
+          - {function_key: source.read_relation, version: '3'}
+        source_contracts: &sources
+          - {kind: catalog_read, source_id: rs_c9f84da27ca2f8d1, fingerprint: e5f219437b6d51ec5e9f09abaccfc93da03eb8974bcae5656647fa59278c801b}
+    - <<: *base_attempt
+      id: extra_function
+      compatibility:
+        <<: *missing_function
+        function_semantics:
+          - {function_key: answer.classify, version: '3'}
+          - {function_key: answer.materialize, version: '3'}
+          - {function_key: fact.materialize, version: '3'}
+          - {function_key: proof.construct, version: '3'}
+          - {function_key: relation.aggregate, version: '3'}
+          - {function_key: relation.project, version: '3'}
+          - {function_key: source.instantiate_read, version: '3'}
+          - {function_key: source.read_relation, version: '3'}
+        source_contracts: *sources
+    - <<: *base_attempt
+      id: incompatible_compiler
+      compatibility:
+        <<: *missing_function
+        compiler_version: incompatible.compiler@2
+        function_semantics: &functions
+          - {function_key: answer.classify, version: '3'}
+          - {function_key: answer.materialize, version: '3'}
+          - {function_key: fact.materialize, version: '3'}
+          - {function_key: proof.construct, version: '3'}
+          - {function_key: relation.project, version: '3'}
+          - {function_key: source.instantiate_read, version: '3'}
+          - {function_key: source.read_relation, version: '3'}
+        source_contracts: *sources
+    - <<: *base_attempt
+      id: incompatible_function
+      compatibility:
+        <<: *missing_function
+        function_semantics:
+          - {function_key: answer.classify, version: incompatible}
+          - {function_key: answer.materialize, version: '3'}
+          - {function_key: fact.materialize, version: '3'}
+          - {function_key: proof.construct, version: '3'}
+          - {function_key: relation.project, version: '3'}
+          - {function_key: source.instantiate_read, version: '3'}
+          - {function_key: source.read_relation, version: '3'}
+        source_contracts: *sources
+    - <<: *base_attempt
+      id: previous_compiler
+      compatibility:
+        <<: *missing_function
+        compiler_version: fervis.answer_program.compiler@10
+        function_semantics: *functions
+        source_contracts: *sources
+    - <<: *base_attempt
+      id: incompatible_source
+      catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales_changed_endpoint}
+      compatibility:
+        <<: *missing_function
+        function_semantics: *functions
+        source_contracts: *sources
+expect:
+  result_equals:
+    attempts:
+      - {id: missing_function, status: rejected, code: incomplete_compatibility_manifest, reads: 0}
+      - {id: extra_function, status: rejected, code: incomplete_compatibility_manifest, reads: 0}
+      - {id: incompatible_compiler, status: rejected, code: incompatible_compiler_version, reads: 0}
+      - {id: incompatible_function, status: rejected, code: incompatible_function_semantics, reads: 0}
+      - {id: previous_compiler, status: rejected, code: incompatible_compiler_version, reads: 0}
+      - {id: incompatible_source, status: rejected, code: incompatible_source_contract, reads: 0}

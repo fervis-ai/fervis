@@ -10,7 +10,6 @@ from fervis.lookup.conversation_resolution import (
     ConversationResolutionRequest,
     generate_conversation_resolution,
 )
-from fervis.lookup.conversation_resolution.prompt import ConversationResolutionTurnPrompt
 from fervis.lookup.conversation_resolution.schema import (
     build_conversation_resolution_tool_schemas,
 )
@@ -33,19 +32,6 @@ def _context_source() -> ConversationContextSource:
             ),
         ),
     )
-
-
-def test_retained_frame_shape_has_one_model_facing_owner():
-    prompt = ConversationResolutionTurnPrompt(
-        question="What about stores?",
-        context_sources=(_context_source(),),
-    ).to_model_invocation().prompt_text
-
-    assert (
-        "retained_frame_parts is the sole representation of fixed prior question "
-        "shape" in prompt
-    )
-    assert "Do not repeat retained frame meaning in resolved values." in prompt
 
 
 def test_conversation_resolution_schemas_are_provider_compatible_root_objects():
@@ -135,15 +121,19 @@ class _ConversationResolutionModelPort:
                                 "The prior rows supply the referent omitted by the "
                                 "current question."
                             ),
-                            "contextualized_question": (
-                                "What quantities were in the prior rows?"
-                            ),
                             "clauses": [
                                 {
                                     "current_clause_text": (
                                         "What quantities were those?"
                                     ),
                                     "occurrence": 1,
+                                    "request_shape_basis": (
+                                        "The current clause asks for quantities; "
+                                        "prior context resolves only those."
+                                    ),
+                                    "request_shape_source": (
+                                        "current_clause_supplies_request"
+                                    ),
                                     "resolved_text": (
                                         "What quantities were in the prior rows?"
                                     ),

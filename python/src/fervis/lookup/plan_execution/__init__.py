@@ -1,1 +1,1 @@
-"""Lookup deterministic fact-plan execution package."""
+"""Deterministic answer-program execution."""

@@ -8,7 +8,7 @@ from typing import Any
 
 from fervis.model_io.turns import ModelTurnPurpose
 from fervis.observability.event_contracts import EventPayloadKey
-from fervis.lineage.enums import RunStepKey, RunStepKind
+from fervis.lineage.enums import RunStepKey, RunStepKind, SourceInspectionPhase
 from fervis.lineage.ports import LineageRecorderPort
 from fervis.lineage.recorder import (
     CatalogEndpointWrite,
@@ -30,17 +30,28 @@ _MODEL_TURN_STEP_KEYS = {
     ModelTurnPurpose.GROUNDING: RunStepKey.GROUNDING,
     ModelTurnPurpose.READ_ELIGIBILITY: RunStepKey.READ_ELIGIBILITY,
     ModelTurnPurpose.PLAN_SELECTION: RunStepKey.PLAN_SELECTION,
+    ModelTurnPurpose.SOURCE_ACCESS: RunStepKey.SOURCE_ACCESS,
+    ModelTurnPurpose.SOURCE_POPULATION: RunStepKey.SOURCE_POPULATION,
+    ModelTurnPurpose.SOURCE_REALIZATION: RunStepKey.SOURCE_REALIZATION,
     ModelTurnPurpose.SOURCE_BINDING: RunStepKey.SOURCE_BINDING,
-    ModelTurnPurpose.PATTERN_FACT_PLANNING: RunStepKey.FACT_PLANNING,
-    ModelTurnPurpose.FACT_PLAN: RunStepKey.FACT_PLANNING,
     ModelTurnPurpose.ANSWER_SYNTHESIS: RunStepKey.ANSWER_SYNTHESIS,
 }
 
 _DETERMINISTIC_STEP_SEQUENCE = {
     RunStepKey.QUESTION_CONTRACT: 100,
+    RunStepKey.SOURCE_INSPECTION: 8800,
     RunStepKey.COMPILE: 8900,
     RunStepKey.EXECUTE: 9000,
     RunStepKey.RENDER: 9100,
+}
+
+
+_INSPECTION_SEQUENCES = {
+    SourceInspectionPhase.CONTINUATION_IDENTITY: 8650,
+    SourceInspectionPhase.IDENTITY: 8750,
+    SourceInspectionPhase.CONTINUATION: 8700,
+    SourceInspectionPhase.SEMANTIC: 8800,
+    SourceInspectionPhase.EXECUTION: 8850,
 }
 
 
@@ -112,6 +123,27 @@ class LineageRuntimeStepSink:
                 "model-turn audit lineage persistence failed"
             ) from exc
 
+    def record_source_inspection(
+        self,
+        *,
+        phase: SourceInspectionPhase,
+        catalog_endpoints=(),
+        source_reads=(),
+        artifacts=(),
+    ):
+        return self._record_deterministic(
+            step_key=RunStepKey.SOURCE_INSPECTION,
+            output_summary_json={
+                "phase": phase.value,
+                "inspectedReadCount": len(source_reads),
+            },
+            base_sequence=_INSPECTION_SEQUENCES[phase],
+            error_json={},
+            catalog_endpoints=catalog_endpoints,
+            source_reads=source_reads,
+            artifacts=artifacts,
+        )
+
     def record_execution(
         self,
         *,
@@ -161,6 +193,11 @@ class LineageRuntimeStepSink:
 
     def execution_step_id(self) -> str:
         return self._deterministic_step_id(RunStepKey.EXECUTE)
+
+    def source_inspection_step_id(self, phase: SourceInspectionPhase) -> str:
+        return self._deterministic_step_id(
+            RunStepKey.SOURCE_INSPECTION, base_sequence=_INSPECTION_SEQUENCES[phase]
+        )
 
     def compile_step_id(self) -> str:
         return self._deterministic_step_id(RunStepKey.COMPILE)
@@ -224,9 +261,13 @@ class LineageRuntimeStepSink:
             error_json={},
         )
 
-    def _deterministic_step_id(self, step_key: RunStepKey) -> str:
+    def _deterministic_step_id(
+        self, step_key: RunStepKey, *, base_sequence: int | None = None
+    ) -> str:
         sequence = _attempt_sequence(
-            base_sequence=_DETERMINISTIC_STEP_SEQUENCE[step_key],
+            base_sequence=_DETERMINISTIC_STEP_SEQUENCE[step_key]
+            if base_sequence is None
+            else base_sequence,
             attempt=self.attempt,
         )
         return _step_id(run_id=self.run_id, sequence=sequence, step_key=step_key)
@@ -240,9 +281,12 @@ class LineageRuntimeStepSink:
         catalog_endpoints: tuple[CatalogEndpointWrite, ...] = (),
         source_reads: tuple[SourceReadWrite, ...] = (),
         artifacts: tuple[RunArtifactWrite, ...] = (),
+        base_sequence: int | None = None,
     ) -> RunStepWrite:
         sequence = _attempt_sequence(
-            base_sequence=_DETERMINISTIC_STEP_SEQUENCE[step_key],
+            base_sequence=_DETERMINISTIC_STEP_SEQUENCE[step_key]
+            if base_sequence is None
+            else base_sequence,
             attempt=self.attempt,
         )
         step = _step(

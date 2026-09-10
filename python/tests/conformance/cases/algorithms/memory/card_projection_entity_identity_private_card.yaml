@@ -5,7 +5,6 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
-  current_question: What about Alice?
   conversation_context:
     factArtifacts:
       - artifactId: turn_1

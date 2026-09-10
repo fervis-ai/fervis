@@ -536,7 +536,7 @@ def test_fervis_models_lists_strict_tool_certified_providers(tmp_path: Path) -> 
         },
         {
             "name": "openai",
-            "transport": "openai_chat_completions",
+            "transport": "openai_responses",
             "default_model": "gpt-5.4-mini",
             "default_model_ref": "openai:gpt-5.4-mini",
             "strict_tools": True,
@@ -4382,7 +4382,7 @@ def test_fervis_migrate_creates_sqlite_store_and_unblocks_doctor(
     assert migrate_envelope["payload"]["target"] == "sqlite"
     assert migrate_envelope["payload"]["location"] == ".fervis/fervis.sqlite3"
     assert migrate_envelope["payload"]["status"] == "applied"
-    assert migrate_envelope["payload"]["target_revision"] == "fervis.0003"
+    assert migrate_envelope["payload"]["target_revision"] == "fervis.0004"
     assert migrate_envelope["next_actions"] == [run_doctor_action()]
     assert (root / ".fervis" / "fervis.sqlite3").is_file()
     with sqlite3.connect(root / ".fervis" / "fervis.sqlite3") as connection:

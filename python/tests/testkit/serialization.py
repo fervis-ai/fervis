@@ -3,9 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 
 def portable_value(value: Any) -> Any:
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, Decimal):
         return format(value, "f")
     if is_dataclass(value) and not isinstance(value, type):

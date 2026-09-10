@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from rest_framework.mixins import ListModelMixin
 from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
 
@@ -9,6 +11,11 @@ from fervis.host_api.contracts import PaginationContract, PaginationKind
 
 
 def pagination_contract(view_class: type) -> PaginationContract | None:
+    declared = getattr(view_class, "fervis_pagination", None)
+    if declared is not None:
+        if not isinstance(declared, Mapping):
+            raise ValueError("fervis_pagination must be a pagination contract mapping")
+        return PaginationContract.from_public_dict(declared)
     try:
         if not issubclass(view_class, ListModelMixin):
             return None

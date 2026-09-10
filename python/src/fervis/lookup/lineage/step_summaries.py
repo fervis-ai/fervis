@@ -12,25 +12,9 @@ from fervis.lineage.step_summary import (
     merge_step_summary_json,
     step_summary_json,
 )
-from fervis.lookup.answer_program.values import (
-    FactValue,
-    IdentitySetValuePayload,
-    IdentityValuePayload,
-    LiteralValuePayload,
-    NamedValuePayload,
-    TimeValuePayload,
-)
-from fervis.lookup.fact_planning.lineage_summary import (
-    fact_planning_step_summary,
-)
-from fervis.lookup.grounding.model import CanonicalInputLedger
 from fervis.lookup.lineage.explanation_metadata import (
     lineage_explanation_items,
     lineage_explanation_paths_from_payload,
-)
-from fervis.lookup.question_contract import QuestionContract
-from fervis.lookup.source_binding.lineage_summary import (
-    source_binding_step_summary,
 )
 from fervis.model_io.turns import ModelTurnPurpose
 from fervis.observability.event_contracts import EventPayloadKey
@@ -52,29 +36,12 @@ def model_turn_output_summary(payload: dict[str, Any]) -> dict[str, object]:
     )
 
 
-def add_grounding_result_semantics(
-    summary: dict[str, object],
-    *,
-    ledger: CanonicalInputLedger,
-    question_contract: QuestionContract,
-) -> dict[str, object]:
-    return merge_step_semantic_json(
-        summary,
-        *_grounding_result_semantic_items(
-            ledger=ledger,
-            question_contract=question_contract,
-        ),
-    )
-
-
 def _summary_source(
     *,
     purpose: str,
     parsed: dict[str, Any],
     submitted: dict[str, Any],
 ) -> dict[str, Any]:
-    if purpose in {ModelTurnPurpose.PATTERN_FACT_PLANNING, ModelTurnPurpose.FACT_PLAN}:
-        return submitted or parsed
     return parsed or submitted
 
 
@@ -83,11 +50,49 @@ def _turn_summary(*, purpose: str, source: dict[str, Any]) -> dict[str, object]:
         return _read_eligibility_step_summary(source)
     if purpose == ModelTurnPurpose.PLAN_SELECTION:
         return _plan_selection_step_summary(source)
-    if purpose == ModelTurnPurpose.SOURCE_BINDING:
-        return source_binding_step_summary(source)
-    if purpose in {ModelTurnPurpose.PATTERN_FACT_PLANNING, ModelTurnPurpose.FACT_PLAN}:
-        return fact_planning_step_summary(source)
+    if purpose in {ModelTurnPurpose.SOURCE_ACCESS, ModelTurnPurpose.SOURCE_POPULATION, ModelTurnPurpose.SOURCE_REALIZATION, ModelTurnPurpose.SOURCE_BINDING}:
+        return _source_binding_step_summary(source)
     return {}
+
+
+def _source_binding_step_summary(payload: dict[str, Any]) -> dict[str, object]:
+    return step_summary_json(
+        *(
+            StepSummaryItem(
+                text=basis,
+                is_explanation=True,
+                basis=basis,
+                path=path,
+            )
+            for path, basis in _authored_bases(payload)
+        )
+    )
+
+
+def _authored_bases(
+    value: object,
+    *,
+    path: tuple[str, ...] = (),
+) -> tuple[tuple[tuple[str, ...], str], ...]:
+    if isinstance(value, dict):
+        return tuple(
+            item
+            for key, child in value.items()
+            for item in (
+                (((*path, str(key)), child),)
+                if key in {"mapping_basis", "decision_basis"}
+                and isinstance(child, str)
+                and child.strip()
+                else _authored_bases(child, path=(*path, str(key)))
+            )
+        )
+    if isinstance(value, list):
+        return tuple(
+            item
+            for index, child in enumerate(value)
+            for item in _authored_bases(child, path=(*path, str(index)))
+        )
+    return ()
 
 
 def _semantic_items(
@@ -104,6 +109,8 @@ def _semantic_items(
         return _query_enrichment_semantic_items(source)
     if purpose == ModelTurnPurpose.GROUNDING:
         return _grounding_semantic_items(source)
+    if purpose == ModelTurnPurpose.READ_ELIGIBILITY:
+        return _read_eligibility_semantic_items(source)
     return ()
 
 
@@ -167,42 +174,54 @@ def _question_contract_semantic_items(
     payload: dict[str, Any],
 ) -> tuple[StepSemanticItem, ...]:
     items: list[StepSemanticItem] = []
-    for index, answer_request in enumerate(
-        _dicts(payload.get("answer_requests")), start=1
-    ):
-        description = _text(answer_request.get("answer_fact"))
+    outcome = _dict_or_empty(payload.get("outcome"))
+    outcome_kind = _text(outcome.get("kind"))
+    for index, answer_request in enumerate(_dicts(outcome.get("answer_requests")), 1):
+        description = (
+            _text(answer_request.get("return_request_basis"))
+            if outcome_kind == "question_meaning"
+            else _text(answer_request.get("description"))
+        )
+        requested_fact_id = _text(answer_request.get("requested_fact_ref"))
+        if not description:
+            description = _text(
+                _dict_or_empty(answer_request.get("origin")).get("meaning")
+            )
         if description:
             items.append(
                 StepSemanticItem(
                     kind="requested_fact",
                     payload={
-                        "requested_fact_id": f"fact_{index}",
+                        "requested_fact_id": requested_fact_id or f"fact_{index}",
                         "description": description,
                     },
                 )
             )
-    for raw_input in _dicts(payload.get("question_inputs")):
-        input_id = _text(raw_input.get("input_ref") or raw_input.get("id"))
-        text = _text(
-            raw_input.get("source_text")
-            or raw_input.get("reference_text")
-            or raw_input.get("text")
-        )
+    for supplied in _dicts(outcome.get("supplied_values")):
+        entity_reference = _dict_or_empty(supplied.get("entity_reference"))
+        non_entity_value = _dict_or_empty(supplied.get("non_entity_value"))
+        selected = entity_reference or non_entity_value
+        raw_value = _dict_or_empty(selected.get("value"))
+        text = _operand_text(raw_value.get("operands"))
+        origin = _dict_or_empty(raw_value.get("origin"))
+        input_id = _text(origin.get("resolved_input_ref")) or text
         if not input_id or not text:
             continue
+        input_kind = (
+            "IDENTITY_REFERENCE"
+            if entity_reference
+            else "NON_IDENTITY_SCALAR"
+        )
         items.append(
             StepSemanticItem(
                 kind="known_input",
                 payload={
                     "input_id": input_id,
                     "text": text,
-                    "kind": _text(raw_input.get("kind")),
-                    "role": _text(raw_input.get("role")),
-                    "description": _text(
-                        raw_input.get("value_meaning_hint")
-                        or raw_input.get("description")
-                    ),
-                    "resolved_value_text": _text(raw_input.get("resolved_value_text")),
+                    "kind": input_kind,
+                    "role": "",
+                    "description": _text(supplied.get("meaning")),
+                    "resolved_value_text": text,
                 },
             )
         )
@@ -214,138 +233,103 @@ def _query_enrichment_semantic_items(
 ) -> tuple[StepSemanticItem, ...]:
     return tuple(
         StepSemanticItem(
-            kind="resolver_candidate",
+            kind="resource_recall",
             payload={
-                "input_id": _text(item.get("target_id")),
-                "resolver_read_id": "",
-                "resolver_label": _title_words(_text(term.get("term"))),
-                "basis": _text(term.get("basis")),
+                "input_use_ref": _text(item.get("input_use_ref")),
+                "resource_name": term,
             },
         )
-        for item in _dicts(payload.get("entity_target_catalog_search_terms"))
-        for term in _dicts(item.get("catalog_search_terms"))
-        if _text(item.get("target_id")) and _text(term.get("term"))
+        for item in _dicts(payload.get("input_resource_search_terms"))
+        for term in _texts(item.get("catalog_search_terms"))
+        if _text(item.get("input_use_ref")) and term
     )
 
 
 def _grounding_semantic_items(payload: dict[str, Any]) -> tuple[StepSemanticItem, ...]:
-    reviews = _dict_or_empty(payload.get("known_input_binding_reviews"))
+    reviews = _dict_or_empty(payload.get("reference_reviews"))
     items: list[StepSemanticItem] = []
-    for input_id, raw_review in reviews.items():
+    for task_ref, raw_review in reviews.items():
         review = _dict_or_empty(raw_review)
-        options = _dict_or_empty(review.get("option_reviews"))
-        for option_id, raw_option in options.items():
-            option = _dict_or_empty(raw_option)
-            if _text(option.get("decision")) != "CAN_RESOLVE_LOOKUP_TEXT":
-                continue
-            items.append(
-                StepSemanticItem(
-                    kind="resolver_candidate",
-                    payload={
-                        "input_id": str(input_id),
-                        "resolver_read_id": "",
-                        "resolver_label": str(option_id),
-                        "basis": _text(option.get("because")),
-                    },
+        for raw_type_review in _dict_or_empty(
+            review.get("resource_type_reviews")
+        ).values():
+            type_review = _dict_or_empty(raw_type_review)
+            for route_ref, raw_route_review in _dict_or_empty(
+                type_review.get("route_reviews")
+            ).items():
+                route_review = _dict_or_empty(raw_route_review)
+                resolution = _dict_or_empty(route_review.get("resolution"))
+                if _text(resolution.get("decision")) != "CAN_RESOLVE_LOOKUP_TEXT":
+                    continue
+                items.append(
+                    StepSemanticItem(
+                        kind="resolver_candidate",
+                        payload={
+                            "input_id": str(task_ref),
+                            "resolver_read_id": str(route_ref),
+                            "resolver_label": _title_words(str(route_ref)),
+                            "basis": _text(route_review.get("assessment_basis")),
+                        },
+                    )
                 )
+    for task_ref, raw_resolution in _dict_or_empty(
+        payload.get("time_resolutions")
+    ).items():
+        date_intent = _dict_or_empty(
+            _dict_or_empty(raw_resolution).get("date_intent")
+        )
+        expression = _text(date_intent.get("expression"))
+        intent = _dict_or_empty(date_intent.get("intent"))
+        if expression:
+            interpreted = _interpreted_input_item(
+                input_id=str(task_ref),
+                input_text=expression,
+                kind="time",
+                value=expression,
+                label=expression,
+                detail=_text(intent.get("unit") or intent.get("time_shape")),
             )
+            if interpreted is not None:
+                items.append(interpreted)
     return tuple(items)
 
 
-def _grounding_result_semantic_items(
-    *,
-    ledger: CanonicalInputLedger,
-    question_contract: QuestionContract,
+def _read_eligibility_semantic_items(
+    payload: dict[str, Any],
 ) -> tuple[StepSemanticItem, ...]:
-    inputs_by_id = {
-        known.id: known
-        for fact in question_contract.requested_facts
-        for known in fact.known_inputs
-    }
     return tuple(
-        item
-        for value in ledger.values
-        if (item := _grounding_result_semantic_item(value, inputs_by_id=inputs_by_id))
-        is not None
+        StepSemanticItem(
+            kind="identity_selection",
+            payload={
+                "input_id": str(input_ref),
+                "canonical_option_id": _text(outcome.get("canonical_option_id")),
+                "resolver_route_id": _text(outcome.get("resolver_route_id")),
+                "basis": _identity_selection_basis(outcome),
+                "outcome": _text(outcome.get("outcome")),
+            },
+        )
+        for input_ref, raw_outcome in _dict_or_empty(
+            payload.get("identity_outcomes")
+        ).items()
+        if (outcome := _dict_or_empty(raw_outcome))
+        if (
+            _text(outcome.get("canonical_option_id"))
+            or _text(outcome.get("resolver_route_id"))
+            or _text(outcome.get("outcome"))
+        )
     )
 
 
-def _grounding_result_semantic_item(
-    value: FactValue,
-    *,
-    inputs_by_id: dict[str, Any],
-) -> StepSemanticItem | None:
-    payload = value.payload
-    input_id = _known_input_id_from_proof_refs(value.proof_refs)
-    if not input_id:
-        return None
-    known_input = inputs_by_id.get(input_id)
-    if isinstance(payload, TimeValuePayload):
-        return _interpreted_input_item(
-            input_id=input_id,
-            input_text=_text(getattr(known_input, "text", "")),
-            kind="time",
-            value=_time_interpretation_value(payload),
-            label=payload.expression or value.label,
-            detail=payload.granularity,
+def _identity_selection_basis(outcome: dict[str, Any]) -> str:
+    return " ".join(
+        dict.fromkeys(
+            value
+            for value in (
+                _text(outcome.get("canonical_option_basis")),
+                _text(outcome.get("resolver_route_basis")),
+            )
+            if value
         )
-    if isinstance(payload, NamedValuePayload):
-        return _interpreted_input_item(
-            input_id=input_id,
-            input_text=_text(getattr(known_input, "text", "")),
-            kind="named",
-            value=payload.text,
-            label=payload.reference_text or value.label,
-        )
-    if isinstance(payload, LiteralValuePayload):
-        return _interpreted_input_item(
-            input_id=input_id,
-            input_text=_text(getattr(known_input, "text", "")),
-            kind=f"literal_{payload.literal_type.value}",
-            value=payload.value,
-            label=value.label,
-        )
-    if isinstance(payload, IdentitySetValuePayload):
-        return _interpreted_input_item(
-            input_id=input_id,
-            input_text=_text(getattr(known_input, "text", "")),
-            kind="identity_set",
-            value=(
-                payload.display_value
-                or f"{len(payload.keys)} {payload.entity_kind} identities"
-            ),
-            label=value.label,
-            detail=(
-                f"{payload.key_id}."
-                + "+".join(
-                    component.component_id for component in payload.keys[0].components
-                )
-            ),
-        )
-    if not isinstance(payload, IdentityValuePayload):
-        return None
-    resolver_read_id = value.source_refs[0] if value.source_refs else ""
-    resolver_endpoint_name = (
-        value.source_refs[1] if len(value.source_refs) > 1 else resolver_read_id
-    )
-    return StepSemanticItem(
-        kind="grounding_result",
-        payload={
-            "input_id": input_id,
-            "input_text": _text(getattr(known_input, "text", "")),
-            "resolver_read_id": resolver_read_id,
-            "resolver_label": _title_words(resolver_read_id or resolver_endpoint_name),
-            "entity_kind": payload.entity_kind,
-            "key_id": payload.key_id,
-            "key_components": [
-                {
-                    "component_id": component.component_id,
-                    "value": str(component.value),
-                }
-                for component in payload.key.components
-            ],
-            "matched_label": payload.display_value or value.label,
-        },
     )
 
 
@@ -373,20 +357,6 @@ def _interpreted_input_item(
     )
 
 
-def _time_interpretation_value(payload: TimeValuePayload) -> str:
-    if payload.resolved_start and payload.resolved_end:
-        return f"{payload.resolved_start} to {payload.resolved_end}"
-    return payload.resolved_start or payload.resolved_end or payload.expression
-
-
-def _known_input_id_from_proof_refs(proof_refs: tuple[str, ...]) -> str:
-    for ref in proof_refs:
-        prefix, separator, value = ref.partition(":")
-        if prefix == "known_input" and separator and value:
-            return value
-    return ""
-
-
 def _read_eligibility_step_summary(payload: dict[str, Any]) -> dict[str, object]:
     reviews = _read_eligibility_reviews(payload)
     if not reviews:
@@ -404,13 +374,10 @@ def _read_eligibility_step_summary(payload: dict[str, Any]) -> dict[str, object]
             StepSummaryItem(
                 text=_read_eligibility_review_text(review),
                 detail=StepSummaryDetail.VERBOSE,
-                is_explanation=bool(_text(review.get("retention_basis"))),
-                subject=(
-                    f"{_text(review.get('source_candidate_id'))} "
-                    f"{_text(review.get('read_id'))}"
-                ).strip(),
+                is_explanation=bool(_text(review.get("assessment_basis"))),
+                subject=_text(review.get("candidate_ref")),
                 disposition=_review_decision(review),
-                basis=_text(review.get("retention_basis")),
+                basis=_text(review.get("assessment_basis")),
             )
             for review in reviews
         ),
@@ -418,29 +385,31 @@ def _read_eligibility_step_summary(payload: dict[str, Any]) -> dict[str, object]
 
 
 def _read_eligibility_reviews(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-    reviews: list[dict[str, Any]] = []
-    assessments = _dict_or_empty(payload.get("requested_fact_assessments"))
-    for assessment in assessments.values():
-        if not isinstance(assessment, dict):
-            continue
-        fact_reviews = _dict_or_empty(assessment.get("read_candidate_reviews"))
-        reviews.extend(
-            {"source_candidate_id": source_candidate_id, **review}
-            for source_candidate_id, review in fact_reviews.items()
-            if isinstance(review, dict)
-        )
-    return tuple(reviews)
+    return tuple(
+        {
+            "requested_fact_id": requested_fact_id,
+            "candidate_ref": candidate_ref,
+            "assessment_basis": _text(assessment.get("assessment_basis")),
+            "decision": _text(assessment.get("decision")).upper(),
+            "relevant_field_refs": _texts(assessment.get("relevant_field_refs")),
+        }
+        for requested_fact_id, raw_assessments in _dict_or_empty(
+            payload.get("read_assessments_by_requested_fact")
+        ).items()
+        for candidate_ref, raw_assessment in _dict_or_empty(raw_assessments).items()
+        if (assessment := _dict_or_empty(raw_assessment))
+    )
 
 
 def _read_eligibility_review_text(review: dict[str, Any]) -> str:
-    source_candidate_id = _text(review.get("source_candidate_id")) or "unknown_source"
-    read_id = _text(review.get("read_id"))
+    source_candidate_id = _text(review.get("candidate_ref")) or "unknown_source"
     decision = _review_decision(review) or "UNKNOWN"
-    rows = len(_texts(review.get("relevant_row_path_tokens")))
-    fields = len(_texts(review.get("relevant_field_tokens")))
-    basis = _text(review.get("retention_basis"))
-    label = f"{source_candidate_id} {read_id}".strip()
-    parts = [f"{label}: {decision}", f"rows={rows}", f"fields={fields}"]
+    fields = len(_texts(review.get("relevant_field_refs")))
+    basis = _text(review.get("assessment_basis"))
+    parts = [
+        f"{source_candidate_id}: {decision}",
+        f"fields={fields}",
+    ]
     if basis:
         parts.append(basis)
     return " - ".join(parts)
@@ -455,7 +424,7 @@ def _plan_selection_step_summary(payload: dict[str, Any]) -> dict[str, object]:
     )
     return step_summary_json(
         StepSummaryItem(
-            text=f"Plan selection reviewed source candidates: {', '.join(source_ids)}."
+            text=f"Plan selection assessed sources: {', '.join(source_ids)}."
         ),
         *(
             StepSummaryItem(
@@ -463,7 +432,7 @@ def _plan_selection_step_summary(payload: dict[str, Any]) -> dict[str, object]:
                 detail=StepSummaryDetail.VERBOSE,
                 is_explanation=bool(_plan_selection_basis(review)),
                 subject=_source_candidate_id(review),
-                disposition=_plan_selection_disposition(review),
+                disposition=_text(review.get("alignment")),
                 basis=_plan_selection_basis(review),
             )
             for review in reviews
@@ -472,38 +441,28 @@ def _plan_selection_step_summary(payload: dict[str, Any]) -> dict[str, object]:
 
 
 def _plan_selection_reviews(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-    outcome = _dict_or_empty(payload.get("outcome"))
-    reviews_by_fact = _dict_or_empty(outcome.get("reviews_by_requested_fact"))
-    if reviews_by_fact:
-        return tuple(
-            review
-            for fact_reviews in reviews_by_fact.values()
-            for review in _dict_or_empty(fact_reviews).values()
-            if isinstance(review, dict)
-        )
-    reviews: list[dict[str, Any]] = []
-    for assessment in _dicts(payload.get("answer_request_assessments")):
-        reviews.extend(_dicts(assessment.get("source_candidate_reviews")))
-    for assessment in _dicts(payload.get("requested_fact_assessments")):
-        reviews.extend(_dicts(assessment.get("source_candidate_reviews")))
-    return tuple(reviews)
+    return tuple(
+        {
+            "source_candidate_id": source_ref,
+            "requested_fact_id": requested_fact_id,
+            "basis": _text(assessment.get("basis")),
+            "alignment": _text(assessment.get("alignment")),
+        }
+        for requested_fact_id, raw_assessments in _dict_or_empty(
+            payload.get("source_assessments_by_requested_fact")
+        ).items()
+        for source_ref, raw_assessment in _dict_or_empty(raw_assessments).items()
+        if (assessment := _dict_or_empty(raw_assessment))
+    )
 
 
 def _plan_selection_review_text(review: dict[str, Any]) -> str:
     source_candidate_id = _source_candidate_id(review) or "unknown_source"
-    alignment = _plan_selection_disposition(review) or "UNKNOWN"
     basis = _plan_selection_basis(review)
+    alignment = _text(review.get("alignment")) or "UNKNOWN"
     if basis:
         return f"{source_candidate_id}: {alignment} - {basis}"
     return f"{source_candidate_id}: {alignment}"
-
-
-def _plan_selection_disposition(review: dict[str, Any]) -> str:
-    return _text(
-        review.get("source_alignment")
-        or review.get("alignment")
-        or review.get("disposition")
-    )
 
 
 def _plan_selection_basis(review: dict[str, Any]) -> str:
@@ -515,7 +474,7 @@ def _plan_selection_basis(review: dict[str, Any]) -> str:
 
 
 def _review_decision(review: dict[str, Any]) -> str:
-    return _text(review.get("decision") or review.get("retention_decision")).upper()
+    return _text(review.get("decision")).upper()
 
 
 def _source_candidate_id(review: dict[str, Any]) -> str:
@@ -533,13 +492,19 @@ def _dicts(value: object) -> tuple[dict[str, Any], ...]:
 
 
 def _texts(value: object) -> tuple[str, ...]:
-    if not isinstance(value, list):
+    if not isinstance(value, (list, tuple)):
         return ()
     return tuple(str(item) for item in value if item is not None)
 
 
 def _text(value: object) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _operand_text(value: object) -> str:
+    if isinstance(value, list):
+        return ", ".join(_text(item) for item in value if _text(item))
+    return _text(value)
 
 
 def _title_words(value: str) -> str:

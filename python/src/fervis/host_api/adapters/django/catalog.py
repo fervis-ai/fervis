@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import inspect
 import re
 from dataclasses import replace
@@ -10,16 +11,20 @@ from importlib.util import find_spec
 from types import SimpleNamespace
 from typing import Any
 
+from django.db.models import Field
 from django.urls import URLPattern, URLResolver, get_resolver
+from rest_framework import mixins
 from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import AllowAny
 
+from fervis.host_api.contracts.endpoint import relation_metadata_from_public_value
 from fervis.host_api.contracts import (
     CatalogEndpointContract,
     CandidateKeyContract,
     EndpointContract,
     FrameworkKind,
     ParameterContract,
+    ParameterSemantics,
     ResponseFieldContract,
     SourceNamespaceKind,
 )
@@ -68,13 +73,14 @@ def _cached_endpoint_contracts(
     sources: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...],
 ) -> tuple[EndpointContract, ...]:
     contracts: list[EndpointContract] = []
-    for _source_name, app_modules, path_prefixes in sources:
+    for source_name, app_modules, path_prefixes in sources:
         _walk_patterns(
             get_resolver().url_patterns,
             "",
             contracts,
             app_modules=app_modules,
             path_prefixes=path_prefixes,
+            source_namespace_path=(source_name,),
         )
     return tuple(sorted(contracts, key=lambda item: item.path_template))
 
@@ -148,6 +154,7 @@ def _walk_patterns(
                 url_name=pattern.name,
                 view_class=view_class,
                 converters=pattern_converters,
+                get_action=(getattr(pattern.callback, "actions", {}) or {}).get("get"),
                 source_namespace_path=source_namespace_path,
             )
         )
@@ -159,6 +166,7 @@ def _build_contract(
     url_name: str,
     view_class: type,
     converters: dict[str, object],
+    get_action: str | None = None,
     source_namespace_path: tuple[str, ...] = (),
 ) -> EndpointContract:
     query_serializer_class = getattr(view_class, "query_serializer_class", None)
@@ -185,7 +193,15 @@ def _build_contract(
     )
     response_model = response_model or response_inspection.relation_model
     response_fields = response_inspection.response_fields
-    candidate_keys = response_inspection.candidate_keys
+    declared_keys, declared_references = relation_metadata_from_public_value(
+        getattr(view_class, "fervis_relation_metadata", {})
+    )
+    candidate_keys = tuple(
+        dict.fromkeys((*response_inspection.candidate_keys, *declared_keys))
+    )
+    entity_references = tuple(
+        dict.fromkeys((*response_inspection.entity_references, *declared_references))
+    )
     optional_projection_params = optional_full_response_projection_param_names(
         response_serializer_class,
         query_params=query_params,
@@ -221,6 +237,7 @@ def _build_contract(
         query_params=query_params,
     )
     path_param_names = tuple(_path_param_names(path))
+    path_fields = _declared_path_parameter_fields(view_class, path_param_names)
     path_params = tuple(
         ParameterContract(
             name=name,
@@ -231,6 +248,7 @@ def _build_contract(
             entity_target=path_param_entity_target(
                 response_model,
                 param_name=name,
+                declared_field=path_fields.get(name),
             ),
         )
         for name in path_param_names
@@ -239,7 +257,9 @@ def _build_contract(
         authority
         for name in path_param_names
         for authority in (
-            path_param_candidate_key_authority(response_model, param_name=name),
+            path_param_candidate_key_authority(
+                response_model, param_name=name, declared_field=path_fields.get(name)
+            ),
         )
         if authority is not None
     )
@@ -276,6 +296,10 @@ def _build_contract(
         query_params=query_params,
         response_fields=response_fields,
         response_schema=response_schema,
+        response_cardinality=_response_cardinality(
+            view_class,
+            get_action=get_action,
+        ),
         capabilities=capabilities,
         capability_sources=_capability_sources(capabilities),
         agent_access=bool(getattr(view_class, "agent_access", False)),
@@ -297,7 +321,7 @@ def _build_contract(
         resource_names=resource_names,
         candidate_keys=candidate_keys,
         candidate_key_authorities=candidate_key_authorities,
-        entity_references=response_inspection.entity_references,
+        entity_references=entity_references,
         catalog_endpoint=_catalog_endpoint_contract(
             url_name=url_name,
             view_class=view_class,
@@ -305,6 +329,25 @@ def _build_contract(
             resource_names=resource_names,
         ),
     )
+
+
+def _response_cardinality(
+    view_class: type,
+    *,
+    get_action: str | None,
+) -> str:
+    declared = getattr(view_class, "fervis_response_cardinality", None)
+    if declared in {"one", "many"}:
+        return str(declared)
+    if get_action == "list":
+        return "many"
+    if get_action == "retrieve":
+        return "one"
+    supports_list = issubclass(view_class, mixins.ListModelMixin)
+    supports_retrieve = issubclass(view_class, mixins.RetrieveModelMixin)
+    if supports_list and not supports_retrieve:
+        return "many"
+    return "one" if supports_retrieve else "unknown"
 
 
 def _get_response_serializer_class(view_class: type) -> type | None:
@@ -378,18 +421,31 @@ def _with_framework_param_semantics(
     response_fields: tuple[ResponseFieldContract, ...],
     view_class: type,
 ) -> tuple[ParameterContract, ...]:
+    declared = getattr(view_class, "fervis_parameter_semantics", {})
+    names = {param.name for param in query_params}
+    allowed = {value.value for value in ParameterSemantics}
+    if not isinstance(declared, Mapping) or any(
+        name not in names or not isinstance(value, str) or value not in allowed
+        for name, value in declared.items()
+    ):
+        raise ValueError("invalid parameter semantics declaration")
     response_shape_param_names = _response_shape_param_names_from_framework(
         query_params,
         response_fields=response_fields,
         view_class=view_class,
     )
-    if not response_shape_param_names:
-        return query_params
     return tuple(
-        (
-            replace(param, semantics="response_shape")
-            if param.name in response_shape_param_names and not param.semantics
-            else param
+        replace(
+            param,
+            semantics=declared.get(
+                param.name,
+                param.semantics
+                or (
+                    ParameterSemantics.RESPONSE_SHAPE.value
+                    if param.name in response_shape_param_names
+                    else ""
+                ),
+            ),
         )
         for param in query_params
     )
@@ -594,6 +650,7 @@ def _with_conditional_requirements(
                 path=field.path,
                 description=field.description,
                 choices=field.choices,
+                nullable=field.nullable,
                 requires={"queryParam": query_param, "value": True},
             )
         )
@@ -843,3 +900,19 @@ def _tags_for(*, path: str, view_class: type) -> tuple[str, ...]:
     return tuple(
         sorted({part.lower() for part in re.split(r"[^a-zA-Z0-9]+", raw) if part})
     )
+
+
+def _declared_path_parameter_fields(
+    view_class: type, names: tuple[str, ...]
+) -> dict[str, Field]:
+    declaration = getattr(view_class, "fervis_path_parameter_fields", {})
+    if not isinstance(declaration, Mapping):
+        raise ValueError("path parameter fields must be a mapping")
+    fields: dict[str, Field] = {}
+    for name, field in declaration.items():
+        if name not in names or not isinstance(field, Field):
+            raise ValueError(
+                "path parameter declaration must name a route parameter and model field"
+            )
+        fields[name] = field
+    return fields

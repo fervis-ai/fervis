@@ -92,8 +92,7 @@ def _resolved_intent_from_inputs(
             **parsed,
             **(
                 {IntentField.ANCHOR_PERIOD: intent[IntentField.ANCHOR_PERIOD]}
-                if isinstance(intent, dict)
-                and IntentField.ANCHOR_PERIOD in intent
+                if isinstance(intent, dict) and IntentField.ANCHOR_PERIOD in intent
                 else {}
             ),
         }

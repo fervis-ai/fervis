@@ -11,7 +11,7 @@ from fervis.model_io.turn_artifacts import (
     ModelTurnArtifact,
     model_turn_artifact,
 )
-from fervis.model_io.structured_output.errors import RequiredToolOutputError
+from fervis.model_io.structured_output.errors import RequiredToolOutputError, ModelValidationKind
 from fervis.model_io.structured_output.generation import (
     generate_one_of_tool_output,
 )
@@ -37,6 +37,7 @@ class LookupModelTurnError(Exception):
     artifact: ModelTurnArtifact
     error_code: str = ErrorCode.PLANNING_FAILED
     error_context: dict[str, Any] = field(default_factory=dict)
+    validation_kind: ModelValidationKind | None = None
 
     def __str__(self) -> str:
         return self.message
@@ -56,6 +57,7 @@ def generation_error_kwargs(
         "artifact": failure.artifact,
         "error_code": failure.error_code,
         "error_context": failure.error_context,
+        "validation_kind": failure.validation_kind,
     }
 
 
@@ -81,6 +83,7 @@ def run_one_of_tool_model_turn(
     except ModelTurnPromptBudgetError as exc:
         raise ModelTurnGenerationFailure(
             message=prompt_budget_error_message,
+            error_context={'exception_class': type(exc).__name__, 'message': str(exc)},
             usage={},
             duration_ms=0,
             artifact=ModelTurnArtifact(
@@ -117,6 +120,7 @@ def run_one_of_tool_model_turn(
             ),
             error_code=exc.error_code or ErrorCode.PLANNING_FAILED,
             error_context=dict(exc.error_context or {}),
+            validation_kind=exc.validation_kind,
         ) from exc
     duration_ms = int((time.monotonic() - started) * 1000)
     return ModelTurnOutput(

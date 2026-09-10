@@ -19,7 +19,7 @@ class ErrorCode:
     INVALID_MODEL_TOOL_CALL = "invalid_model_tool_call"
     PLANNING_FAILED = "planning_failed"
     PLAN_VALIDATION_FAILED = "plan_validation_failed"
-    FACT_PLAN_EXECUTION_FAILED = "fact_plan_execution_failed"
+    PROGRAM_EXECUTION_FAILED = "program_execution_failed"
     FRAMEWORK_ADAPTER_FAILED = "framework_adapter_failed"
     LINEAGE_PERSISTENCE_FAILED = "lineage_persistence_failed"
     DEADLINE_EXCEEDED = "deadline_exceeded"

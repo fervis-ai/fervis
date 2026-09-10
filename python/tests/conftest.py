@@ -17,7 +17,6 @@ from fervis.model_io.backbone.factory import build_test_provider_backbone
 from fervis.project.source_scope import configured_django_source_scopes
 from fervis.run_work.queue.django.queue import reset_question_run_queue_for_tests
 from tests.testkit.django import SEEDED_USER_PK
-from tests.testkit.provider_native import provider_native_test_arguments
 
 
 @pytest.fixture
@@ -100,11 +99,7 @@ class _FervisPlannerTestAdapter:
                 prompt,
                 {
                     "tool": tool_name,
-                    "arguments": provider_native_test_arguments(
-                        tool_name=tool_name,
-                        prompt=prompt,
-                        tool_specs=tool_specs,
-                    ),
+                    "arguments": {},
                 },
             )
         return _planner_response(prompt, {"answer": "Test adapter response."})

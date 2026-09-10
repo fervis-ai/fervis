@@ -5,27 +5,12 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
-  current_question: Tell me about the last item.
   conversation_context:
     factArtifacts:
       - artifactId: turn_products
         outcome: answered
         sourceQuestion: Which products sold best this week?
         sourceAnswer: "Alpha: 10, Beta: 8."
-        provenance:
-          question_contract:
-            question_inputs: []
-            answer_requests:
-              - id: fact_1
-                answer_fact: products sold best this week
-                answer_outputs:
-                  - id: answer_1
-                    description: product name
-                    role: ANSWER_VALUE
-                  - id: answer_2
-                    description: units sold
-                    role: ANSWER_VALUE
-                used_question_inputs: []
         addresses:
           - address: relation.answer_rows
             kind: relation

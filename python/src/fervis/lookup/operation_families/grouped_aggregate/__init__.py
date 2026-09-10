@@ -1,1 +1,0 @@
-"""Grouped-aggregate operation family."""

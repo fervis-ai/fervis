@@ -1,0 +1,19 @@
+id: projected_components_are_distinct_operation_inputs
+kind: algorithm
+algorithm: answer_program.projected_operation_inputs
+description: Different projections of one typed value remain distinct operation inputs.
+input:
+  start: "2026-03-01"
+  end: "2026-03-31"
+expect:
+  result_equals:
+    inputs:
+      - operation_id: filter_period
+        input_id: parameter:period.start
+        value: "2026-03-01"
+      - operation_id: filter_period
+        input_id: parameter:period.end
+        value: "2026-03-31"
+      - operation_id: project_day
+        input_id: constant:temporal_grain@fixture-v1
+        value: day

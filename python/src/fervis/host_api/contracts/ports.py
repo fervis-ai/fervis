@@ -9,6 +9,7 @@ from fervis.host_api.contracts import EndpointContract
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.contracts.credentials import DelegatedReadCredential
 from fervis.host_api.contracts.read import ReadInvocation
+from fervis.host_api.contracts.response_page import ResponseFormat
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class EndpointExecutionResult:
     response_body: Any
     page_count: int = 1
     truncated: bool = False
+    response_format: ResponseFormat = ResponseFormat.JSON
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -29,6 +31,7 @@ class EndpointExecutionResult:
             "requestParams": dict(self.query_params),
             "responseStatus": self.response_status,
             "responseBody": self.response_body,
+            "responseFormat": self.response_format.value,
             "pageCount": self.page_count,
             "truncated": self.truncated,
         }

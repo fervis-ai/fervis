@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from fervis.lookup.answer_program.codec import (
+from fervis.lookup.contract_codec import (
     canonical_answer_program_payload,
     decode_answer_program,
 )
@@ -25,8 +25,6 @@ from fervis.lookup.answer_program.operations import (
     ComputeSpec,
     FilterSpec,
     Operation,
-    Predicate,
-    PredicateOperator,
 )
 from fervis.lookup.answer_program.values import (
     ConstantRef,
@@ -64,11 +62,15 @@ def test_expression_tree_is_the_single_predicate_and_compute_language() -> None:
 
     assert references.fields == (FieldRef(field_id="amount"),)
     assert references.parameters == (ParameterRef(parameter_id="question.adjustment"),)
-    assert Predicate(
+    condition = BinaryExpression(
         left=FieldRef(field_id="amount"),
-        operator=PredicateOperator.GT,
+        operator=ExpressionBinaryOperator.GT,
         right=ParameterRef(parameter_id="question.threshold"),
-    ).right == ParameterRef(parameter_id="question.threshold")
+    )
+
+    assert expression_references(condition).parameters == (
+        ParameterRef(parameter_id="question.threshold"),
+    )
 
 
 def test_every_expression_node_round_trips_through_the_answer_program_codec() -> None:
@@ -76,14 +78,6 @@ def test_every_expression_node_round_trips_through_the_answer_program_codec() ->
         function=ExpressionFunction.TEMPORAL_BUCKET,
         arguments=(
             FieldRef("recorded_at"),
-            UnaryExpression(
-                operator=ExpressionUnaryOperator.NEGATE,
-                operand=BinaryExpression(
-                    operator=ExpressionBinaryOperator.ADD,
-                    left=ParameterRef("question.offset"),
-                    right=NodeOutputRef("prior", "amount"),
-                ),
-            ),
             ConstantRef(
                 constant_id="grain",
                 version_ref="test@1",
@@ -101,6 +95,27 @@ def test_every_expression_node_round_trips_through_the_answer_program_codec() ->
             Operation(
                 id="expression",
                 spec=ComputeSpec(expression=expression, output_scalar="value"),
+            ),
+            Operation(
+                id="arithmetic",
+                spec=ComputeSpec(
+                    expression=UnaryExpression(
+                        operator=ExpressionUnaryOperator.NEGATE,
+                        operand=BinaryExpression(
+                            operator=ExpressionBinaryOperator.ADD,
+                            left=ParameterRef("question.offset"),
+                            right=NodeOutputRef("prior", "amount"),
+                        ),
+                    ),
+                    output_scalar="arithmetic",
+                ),
+            ),
+            Operation(
+                id="row_number",
+                spec=ComputeSpec(
+                    expression=FunctionExpression(ExpressionFunction.ROW_NUMBER, ()),
+                    output_scalar="row_number",
+                ),
             ),
         )
     )
@@ -125,6 +140,67 @@ def test_expression_evaluator_uses_exact_decimal_arithmetic() -> None:
     assert result.value_type == "decimal"
 
 
+def test_expression_evaluator_composes_boolean_conditions() -> None:
+    result = evaluate_expression(
+        BinaryExpression(
+            operator=ExpressionBinaryOperator.AND,
+            left=BinaryExpression(
+                operator=ExpressionBinaryOperator.GT,
+                left=FieldRef("amount"),
+                right=ParameterRef("minimum"),
+            ),
+            right=UnaryExpression(
+                operator=ExpressionUnaryOperator.NOT,
+                operand=UnaryExpression(
+                    operator=ExpressionUnaryOperator.IS_NULL,
+                    operand=FieldRef("label"),
+                ),
+            ),
+        ),
+        environment=ExpressionEnvironment(
+            row={"amount": Decimal("12"), "label": "ready"},
+            field_types={"amount": "decimal", "label": "string"},
+            scalars={"parameter:minimum": Decimal("10")},
+            scalar_types={"parameter:minimum": "decimal"},
+        ),
+    )
+
+    assert result.value is True
+    assert result.value_type == "boolean"
+
+
+@pytest.mark.parametrize(
+    "operator",
+    (
+        ExpressionBinaryOperator.EQUALS,
+        ExpressionBinaryOperator.NOT_EQUALS,
+        ExpressionBinaryOperator.LT,
+        ExpressionBinaryOperator.LTE,
+        ExpressionBinaryOperator.GT,
+        ExpressionBinaryOperator.GTE,
+    ),
+)
+def test_comparisons_with_null_are_unknown(
+    operator: ExpressionBinaryOperator,
+) -> None:
+    result = evaluate_expression(
+        BinaryExpression(
+            operator=operator,
+            left=FieldRef("value"),
+            right=ParameterRef("expected"),
+        ),
+        environment=ExpressionEnvironment(
+            row={"value": None},
+            field_types={"value": "decimal"},
+            scalars={"parameter:expected": Decimal("1")},
+            scalar_types={"parameter:expected": "decimal"},
+        ),
+    )
+
+    assert result.value is None
+    assert result.value_type == "boolean"
+
+
 def test_field_expression_requires_row_context() -> None:
     with pytest.raises(RelationEngineError, match="row context"):
         evaluate_expression(
@@ -134,12 +210,12 @@ def test_field_expression_requires_row_context() -> None:
 
 
 @pytest.mark.parametrize(
-    ("predicate", "scalars", "scalar_types", "expected_ids"),
+    ("condition", "scalars", "scalar_types", "expected_ids"),
     (
         (
-            Predicate(
+            BinaryExpression(
                 left=FieldRef("state"),
-                operator=PredicateOperator.IN,
+                operator=ExpressionBinaryOperator.IN,
                 right=ParameterRef("states"),
             ),
             {"parameter:states": ("open",)},
@@ -147,9 +223,9 @@ def test_field_expression_requires_row_context() -> None:
             ("a",),
         ),
         (
-            Predicate(
+            BinaryExpression(
                 left=FieldRef("label"),
-                operator=PredicateOperator.CONTAINS,
+                operator=ExpressionBinaryOperator.CONTAINS,
                 right=ParameterRef("fragment"),
             ),
             {"parameter:fragment": "pha"},
@@ -157,9 +233,9 @@ def test_field_expression_requires_row_context() -> None:
             ("a",),
         ),
         (
-            Predicate(
-                left=FieldRef("deleted_at"),
-                operator=PredicateOperator.IS_NULL,
+            UnaryExpression(
+                operand=FieldRef("deleted_at"),
+                operator=ExpressionUnaryOperator.IS_NULL,
             ),
             {},
             {},
@@ -167,8 +243,8 @@ def test_field_expression_requires_row_context() -> None:
         ),
     ),
 )
-def test_filter_predicates_share_one_typed_runtime(
-    predicate: Predicate,
+def test_filter_conditions_share_one_typed_runtime(
+    condition: BinaryExpression | UnaryExpression,
     scalars: dict[str, object],
     scalar_types: dict[str, str],
     expected_ids: tuple[str, ...],
@@ -203,7 +279,7 @@ def test_filter_predicates_share_one_typed_runtime(
             operations=(
                 ExecutableOperation(
                     id="filter",
-                    spec=FilterSpec(input_relation="rows", predicate=predicate),
+                    spec=FilterSpec(input_relation="rows", condition=condition),
                     output_relation="filtered",
                 ),
             ),
@@ -228,9 +304,7 @@ def test_compute_consumes_one_scalar_output_from_a_prior_aggregate() -> None:
                         {"amount": Decimal("30")},
                     ),
                     field_types={"amount": "decimal"},
-                    completeness=CompletenessProof(
-                        status=CompletenessStatus.COMPLETE
-                    ),
+                    completeness=CompletenessProof(status=CompletenessStatus.COMPLETE),
                 ),
             ),
             operations=(

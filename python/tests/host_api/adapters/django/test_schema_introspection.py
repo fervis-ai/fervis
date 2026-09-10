@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.db import models
+import pytest
 from rest_framework import generics, serializers
 
 from fervis.host_api.adapters.django.schema_introspection import (
@@ -12,6 +13,37 @@ from fervis.host_api.adapters.django.schema_introspection import (
     relation_keys_from_serializer,
     response_fields_from_serializer,
 )
+
+
+@pytest.mark.parametrize("key_field", [models.UUIDField, models.CharField])
+def test_related_object_display_is_not_certified_as_its_primary_key(key_field):
+    class Target(models.Model):
+        target_id = key_field(primary_key=True)
+
+        class Meta:
+            app_label = f"test_display_reference_{key_field.__name__.lower()}"
+
+    class Observation(models.Model):
+        target = models.ForeignKey(Target, on_delete=models.CASCADE)
+
+        class Meta:
+            app_label = f"test_display_reference_{key_field.__name__.lower()}"
+
+    class ObservationSerializer(serializers.ModelSerializer):
+        label = serializers.CharField(source="target", read_only=True)
+        explicit_key = serializers.ReadOnlyField(source="target.target_id")
+
+        class Meta:
+            model = Observation
+            fields = ("target", "target_id", "explicit_key", "label")
+
+    inspection = inspect_response_serializer(ObservationSerializer)
+
+    assert {component.local_field_path for reference in inspection.entity_references
+            for component in reference.components} == {
+        "target", "target_id", "explicit_key",
+    }
+    assert next(field for field in inspection.response_fields if field.name == "label").type == "string"
 
 
 def test_foreign_key_path_param_targets_the_related_candidate_key() -> None:
@@ -31,7 +63,7 @@ def test_foreign_key_path_param_targets_the_related_candidate_key() -> None:
     target = path_param_entity_target(ShiftRecord, param_name="staff_id")
 
     assert target is not None
-    assert target.entity_kind == "staff"
+    assert target.entity_kind == Staff._meta.label_lower
     assert target.key_id == "primary_key"
     assert target.component_id == "staff_id"
     authority = path_param_candidate_key_authority(
@@ -39,7 +71,7 @@ def test_foreign_key_path_param_targets_the_related_candidate_key() -> None:
         param_name="staff_id",
     )
     assert authority is not None
-    assert authority.entity_kind == "staff"
+    assert authority.entity_kind == Staff._meta.label_lower
     assert authority.key_id == "primary_key"
     assert authority.components[0].component_id == "staff_id"
 
@@ -124,9 +156,9 @@ def test_plain_response_serializer_derives_keys_and_references_from_model_contex
         model_context=Sale,
     )
 
-    assert keys[0].entity_kind == "sale"
+    assert keys[0].entity_kind == Sale._meta.label_lower
     assert keys[0].components[0].field_path == "sale_id"
-    assert references[0].target_entity_kind == "location"
+    assert references[0].target_entity_kind == Location._meta.label_lower
     assert references[0].components[0].local_field_path == "location_id"
 
     inspection = inspect_response_serializer(
@@ -134,9 +166,37 @@ def test_plain_response_serializer_derives_keys_and_references_from_model_contex
         model_context=Sale,
     )
     authority = inspection.candidate_key_authorities[0]
-    assert authority.entity_kind == "location"
+    assert authority.entity_kind == Location._meta.label_lower
     assert authority.key_id == "primary_key"
     assert authority.components[0].type == "uuid"
+
+
+def test_nested_many_serializer_declares_its_own_row_identity() -> None:
+    class Location(models.Model):
+        location_id = models.UUIDField(primary_key=True)
+
+        class Meta:
+            app_label = "test_schema_introspection_nested_many_identity"
+
+    class LocationRowSerializer(serializers.Serializer):
+        location_id = serializers.UUIDField()
+
+        class Meta:
+            model = Location
+
+    class ReportSerializer(serializers.Serializer):
+        data = LocationRowSerializer(many=True)
+
+    inspection = inspect_response_serializer(ReportSerializer)
+
+    assert tuple(
+        (
+            key.entity_kind,
+            key.key_id,
+            tuple(component.field_path for component in key.components),
+        )
+        for key in inspection.candidate_keys
+    ) == ((Location._meta.label_lower, "primary_key", ("data.location_id",)),)
 
 
 def test_method_field_name_does_not_override_declared_relation_structure():
@@ -173,7 +233,7 @@ def test_method_field_name_does_not_override_declared_relation_structure():
 
     references = entity_references_from_serializer(SaleSerializer)
 
-    assert tuple(reference.target_entity_kind for reference in references) == ("staff",)
+    assert tuple(reference.target_entity_kind for reference in references) == (Staff._meta.label_lower,)
 
 
 def test_relation_keys_include_only_total_declared_uniqueness():
@@ -280,12 +340,12 @@ def test_flattened_related_key_remains_outside_the_owning_relation_key():
         for key in keys
     ) == (
         (
-            "shift_compensation",
+            ShiftCompensation._meta.label_lower,
             "primary_key",
             ("shift_compensation_id",),
         ),
         (
-            "shift_compensation",
+            ShiftCompensation._meta.label_lower,
             "unique_compensation_closure",
             ("shift_record_id", "closure_version"),
         ),
@@ -324,7 +384,7 @@ def test_nested_to_one_key_is_a_reference_not_a_second_relation_key():
     assert inspection.relation_model is Staff
     assert tuple(
         (key.entity_kind, key.key_id) for key in inspection.candidate_keys
-    ) == (("staff", "primary_key"),)
+    ) == ((Staff._meta.label_lower, "primary_key"),)
     assert tuple(
         (
             reference.target_entity_kind,
@@ -335,7 +395,7 @@ def test_nested_to_one_key_is_a_reference_not_a_second_relation_key():
         for reference in inspection.entity_references
     ) == (
         (
-            "area",
+            Area._meta.label_lower,
             "primary_key",
             "default_area.area_id",
             ("default_area.name",),
@@ -371,7 +431,7 @@ def test_foreign_key_reference_targets_the_declared_unique_key():
         model_context=Sale,
     )
 
-    assert references[0].target_entity_kind == "location"
+    assert references[0].target_entity_kind == Location._meta.label_lower
     assert references[0].target_key_id == "unique_code"
     assert references[0].components[0].target_component_id == "code"
     assert references[0].components[0].local_field_path == "location_code"
@@ -394,7 +454,7 @@ def test_slug_related_query_parameter_targets_the_declared_unique_key():
     params = query_params_from_serializer(QuerySerializer)
 
     assert params[0].entity_target is not None
-    assert params[0].entity_target.entity_kind == "location"
+    assert params[0].entity_target.entity_kind == Location._meta.label_lower
     assert params[0].entity_target.key_id == "unique_code"
     assert params[0].entity_target.component_id == "code"
 
@@ -444,7 +504,7 @@ def test_scalar_query_parameter_targets_declared_foreign_key_filter() -> None:
     )
 
     assert params[0].entity_target is not None
-    assert params[0].entity_target.entity_kind == "location"
+    assert params[0].entity_target.entity_kind == Location._meta.label_lower
     assert params[0].entity_target.key_id == "primary_key"
     assert params[0].entity_target.component_id == "location_id"
 
@@ -553,3 +613,130 @@ def test_scalar_query_parameter_without_proven_filter_has_no_entity_target() -> 
     )
 
     assert params[0].entity_target is None
+
+
+def test_callable_query_default_remains_unknown_without_execution():
+    def must_not_run():
+        raise AssertionError('Discovery must not evaluate request defaults')
+
+    class Query(serializers.Serializer):
+        active = serializers.BooleanField(default=must_not_run)
+
+    [param] = query_params_from_serializer(Query)
+    assert param.default is None
+    assert param.default_is_known is False
+
+
+def test_optional_response_boolean_is_not_a_closed_two_value_domain():
+    class Response(serializers.Serializer):
+        active = serializers.BooleanField(required=False)
+
+    assert Response({}).data == {}
+    [field] = response_fields_from_serializer(Response, model_context=None)
+    assert field.nullable is True
+
+
+@pytest.mark.parametrize('nested', [False, True])
+def test_omittable_boolean_cannot_certify_finite_population_coverage(nested):
+    from dataclasses import replace
+    from fervis.host_api.contracts import EndpointContract, ParameterContract
+    from fervis.host_api.contracts.population import ParameterPopulation, ParameterRowValues
+    from fervis.lookup.relation_catalog.from_host_api import relation_catalog_from_endpoint_contracts
+    from fervis.lookup.relation_catalog.row_sources.builder import build_api_row_source_catalog
+    from fervis.lookup.source_binding.population_values import population_values
+
+    class Inner(serializers.Serializer):
+        active = serializers.BooleanField(required=True)
+
+    class Flat(serializers.Serializer):
+        active = serializers.BooleanField(required=False)
+
+    class Nested(serializers.Serializer):
+        details = Inner(required=False)
+
+    response = Nested if nested else Flat
+    assert response({}).data == {}
+    endpoint = EndpointContract('entries', 'entries', 'GET', '/entries', '', '',
+        resource_names=('entries',), response_cardinality='many',
+        query_params=(ParameterContract('active', 'boolean', default=True),),
+        response_fields=response_fields_from_serializer(response, model_context=None))
+    catalog = relation_catalog_from_endpoint_contracts((endpoint,))
+    sources = build_api_row_source_catalog(catalog).sources
+    source = next(s for s in sources if any(f.id.endswith('active') for f in s.fields))
+    field = next(f for f in source.fields if f.id.endswith('active'))
+    effect = ParameterPopulation(field_path=field.field_ref, value_mapping=(
+        ParameterRowValues('false', ('false',)), ParameterRowValues('true', ('true',))))
+    assert population_values(source, replace(source.params[0], population=effect)) == ()
+
+
+def test_declared_query_defaults_preserve_catalog_types():
+    from datetime import date
+    from fervis.host_api.contracts import EndpointContract
+    from fervis.lookup.relation_catalog.from_host_api import relation_catalog_from_endpoint_contracts
+
+    class Query(serializers.Serializer):
+        states = serializers.ListField(child=serializers.CharField(), default=['active'])
+        since = serializers.DateField(default=date(2026, 1, 1))
+        mode = serializers.ChoiceField(choices=[(1, 'First'), (2, 'Second')], default=1)
+
+    params = query_params_from_serializer(Query)
+    assert {p.name: p.default for p in params} == {
+        'states': ['active'], 'since': '2026-01-01', 'mode': '1'}
+    endpoint = EndpointContract('entries', 'entries', 'GET', '/entries', '', '', resource_names=('entries',), query_params=params)
+    [read] = relation_catalog_from_endpoint_contracts((endpoint,)).reads
+    assert {p.name: p.default for p in read.params} == {
+        'states': ('active',), 'since': '2026-01-01', 'mode': '1'}
+
+
+def test_readonly_model_property_uses_declared_type_without_executing_getter():
+    class Observation(models.Model):
+        @property
+        def eligible(self) -> bool:
+            raise AssertionError("Catalog discovery must not evaluate model properties")
+
+        @property
+        def undocumented(self):
+            raise AssertionError("Catalog discovery must not sample model properties")
+
+        class Meta:
+            app_label = "test_declared_property_type"
+
+    class ObservationSerializer(serializers.ModelSerializer):
+        renamed = serializers.ReadOnlyField(source="eligible")
+
+        class Meta:
+            model = Observation
+            fields = ("eligible", "renamed", "undocumented")
+
+    inspection = inspect_response_serializer(ObservationSerializer)
+    fields = {field.name: field for field in inspection.response_fields}
+    assert fields["eligible"].type == "boolean"
+    assert fields["renamed"].type == "boolean"
+    assert fields["undocumented"].type == "any"
+
+
+def test_readonly_property_typing_follows_declared_related_source_path():
+    class Detail(models.Model):
+        @property
+        def quantity(self) -> int | None:
+            raise AssertionError("Do not evaluate a related object's getter")
+
+        class Meta:
+            app_label = "test_related_property_type"
+
+    class Record(models.Model):
+        detail = models.ForeignKey(Detail, on_delete=models.CASCADE, null=True)
+
+        class Meta:
+            app_label = "test_related_property_type"
+
+    class RecordSerializer(serializers.ModelSerializer):
+        quantity = serializers.ReadOnlyField(source="detail.quantity")
+
+        class Meta:
+            model = Record
+            fields = ("quantity",)
+
+    [field] = inspect_response_serializer(RecordSerializer).response_fields
+    assert field.type == "integer"
+    assert field.nullable

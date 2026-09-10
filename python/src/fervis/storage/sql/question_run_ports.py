@@ -245,6 +245,24 @@ class SQLQuestionLifecyclePort:
             ).first()
         return _stored_program_invocation(row) if row is not None else None
 
+    def load_prior_invocation(
+        self,
+        *,
+        invocation_id: str,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None:
+        invocation = metadata.tables["fervis_program_invocation"]
+        question = metadata.tables["fervis_question"]
+        with sql_connection(self.engine) as connection:
+            row = connection.execute(
+                _answered_program_invocation_statement(tenant_id=tenant_id).where(
+                    invocation.c.invocation_id == invocation_id,
+                    question.c.conversation_id == conversation_id,
+                )
+            ).first()
+        return _stored_program_invocation(row) if row is not None else None
+
     def load_program_invocation_for_execution(
         self,
         *,
@@ -983,8 +1001,8 @@ def _spine_question_run_start(record: QuestionRunRecord) -> QuestionRunStartRequ
 
 def _answered_program_invocation_statement(
     *,
-    run_id: str,
     tenant_id: str,
+    run_id: str | None = None,
 ):
     invocation = metadata.tables["fervis_program_invocation"]
     program = metadata.tables["fervis_answer_program"]
@@ -992,7 +1010,7 @@ def _answered_program_invocation_statement(
     question = metadata.tables["fervis_question"]
     conversation = metadata.tables["fervis_conversation"]
     result = metadata.tables["fervis_run_result"]
-    return (
+    statement = (
         sa.select(
             invocation.c.invocation_id,
             invocation.c.run_id,
@@ -1019,10 +1037,14 @@ def _answered_program_invocation_statement(
             .join(result, result.c.run_id == run.c.run_id)
         )
         .where(
-            invocation.c.run_id == run_id,
             conversation.c.tenant_id == tenant_id,
             result.c.result_kind == RunResultKind.ANSWERED.value,
         )
+    )
+    return (
+        statement.where(invocation.c.run_id == run_id)
+        if run_id is not None
+        else statement
     )
 
 

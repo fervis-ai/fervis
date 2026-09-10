@@ -13,7 +13,35 @@ from fervis.questions import (
 )
 from fervis.lookup.clarification.payload import clarification_from_payload
 from fervis.questions.contracts import QuestionLifecycleError
-from fervis.lookup.answer_program.codec import answer_program_id, decode_answer_program
+from fervis.lookup.contract_codec import answer_program_id, decode_answer_program
+from fervis.lookup.answer_program.model import AnswerProgram
+from fervis.lookup.answer_program.capability_contracts import NarrowPopulationCapability
+from fervis.lookup.answer_program.operations import (
+    ComputeSpec,
+    Operation,
+    OrderSpec,
+    SortDirection,
+    SortKey,
+    Take,
+)
+from fervis.lookup.answer_program.relations import (
+    FieldBindingRole,
+    Relation,
+    RelationField,
+    RelationSource,
+    SourceKind,
+)
+from fervis.lookup.answer_program.values import (
+    ConstantRef,
+    FactValue,
+    LiteralType,
+    ParameterDeclaration,
+    ParameterRole,
+    ParameterValueType,
+    ValueDependency,
+    ValueDependencyKind,
+)
+from fervis.lookup.expression_operators import ExpressionBinaryOperator
 from fervis.lookup.answer_program.persistence import (
     StoredProgramInvocation,
     parse_stored_program_invocation,
@@ -46,6 +74,7 @@ from tests.testkit.answer_program_contracts import (
     capability_application_from_payload,
 )
 from tests.testkit.assertions import subset_mismatches
+from tests.testkit.semantic_question_contracts import semantic_requested_fact
 
 
 def run_question_run_lifecycle_case(payload: dict[str, Any]) -> list[str]:
@@ -270,7 +299,7 @@ def _portable_rerun_state(
             read_context_ref=principal.read_context_ref,
         )
     for base in payload.get("program_invocations") or ():
-        program = decode_answer_program(base["program"])
+        program = _portable_program(base)
         bindings = binding_set_from_payload(base)
         invocation = program_invocation(
             run_id=str(base["run_id"]),
@@ -301,6 +330,122 @@ def _portable_rerun_state(
         runtime_version="test-runtime",
     )
     return service, runs, lineage, execution
+
+
+def _portable_program(payload: dict[str, Any]) -> AnswerProgram:
+    kind = str(payload.get("program_kind") or "")
+    if not kind:
+        return decode_answer_program(payload["program"])
+    if kind == "patchable":
+        return AnswerProgram(parameters=_rerun_parameters())
+    if kind == "capability":
+        fact = semantic_requested_fact(
+            requested_fact_id="fact_1",
+            output_ids=("answer_1",),
+            description="sales count",
+            scalar=True,
+        )
+        capability_parameter = ParameterDeclaration(
+            id="semantic.sale_channels",
+            role=ParameterRole.SEMANTIC_CONTROL,
+            value_type=ParameterValueType.STRING_SET,
+            semantic_control_ref="fact_1:fact:f1",
+        )
+        return AnswerProgram(
+            fact_template=(fact,),
+            parameters=(_rerun_parameters()[0],),
+            relations=(
+                Relation(
+                    id="sales_rows",
+                    source=RelationSource(kind=SourceKind.API_READ, read_id="sales"),
+                    fields=(
+                        RelationField(
+                            field_id="channel",
+                            roles=(FieldBindingRole.PREDICATE,),
+                        ),
+                    ),
+                ),
+            ),
+            capabilities=(
+                NarrowPopulationCapability(
+                    id="filter_by_sale_channel",
+                    parameter=capability_parameter,
+                    relation_id="sales_rows",
+                    field_id="channel",
+                    operator=ExpressionBinaryOperator.IN,
+                    requested_fact_ids=("fact_1",),
+                    proof_refs=("catalog:sales.channel",),
+                ),
+            ),
+        )
+    if kind == "memory_relation":
+        return AnswerProgram(
+            relations=(
+                Relation(
+                    id="prior_rows",
+                    source=RelationSource(
+                        kind=SourceKind.MEMORY_READ,
+                        memory_relation_id="prior_rows",
+                    ),
+                ),
+            )
+        )
+    memory_value = FactValue.literal(
+        id="prior_value",
+        literal_type=LiteralType.NUMBER,
+        value="2",
+        dependencies=(
+            ValueDependency(
+                kind=ValueDependencyKind.CONVERSATION_MEMORY,
+                ref="memory:prior_value",
+            ),
+        ),
+    )
+    constant = ConstantRef(
+        constant_id="prior_value",
+        version_ref="memory-v1",
+        value=memory_value,
+    )
+    if kind == "memory_constant":
+        return AnswerProgram(
+            operations=(
+                Operation(
+                    id="compute",
+                    spec=ComputeSpec(expression=constant, output_scalar="answer"),
+                ),
+            )
+        )
+    if kind == "memory_rank_limit":
+        return AnswerProgram(
+            operations=(
+                Operation(
+                    id="order",
+                    spec=OrderSpec(
+                        input_relation="rows",
+                        order_by=(SortKey("value", SortDirection.DESC),),
+                        selection=Take(limit=constant),
+                    ),
+                    output_relation="ordered",
+                ),
+            )
+        )
+    raise ValueError(f"unsupported portable program kind: {kind}")
+
+
+def _rerun_parameters() -> tuple[ParameterDeclaration, ...]:
+    return (
+        ParameterDeclaration(
+            id="question.store_ids",
+            role=ParameterRole.QUESTION_INPUT,
+            value_type=ParameterValueType.IDENTITY_SET,
+        ),
+        ParameterDeclaration(
+            id="semantic.sale_states",
+            role=ParameterRole.SEMANTIC_CONTROL,
+            value_type=ParameterValueType.STRING_SET,
+            semantic_control_ref="fact_1:fact:f1",
+        ),
+    )
 
 
 def _portable_rerun_request(payload: dict[str, Any]) -> RerunQuestionRequest:
