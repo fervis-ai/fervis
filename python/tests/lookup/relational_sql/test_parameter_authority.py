@@ -86,3 +86,42 @@ def test_reference_guards_do_not_change_argument_authority_acceptance(target, al
         outcomes.append(compatible_argument({'source':'path','type':'uuid','entity_target':target}, description))
         assert not compatible_argument({'source':'path','type':'integer','entity_target':target}, description)
     assert outcomes == [allowed, allowed]
+
+
+def test_catalog_interpretation_cannot_change_an_observed_string_comparison_to_boolean():
+    from fervis.lookup.relational_sql.parameter_usage import validate_sql_parameter_uses
+    tables={'records':{'columns':{'name':{'type':'string'},'active':{'type':'boolean'}}}}
+    parameters={'choice':{'kind':'catalog_choice','type':'boolean','value':'false'}}
+    with pytest.raises(QueryValidationError,match='type'):
+        validate_sql_parameter_uses('SELECT name FROM records WHERE name=$choice',tables,parameters)
+    validate_sql_parameter_uses('SELECT name FROM records WHERE active=$choice',tables,parameters)
+    validate_sql_parameter_uses('SELECT name FROM records WHERE CAST(name AS BOOLEAN)=$choice',tables,parameters)
+    validate_sql_parameter_uses('WITH transformed AS (SELECT CAST(name AS BOOLEAN) AS flag FROM records) SELECT flag FROM transformed WHERE flag=$choice',tables,parameters)
+
+
+@pytest.mark.parametrize('query', [
+    'SELECT name FROM records WHERE name=($choice)',
+    'SELECT name FROM records WHERE (name)=$choice',
+    'SELECT name FROM records WHERE name IN (SELECT $choice)',
+    'SELECT name FROM records WHERE name BETWEEN $choice AND $choice',
+    'WITH c AS (SELECT $choice AS value) SELECT name FROM records,c WHERE name=c.value',
+    'WITH c AS (SELECT (name) AS value FROM records) SELECT value FROM c WHERE value=$choice',
+    'SELECT name FROM records WHERE (SELECT $choice)=name',
+])
+def test_catalog_comparison_types_follow_unchanged_operands(query):
+    with pytest.raises(QueryValidationError, match='type'):
+        validate_identity_key_uses(query,
+            {'records': {'columns': {'name': {'type': 'string'}}}},
+            {'choice': {'kind': 'catalog_choice', 'type': 'boolean'}})
+
+
+@pytest.mark.parametrize('query', [
+    'SELECT name FROM records WHERE name=CAST($choice AS VARCHAR)',
+    'WITH c AS (SELECT CAST($choice AS VARCHAR) AS value) SELECT name FROM records,c WHERE name=c.value',
+    'SELECT name FROM records WHERE CAST(name AS BOOLEAN) IN (SELECT $choice)',
+    'WITH c AS (SELECT $choice AS value) SELECT active FROM records,c WHERE active=c.value',
+])
+def test_catalog_comparison_preserves_explicit_conversions_and_compatible_projections(query):
+    validate_identity_key_uses(query,
+        {'records': {'columns': {'name': {'type': 'string'}, 'active': {'type': 'boolean'}}}},
+        {'choice': {'kind': 'catalog_choice', 'type': 'boolean'}})

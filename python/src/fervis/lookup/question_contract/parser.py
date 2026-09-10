@@ -1028,9 +1028,8 @@ def _requested_fact(
         if ordering_value.expression.discriminator("kind") == "requested_value_ref":
             if ordering_value_ref is None or ordering_value.expression.field("value_ref") != ordering_value_ref:
                 raise ValueError("ordering must reference its declared requested value")
-            expression_ref = outputs[
-                request_meaning.result_key_count + request_meaning.requested_value_refs.index(ordering_value_ref)
-            ].expression_ref
+            from .output_references import requested_value_output_index
+            expression_ref = outputs[requested_value_output_index(request_meaning, ordering_value_ref)].expression_ref
         else:
             if ordering_value_ref is not None:
                 raise ValueError("ordering must reference its declared requested value")

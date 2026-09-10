@@ -61,14 +61,13 @@ def compile_reference_result(
     projections = answer.program.result_projection.relation_outputs
     if (
         len(projections) != 1
-        or projections[0].entity_key is None
+        or not (projections[0].entity_key is not None or projections[0].record_fields)
         or answer.program.result_projection.scalar_outputs
     ):
-        raise QueryValidationError("Reference query must identify one entity kind")
+        raise QueryValidationError("Reference query must identify one entity or observed record")
     projection = projections[0]
     key = projection.entity_key
-    assert key is not None
-    fields = tuple(dict.fromkeys(component.field_id for component in key.components))
+    fields = tuple(dict.fromkeys(projection.value_field_ids))
     if not set(fields) <= set(output_types):
         raise QueryValidationError("Reference query key types are incomplete")
     relation_name = reference_id or f"reference_{input_ref}"
@@ -80,10 +79,13 @@ def compile_reference_result(
             )
         )
         .from_("matches")
-        .distinct()
     )
+    if key is not None:
+        query = query.distinct()
     selection_parameters = []
     if selected_key is not None:
+        if key is None:
+            raise QueryValidationError('Observed references cannot accept a nominal identity choice')
         from fervis.lookup.available_sources import source_value_literal
         from fervis.lookup.relation_catalog.row_sources import RowSourceValueType
 
@@ -132,7 +134,7 @@ def compile_reference_result(
             tuple(SqlOutputField(field, output_types[field]) for field in fields),
             parameters=tuple(selection_parameters),
             scalar=True,
-            entity_keys=(key,),
+            entity_keys=(key,) if key is not None else (),
             reference_input_ref=input_ref,
             reference_operand=operand,
         ),
@@ -146,9 +148,8 @@ def compile_reference_result(
     reserved.update(relation.id for relation in answer.program.relations)
     if guard.id in reserved or guard.output_relation in reserved:
         raise QueryValidationError("Reference guard identifiers collide with its query")
-    columns = {
-        component.component_id: component.field_id for component in key.components
-    }
+    columns = ({component.component_id:component.field_id for component in key.components}
+               if key is not None else dict(projection.record_fields))
     input_refs = tuple(
         dict.fromkeys(
             ref
@@ -191,25 +192,13 @@ def compile_reference_result(
             "input_ref": input_ref,
             "reference_operand": operand,
             "input_refs": list(input_refs),
-            "columns": {
-                component.component_id: {
-                    "type": output_types[component.field_id],
-                    "description": "Canonical identity key component",
-                    "nullable": False,
-                }
-                for component in key.components
-            },
-            "candidate_keys": [
-                {
-                    "entity_kind": key.entity_kind,
-                    "key_id": key.key_id,
-                    "components": {
-                        component.component_id: component.component_id
-                        for component in key.components
-                    },
-                    "context_columns": [],
-                }
-            ],
+            "columns": {name:{"type":output_types[field],
+                "description":"Canonical identity key component" if key is not None else "Observed record property",
+                "nullable":key is None} for name,field in columns.items()},
+            "candidate_keys": ([{"entity_kind":key.entity_kind,"key_id":key.key_id,
+                "components":{component.component_id:component.component_id for component in key.components},
+                "context_columns":[]}] if key is not None else []),
+            "observed_record": key is None,
             "entity_references": [],
             "request_parameters": [],
             "automatic_request_parameters": [],
@@ -294,7 +283,7 @@ def combine_reference_members(
     columns = tuple(first.view.columns)
     union = Operation(
         f"{relation_name}.union",
-        UnionSpec(tuple(projected), columns, columns),
+        UnionSpec(tuple(projected), columns, columns if identity else ()),
         output_relation=f"{relation_name}.rows",
     )
     if union.id in operations:

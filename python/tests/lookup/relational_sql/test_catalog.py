@@ -82,16 +82,16 @@ def test_sql_catalog_exposes_actual_uuid_and_decimal_representations():
     assert views.tables[view.name]['columns']['id']['type']=='uuid'
     assert views.tables[view.name]['columns']['amount']['type']=='number'
     payload={'query':f'SELECT id FROM "{view.name}"','mode':'rows',
-        'columns':[{'name':'id','value_type':'uuid'}],
+
         'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':None}],
         'ordering':[],'api_bindings':[],'interpretations':[]}
     payload = query_payload(**payload)
     parse_query_answer(payload,table_names=set(views.tables),parameter_names=set(),tables=views.tables)
     erased = {**payload, 'columns': [{'name': 'id', 'value_type': 'string'}]}
-    with pytest.raises(QueryValidationError, match='source key type'):
+    with pytest.raises(QueryValidationError, match='compiler-owned'):
         parse_query_answer(erased, table_names=set(views.tables), parameter_names=set(), tables=views.tables)
     payload['query']=f'SELECT CAST(id AS VARCHAR) AS id FROM "{view.name}"'
-    with pytest.raises(QueryValidationError,match='preserve key values'):
+    with pytest.raises(QueryValidationError,match='source key type|preserve key values'):
         parse_query_answer(payload,table_names=set(views.tables),parameter_names=set(),tables=views.tables)
 
 

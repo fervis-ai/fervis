@@ -231,7 +231,7 @@ def test_question_identity_roles_produce_a_required_sql_identity_output(role):
         result_kind='qualifying_instances',selection_kind='all_results',selection_limit_input_ref=None)
     prompt=QueryAnswerPrompt(question='Where were the shifts worked?',meaning=meaning,tables=views.tables,parameters={})
     payload={'query':f'SELECT id FROM "{view.name}"','mode':'rows',
-        'columns':[{'name':'id','value_type':'integer'}],
+
         'outputs':[{'kind':'identity','authority':'locations/primary(id)','components':{'id':'id'},'label':'work location','display_column':None}],
         'ordering':[],'api_bindings':[],'interpretations':[]}
     payload = query_payload(**payload)
@@ -259,7 +259,7 @@ def test_each_union_branch_preserves_a_complete_observed_identity(operator,wrapp
         {operator} SELECT to_country, {"to_id" if valid else "from_id"} FROM "{view.name}"'''
     if wrapped:query=f'WITH districts AS ({query}) SELECT country,id FROM districts'
     projection=EntityKeyProjection('district','pk',(EntityKeyProjectionComponent('country','country'),EntityKeyProjectionComponent('id','id')))
-    payload={'query':query,'mode':'rows','columns':[{'name':'country','value_type':'string'},{'name':'id','value_type':'integer'}],
+    payload={'query':query,'mode':'rows',
         'outputs':[{'kind':'identity','authority':'district/pk(country,id)','components':{'country':'country','id':'id'},'label':'district','display_column':None}],
         'ordering':[],'api_bindings':[],'interpretations':[]}
     payload = query_payload(**payload)

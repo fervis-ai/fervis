@@ -15,7 +15,7 @@ def authored(arguments=None, query=None, tables=None):
             {'view': 'items', 'name': 'first_item', 'parameter_ref': 'id', 'binding': 'p1'},
             {'view': 'items', 'name': 'second_item', 'parameter_ref': 'id', 'binding': 'p2'},
         ]), table_names={'items', 'other'}, parameter_names={'p1', 'p2'},
-        request_parameters={'items': {'id'}}, tables=tables)
+        request_parameters={'items': {'id'}}, tables=tables or {"items":{"columns":{"id":{"type":"integer"}}}})
 
 
 def test_same_endpoint_can_supply_two_independently_bound_sql_relations():
@@ -74,7 +74,7 @@ def test_named_invocations_execute_and_replay_without_crossing_arguments():
             for name, binding in [('first_item', 'p1'), ('second_item', 'p2')]]
     answer = parse_query_answer(payload(query='SELECT SUM(id) AS total FROM (SELECT id FROM first_item UNION ALL SELECT id FROM second_item)',
         api_bindings=args), table_names={'items'}, parameter_names={'p1', 'p2'},
-        request_parameters={'items': {'facility_id'}})
+        request_parameters={'items': {'facility_id'}}, tables={'items':{'columns':{'id':{'type':'integer'}}}})
     expressions = {name: ConstantRef(name, 'question', FactValue.literal(id=name,
         literal_type=LiteralType.NUMBER, value=str(value), proof_refs=('question',)))
         for name, value in [('p1', 1), ('p2', 2)]}

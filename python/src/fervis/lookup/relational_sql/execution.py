@@ -175,7 +175,7 @@ def _checked_type(raw: str) -> exp.DataType:
                          exp.DType.INT, exp.DType.BIGINT, exp.DType.INT128,
                          exp.DType.DECIMAL, exp.DType.TEXT, exp.DType.VARCHAR,
                          exp.DType.DATE, exp.DType.TIMESTAMP, exp.DType.TIMESTAMPNTZ, exp.DType.TIMESTAMPTZ,
-                         exp.DType.TIME}:
+                         exp.DType.TIME, exp.DType.UUID}:
         raise QueryValidationError('Unsupported API-view column type')
     return kind
 
@@ -236,6 +236,7 @@ def _connection():
 
 def execute_query(query: str, *, tables: Mapping[str, SqlTable],
                   parameters: Mapping[str, Any] | None = None,
+                  parameter_types: Mapping[str, str] | None = None,
                   timeout_seconds: float = 30, timezone: str = "UTC") -> SqlResult:
     timezone = query_timezone(timezone)
     if not 0 < timeout_seconds <= 30:
@@ -243,43 +244,16 @@ def execute_query(query: str, *, tables: Mapping[str, SqlTable],
     if len(query) > 100_000 or sum(len(table.rows) for table in tables.values()) > 200_000:
         raise QueryValidationError('Relational query resource limit exceeded')
     statement, sources = _validate(query, tables)
-    from .column_usage import required_columns, ROW_PRESENCE_COLUMN
+    from .column_usage import required_columns
     required_columns(query,{name:table.columns for name,table in tables.items()})
     if len({name.casefold() for name in tables}) != len(tables):
         raise QueryValidationError('API view names collide')
-    parameters = parameters or {}
-    def bind(node: exp.Expr) -> exp.Expr:
-        if isinstance(node, exp.Placeholder):
-            if node.name not in parameters:
-                raise QueryValidationError(f'Unknown query parameter: {node.name}')
-            return exp.convert(parameters[node.name])
-        return node
-    lowered = statement.transform(bind).transform(_lower_numeric_operations)
-    connection = _connection()
+    lowered = _bind_scalar_parameters(statement, parameters or {}, parameter_types=parameter_types).transform(_lower_numeric_operations)
+    connection = _query_connection(timezone)
     timer = Timer(timeout_seconds, connection.interrupt)
     timer.daemon = True
     try:
-        connection.execute("SET TimeZone = ?", [timezone])
-        connection.create_function('FERVIS_DECIMAL_DIVIDE', _divide,
-            ['VARCHAR', 'VARCHAR'], duckdb.sqltype(_QUOTIENT_TYPE), null_handling=FunctionNullHandling.SPECIAL)
-        for name, table in tables.items():
-            types = {column: _checked_type(kind) for column, kind in table.columns.items()}
-            if not types:
-                types={ROW_PRESENCE_COLUMN:_checked_type('BOOLEAN')}
-            definitions = ', '.join(f'{_identifier(column)} {kind.sql(dialect="duckdb")}'
-                                    for column, kind in types.items())
-            connection.execute(f'CREATE TABLE {_identifier(name)} ({definitions})')
-            rows = []
-            for row in table.rows:
-                if not table.columns:
-                    rows.append((True,))
-                    continue
-                if any(column not in row for column in types):
-                    raise QueryValidationError('An API row is missing a declared column')
-                rows.append(tuple(_input_value(row[column], kind) for column,kind in types.items()))
-            if rows:
-                placeholders = ', '.join('?' for _ in types)
-                connection.executemany(f'INSERT INTO {_identifier(name)} VALUES ({placeholders})', rows)
+        _load_tables(connection, tables)
         timer.start()
         query_sql = lowered.sql(dialect='duckdb', identify=True)
         _verify_bound_numeric_types(connection, query_sql)
@@ -306,3 +280,121 @@ def query_timezone(name):
         return ZoneInfo(name).key
     except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
         raise QueryValidationError('SQL timezone is not a supported timezone name') from exc
+
+
+def _load_tables(connection, tables, *, include_rows=True):
+    from .column_usage import ROW_PRESENCE_COLUMN
+    for name, table in tables.items():
+        types = {column: _checked_type(kind) for column, kind in table.columns.items()}
+        if not types:
+            types={ROW_PRESENCE_COLUMN:_checked_type('BOOLEAN')}
+        definitions = ', '.join(f'{_identifier(column)} {kind.sql(dialect="duckdb")}'
+                                for column, kind in types.items())
+        connection.execute(f'CREATE TABLE {_identifier(name)} ({definitions})')
+        rows = []
+        for row in table.rows if include_rows else ():
+            if not table.columns:
+                rows.append((True,))
+                continue
+            if any(column not in row for column in types):
+                raise QueryValidationError('An API row is missing a declared column')
+            rows.append(tuple(_input_value(row[column], kind) for column,kind in types.items()))
+        if rows:
+            placeholders = ', '.join('?' for _ in types)
+            connection.executemany(f'INSERT INTO {_identifier(name)} VALUES ({placeholders})', rows)
+
+
+def _query_connection(timezone):
+    connection = _connection()
+    try:
+        connection.execute("SET TimeZone = ?", [timezone])
+        connection.create_function('FERVIS_DECIMAL_DIVIDE', _divide,
+            ['VARCHAR', 'VARCHAR'], duckdb.sqltype(_QUOTIENT_TYPE), null_handling=FunctionNullHandling.SPECIAL)
+        return connection
+    except BaseException:
+        connection.close()
+        raise
+
+
+def describe_query(query: str, *, tables: Mapping[str, SqlTable],
+                   parameter_types: Mapping[str, str] | None = None,
+                   parameter_values: Mapping[str, Any] | None = None,
+                   timezone: str = 'UTC') -> dict[str, str]:
+    """Bind a stable SQL projection against declared types without observing rows."""
+    if len(query) > 100_000:
+        raise QueryValidationError('Relational query resource limit exceeded')
+    statement, _ = _validate(query, tables)
+    from .column_usage import required_columns
+    required_columns(query, {name:table.columns for name,table in tables.items()})
+    if len({name.casefold() for name in tables}) != len(tables):
+        raise QueryValidationError('API view names collide')
+    for select in statement.find_all(exp.Select):
+        if any(not isinstance(item, exp.Alias) and tuple(item.find_all(exp.Placeholder))
+               for item in select.expressions):
+            raise QueryValidationError('Parameter-dependent SQL projections require stable aliases')
+    parameters = parameter_types or {}
+    occupied = {node.name.casefold() for node in statement.find_all(exp.Identifier)} | {name.casefold() for name in tables}
+    parameter_table = '__fervis_parameters__'
+    while parameter_table.casefold() in occupied:
+        parameter_table += '_'
+    def bind(node):
+        if isinstance(node, exp.Placeholder):
+            if node.name not in parameters:
+                raise QueryValidationError(f'Unknown query parameter: {node.name}')
+            return exp.Subquery(this=exp.select(exp.column(node.name, quoted=True)).from_(
+                exp.Table(this=exp.to_identifier(parameter_table, quoted=True))))
+        return node
+    constants = {name:value for name,value in (parameter_values or {}).items() if value is not None}
+    if not constants.keys() <= parameters.keys():
+        raise QueryValidationError('Grounded SQL constants require declared parameter types')
+    lowered = _bind_scalar_parameters(statement, constants, parameter_types=parameters, missing=bind).transform(_lower_numeric_operations)
+    with _query_connection(query_timezone(timezone)) as connection:
+        timer = Timer(30, connection.interrupt)
+        timer.daemon = True
+        timer.start()
+        try:
+            _load_tables(connection, {**tables, **({parameter_table:SqlTable(parameters, ())} if parameters else {})},
+                         include_rows=False)
+            sql = lowered.sql(dialect='duckdb', identify=True)
+            _verify_bound_numeric_types(connection, sql)
+            description = connection.execute('DESCRIBE '+sql).fetchall()
+        except duckdb.Error as exc:
+            raise QueryValidationError(f'SQL schema could not be bound: {exc}') from exc
+        finally:
+            timer.cancel()
+            timer.join()
+    result: dict[str, str] = {}
+    domains = {'BOOLEAN':'boolean', 'TINYINT':'integer', 'SMALLINT':'integer',
+               'INTEGER':'integer', 'BIGINT':'integer', 'HUGEINT':'integer',
+               'UTINYINT':'integer', 'USMALLINT':'integer', 'UINTEGER':'integer',
+               'UBIGINT':'integer', 'UHUGEINT':'integer', 'VARCHAR':'string',
+               'DATE':'date', 'TIMESTAMP':'datetime', 'TIMESTAMP WITH TIME ZONE':'datetime',
+               'UUID':'uuid'}
+    for name, kind, *_ in description:
+        if not name or name.casefold() in {column.casefold() for column in result}:
+            raise QueryValidationError('SQL output names must be nonempty and unique')
+        domain = 'number' if kind.startswith('DECIMAL(') else domains.get(kind)
+        if domain is None:
+            raise QueryValidationError(f'SQL output has an unsupported type: {kind}')
+        result[name] = domain
+    if not result:
+        raise QueryValidationError('SQL must return at least one column')
+    return result
+
+
+def _bind_scalar_parameters(statement, parameters, *, parameter_types=None, missing=None):
+    """Grounded scalar constants have the same SQL semantics in both phases."""
+    def bind(node):
+        if isinstance(node, exp.Placeholder):
+            if node.name in parameters:
+                from uuid import UUID
+                value = parameters[node.name]
+                literal = (exp.Cast(this=exp.Literal.string(str(value)), to=exp.DataType.build('UUID'))
+                           if isinstance(value, UUID) else exp.convert(value))
+                kind = (parameter_types or {}).get(node.name, '')
+                return exp.Cast(this=literal, to=_checked_type(kind)) if kind.startswith('DECIMAL(') else literal
+            if missing is not None:
+                return missing(node)
+            raise QueryValidationError(f'Unknown query parameter: {node.name}')
+        return node
+    return statement.transform(bind)

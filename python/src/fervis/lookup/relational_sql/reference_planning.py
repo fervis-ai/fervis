@@ -36,8 +36,12 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
     turn_name = "reference query"
     turn_task = "author a runtime query that resolves the assigned reference"
 
-    def __init__(self, *, meaning, tables, parameters, consumer_view_refs=None, expected_key=None):
+    def __init__(self, *, meaning, tables, parameters, consumer_view_refs=None, expected_key=None, record_source=None, record_fields=()):
         self.expected_key = expected_key
+        self.record_source = record_source
+        self.record_fields = tuple(record_fields)
+        if record_source is not None and (expected_key is not None or record_source not in tables or not self.record_fields or not set(self.record_fields) <= set(tables[record_source]['columns'])):
+            raise ValueError('Observed reference requires one declared record carrier and no nominal authority')
         if meaning.reference_kind == 'literal' and expected_key is not None:
             from .outputs import identity_authorities
             tables = {name:table for name,table in tables.items() if any(
@@ -67,6 +71,8 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
     def compilation_scope(self):
         return {
             "required_identity": self.expected_key,
+            "observed_record_source": self.record_source,
+            "observed_record_fields": self.record_fields,
             "unit": "reference_resolution",
             "timezone": self.meaning.timezone,
             "input_ref": self.meaning.reference_input_ref,
@@ -76,6 +82,8 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
         }
 
     def output_identity_authorities(self):
+        if self.record_source is not None:
+            return {}
         authorities = super().output_identity_authorities()
         if self.expected_key is None:
             return authorities
@@ -84,13 +92,16 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
                 (self.expected_key['entity_kind'], self.expected_key['key_id'], set(self.expected_key['components']))}
 
     def allow_record_outputs(self):
-        return False
+        return self.record_source is not None
 
     def _result_modes(self):
         return ["rows"]
 
     def _schema(self):
         schema = super()._schema()
+        if self.record_source is not None:
+            schema['properties'].pop('outputs')
+            schema['required'].remove('outputs')
         schema['properties']['reference_binding'] = {'anyOf':[
             {'type':'object','properties':{'kind':{'type':'string','enum':['literal']},'match_column':{'type':'string','minLength':1}},
              'required':['kind','match_column'],'additionalProperties':False},
@@ -107,7 +118,7 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
                     "The query must select the described role or relationship; merely projecting role fields or returning all entities does not resolve it. "
                     "Fervis checks uniqueness but does not add the description's missing predicates or joins. Preserve extrema ties. "
                     "Description inputs are fixed definitions, not SQL placeholders or REST argument values. Use catalog value symbols where needed.")
-        return ("Project candidate keys and an observed match_column for the supplied literal. Do not author WHERE, joins, grouping, ordering, "
+        return ("Project candidate fields and an observed match_column for the supplied literal. Do not author WHERE, joins, grouping, ordering, "
                 "auxiliary queries, or truncation; UNION of candidate projections is allowed. The match_column must be an observed name/code "
                 "field or null-preserving concatenation of observed fields with punctuation or whitespace separators. Never invent missing values. "
                 "Fervis adds equality to the original input and then checks identity uniqueness. The original literal may bind a declared lookup "
@@ -127,14 +138,23 @@ class ReferenceQueryPrompt(QueryAnswerPrompt):
         return "Return complete canonical key columns and, for literal references, the observed match_column. The matching column is internal, not a public output. Set display_column to null; the factual answer owns presentation."
 
     def instruction_sections(self, builder):
+        if self.record_source is not None:
+            return (builder.instruction_block('Observed reference query contract', (
+                *self.sql_surface_instructions(),
+                'Select observed_record_fields from observed_record_source, plus the literal match_column when needed. That declared projection owns the result; do not submit outputs or invent an identity authority. Do not select unrelated properties.',
+                'Preserve candidate occurrences: the outer query must read one invocation of that carrier, without joins, DISTINCT, grouping, ordering, or set operations. Express relationships and extrema through correlated predicates and subqueries; never truncate competing matches.',
+                self._input_usage_instruction(),
+                'Use mode rows and interpretations empty. Copy the declared literal or description kind into reference_binding. A literal match_column must be selected and observed; a description must implement the supplied condition.',
+                'Fervis checks for exactly one matching record after complete traversal. It does not infer uniqueness from field names or certify a nominal identity. Report unavailable only when the declared API contracts cannot support this selection.',
+            )),)
         return (builder.instruction_block("Reference query contract", (
             *self.sql_surface_instructions(),
-            "Satisfy Compilation scope.required_identity exactly. It is the identity authority already selected by the consuming factual query. Do not substitute a different namespace or key. Resolve only reference_text from Compilation scope. Other collection members and the surrounding factual answer belong to separate queries.",
+            "Satisfy Compilation scope.required_identity exactly. It is the selected reference identity contract. Do not substitute a different namespace or key. Resolve only reference_text from Compilation scope. Other collection members and the surrounding factual answer belong to separate queries.",
             "Copy Requested answer.reference_kind into reference_binding. The frame has already fixed whether this is a literal name/code or a descriptive role; do not reinterpret that choice.",
             "Use the consuming view_refs in Declared API views to disambiguate the API domain of the reference. The question's instance-kind wording is not an API namespace. Do not transfer the factual answer's filters or measures into reference resolution.",
             self._input_usage_instruction(),
             "Use the required logical identity authority. Project all its components unchanged from declared key or entity-reference fields in the selected views and map their SQL aliases in outputs. Matching column names or UUID types do not make different identity domains interchangeable; use declared relationships when necessary.",
-            "Declare every selected SQL alias and its scalar type in columns. For a literal, match_column must name a selected alias, not an unselected source field. Return exactly one identity output, mode rows, ordering empty, interpretations empty.",
+            "Give selected SQL expressions stable aliases; Fervis derives the output column inventory and types. For a literal, match_column names a selected alias or an unambiguous observed source property; Fervis projects it. Return exactly one identity output, mode rows, no outer ORDER BY, interpretations empty.",
             self._identity_display_instruction(),
             "Preserve all candidate keys and ties. Do not choose an arbitrary candidate or use LIMIT/OFFSET. Fervis checks missing and ambiguous identities at execution.",
             "Submit one submit_query_answer call, or report_query_unavailable if the declared views cannot establish this reference. Do not invent unavailable fields or change the requested identity.",
@@ -157,20 +177,39 @@ def parse_reference_query(payload, *, prompt, menu):
     from .reference_matching import reject_reference_truncation
     reject_reference_truncation(payload['query'])
     body = {key:value for key,value in payload.items() if key != 'reference_binding'}
+    record_source = getattr(prompt, 'record_source', None)
+    if record_source is not None:
+        if 'outputs' in body:
+            raise QueryValidationError('Observed reference output is owned by its declared record carrier')
+        body['outputs'] = [{'kind':'record','label':prompt.meaning.denoted_instance_kind or 'record',
+            'fields':[{'name':name,'column':name} for name in prompt.record_fields]}]
+
     value_names = {name for name, description in menu.descriptions.items()
                    if kind == 'literal' or description.get('input_ref') != prompt.meaning.reference_input_ref}
     authored = parse_query_answer(
         body, table_names=set(prompt.tables), parameter_names=value_names,
         meaning=prompt.meaning,
         expected_input_refs=None,
+        required_projection_columns=(binding['match_column'],) if kind == 'literal' else (),
         tables=prompt.tables, parameter_descriptions=menu.descriptions,
         request_parameters={name:{param['param_ref'] for param in table.get('request_parameters',())}
                             for name,table in prompt.tables.items()},
     )
     if isinstance(authored, QueryUnavailable):
         return authored
-    if len(authored.outputs) != 1 or authored.outputs[0].identity is None:
-        raise QueryValidationError('Reference resolution requires a canonical identity output')
+    if len(authored.outputs) != 1 or (not authored.outputs[0].record_fields if record_source is not None else authored.outputs[0].identity is None):
+        raise QueryValidationError('Reference resolution must preserve its declared identity or observed record contract')
+    if record_source is not None:
+        from .reference_matching import require_record_candidate_source
+        require_record_candidate_source(authored, record_source=record_source, record_fields=prompt.record_fields)
+        from sqlglot import parse_one
+        needed = set(prompt.record_fields) | ({binding['match_column']} if kind == 'literal' else set())
+        statement = parse_one(authored.query, read='duckdb')
+        statement.set('expressions', [expression for expression in statement.expressions if expression.alias_or_name in needed])
+        body['query'] = statement.sql(dialect='duckdb')
+        authored = parse_query_answer(body, table_names=set(prompt.tables),parameter_names=value_names,
+            meaning=prompt.meaning,tables=prompt.tables,parameter_descriptions=menu.descriptions)
+
     expected = getattr(prompt, 'expected_key', None)
     if expected is not None and (len(authored.outputs) != 1 or authored.outputs[0].identity is None or
         (authored.outputs[0].identity.entity_kind, authored.outputs[0].identity.key_id,

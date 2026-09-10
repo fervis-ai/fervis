@@ -1,6 +1,5 @@
 """Native query authoring declarations before canonical program compilation."""
 
-from fervis.lookup.answer_program.operations import SQL_VALUE_TYPES
 from fervis.lookup.api_arguments import compatible_argument
 from .parameter_usage import validate_sql_parameter_uses
 from dataclasses import dataclass, asdict, replace
@@ -14,8 +13,8 @@ from fervis.lookup.turn_prompts import (
 )
 from fervis.model_io.structured_output.specs import required_tool_spec
 from .execution import _validate, SqlTable, QueryValidationError
-from .results import ResultContract, ResultOrder
-from .outputs import QueryOutput, parse_query_outputs, identity_authorities, annotate_identity_columns
+from .results import ResultContract
+from .outputs import QueryOutput, parse_query_outputs, query_output_shapes, identity_authorities, annotate_identity_columns
 
 
 @dataclass(frozen=True)
@@ -60,7 +59,7 @@ def invocation_arguments(invocations):
 @dataclass(frozen=True)
 class QueryInterpretation:
     input: str
-    choice: str
+    choice: str | None
     basis: str
 
 
@@ -122,6 +121,7 @@ def parse_query_answer(
     parameter_descriptions=None,
     tables=None,
     expected_input_refs=None,
+    required_projection_columns=(),
 ) -> AuthoredQueryAnswer | QueryUnavailable:
     if "unavailable" in payload:
         if (
@@ -133,8 +133,16 @@ def parse_query_answer(
                 "Unavailable query outcome requires one explicit reason"
             )
         return QueryUnavailable(str(payload["reason"]).strip())
+    if 'ordering' in payload:
+        raise QueryValidationError('Declare requested sorting once in SQL ORDER BY; omit ordering')
+    if 'columns' in payload:
+        raise QueryValidationError('SQL output schemas are compiler-owned; omit columns')
+    if 'reference_demands' in payload:
+        raise QueryValidationError('Reference contracts must be established before factual SQL authoring')
     if 'request_arguments' in payload or 'api_invocations' not in payload:
         raise QueryValidationError('Declare API sources and their bindings together in api_invocations')
+    if any(not isinstance(argument.get('binding'),str) for item in payload['api_invocations'] for argument in item['arguments']):
+        raise QueryValidationError('API arguments must bind declared menu symbols')
     api_invocations = tuple(ApiInvocation(item['view'], item['name'],
         tuple(InvocationArgument(**argument) for argument in item['arguments']),
         tuple(PopulationBinding(**binding) for binding in item.get('population_bindings', ()))) for item in payload['api_invocations'])
@@ -152,94 +160,6 @@ def parse_query_answer(
     names = tuple(sorted({node.name for node in statement.find_all(exp.Placeholder)}))
     if not set(names) <= parameter_names:
         raise QueryValidationError("Query references an undeclared grounded parameter")
-    columns = payload["columns"]
-    output_types = {item["name"]: item["value_type"] for item in columns}
-    if (
-        not columns
-        or len(output_types) != len(columns)
-        or any(not name for name in output_types)
-    ):
-        raise QueryValidationError(
-            "Query output declarations must be nonempty and unique"
-        )
-    if not set(output_types.values()) <= set(SQL_VALUE_TYPES):
-        raise QueryValidationError("Query output has an unsupported value type")
-    if tables:
-        from .column_usage import project_query
-        project_query(payload['query'], {name: table['columns'] for name, table in tables.items()},
-                      output_columns=output_types)
-    mode = payload["mode"]
-    outputs = (
-        ()
-        if mode == "existence"
-        else parse_query_outputs(
-            payload["outputs"],
-            columns=output_types,
-            tables=tables or {},
-            query=payload["query"],
-        )
-    )
-    if mode == "existence" and payload["outputs"]:
-        raise QueryValidationError(
-            "Existence output is owned by the deterministic result contract"
-        )
-    public = tuple(
-        dict.fromkeys(column for output in outputs for column in output.columns)
-    )
-    ordering = tuple(
-        ResultOrder(item["column"], item["descending"]) for item in payload["ordering"]
-    )
-    if any(item.column not in output_types for item in ordering):
-        raise QueryValidationError("Ordering references an undeclared query output")
-    mode = payload["mode"]
-    if mode == "scalar" and len(outputs) != 1:
-        raise QueryValidationError("Scalar answers require exactly one public output")
-    if "selection" in payload or "limit" in payload:
-        raise QueryValidationError(
-            "Result selection belongs to the grounded question request"
-        )
-    selection = (
-        {
-            "all_results": "all",
-            "first_rank_with_ties": "first_with_ties",
-            "take_with_boundary_ties": "take_with_ties",
-            "position_with_ties": "position_with_ties",
-        }[meaning.selection_kind]
-        if meaning is not None
-        else "all"
-    )
-    if mode != "rows" and (
-        ordering or selection != "all" or selection_limit is not None
-    ):
-        raise QueryValidationError("Only row answers may select or order results")
-    result = ResultContract(
-        mode, public if mode == "rows" else (), ordering, selection, selection_limit
-    )
-    if meaning is not None:
-        if mode == "existence" and meaning.result_kind != "scalar":
-            raise QueryValidationError(
-                "An existence output requires a population value request"
-            )
-        effective_kinds = (
-            ("value",)
-            if mode == "existence"
-            else tuple(
-                "identity" if output.identity is not None or output.record_fields else "value"
-                for output in outputs
-            )
-        )
-        if len(effective_kinds) != len(meaning.output_origins):
-            raise QueryValidationError(
-                "Query public outputs differ from the requested output inventory"
-            )
-        if len(ordering) != len(meaning.ordering_origins):
-            raise QueryValidationError(
-                "Query ordering differs from the requested ranking keys"
-            )
-        if effective_kinds != query_output_roles(meaning):
-            raise QueryValidationError(
-                "Query output identity/value roles differ from the request"
-            )
     if len({(item.sql_view, item.parameter_ref) for item in arguments}) != len(arguments):
         raise QueryValidationError("Request parameter binding is repeated")
     if any(
@@ -280,35 +200,15 @@ def parse_query_answer(
         interpretations
     ):
         raise QueryValidationError("An input interpretation is repeated")
-    alternatives = {
-        name: {item.choice for item in interpretations if item.input == name}
-        for name in {item.input for item in interpretations}
-    }
-    for input_name, choices in alternatives.items():
-        if input_name in used_names:
-            if len(choices) != 1:
-                raise QueryValidationError(
-                    "An interpreted input has multiple representations; use explicit choice symbols"
-                )
-            choice = next(iter(choices))
-            transformed = statement.transform(
-                lambda node, source=input_name, target=choice: (
-                    exp.Placeholder(this=target)
-                    if isinstance(node, exp.Placeholder) and node.name == source
-                    else node
-                )
-            )
-            assert isinstance(transformed, exp.Query)
-            statement = transformed
-            arguments = tuple(
-                replace(argument, binding=choice)
-                if argument.binding == input_name
-                else argument
-                for argument in arguments
-            )
-    names = tuple(sorted({node.name for node in statement.find_all(exp.Placeholder)}))
-    used_names = set(names) | {item.binding for item in arguments}
     for item in interpretations:
+        if item.choice is None:
+            if (not item.basis.strip() or not descriptions.get(item.input, {}).get('may_interpret')
+                    or item.input not in used_names):
+                expression = descriptions.get(item.input, {}).get('sql_expression', '$' + item.input)
+                raise QueryValidationError(
+                    f'Literal interpretation must identify a directly used input: use {expression} in SQL '
+                    f'or bind {item.input} in API arguments. The menu key alone is not a SQL column.')
+            continue
         if (
             not item.basis.strip()
             or not descriptions.get(item.input, {}).get("may_interpret")
@@ -329,6 +229,9 @@ def parse_query_answer(
             raise QueryValidationError(
                 "Interpreted catalog value is not used by the query"
             )
+    # Direct uses already carry their original parameter value and ownership.
+    # Only category mappings freeze lexical inputs as semantic evidence.
+    interpretations = tuple(item for item in interpretations if item.choice is not None)
     if expected_input_refs is not None:
         input_names = used_names | {item.input for item in interpretations} | population_inputs
         used_inputs = {
@@ -377,6 +280,103 @@ def parse_query_answer(
                 "Request argument type or identity authority does not match the bound parameter"
             )
     validate_sql_parameter_uses(query, tables or {}, descriptions)
+    from .acquisition import _sql_type
+    from .query_projection import lower_query_projection
+    from .execution import describe_query
+    declared_tables = tables or {name:{'columns':{}} for name in instances}
+    shapes = query_output_shapes(payload['outputs'], tables=tables or {}) if payload['mode'] != 'existence' else ()
+    query, ordering = lower_query_projection(query, {name:table.get('columns', {}) for name,table in declared_tables.items()},
+        public_columns=tuple(dict.fromkeys((*tuple(column for output in shapes for column in output.columns), *required_projection_columns))))
+    from fervis.lookup.plan_execution.declared_values import parse_declared_value
+    parameter_types, parameter_values = {}, {}
+    for name in names:
+        kind = descriptions.get(name, {}).get('value_type') or descriptions.get(name, {}).get('type')
+        if not kind:
+            raise QueryValidationError('SQL parameter needs a declared scalar type')
+        parameter_types[name] = _sql_type(kind)
+        if 'value' in descriptions[name]:
+            parameter_values[name] = parse_declared_value(descriptions[name]['value'], kind)
+            parameter_types[name] = _sql_type(kind, values=(parameter_values[name],))
+    output_types = describe_query(query, tables={name:SqlTable({column:_sql_type(definition['type'])
+        for column,definition in table.get('columns', {}).items()}, ()) for name,table in declared_tables.items()},
+        parameter_types=parameter_types, parameter_values=parameter_values, timezone=getattr(meaning, 'timezone', 'UTC'))
+    mode = payload["mode"]
+    outputs = (
+        ()
+        if mode == "existence"
+        else parse_query_outputs(
+            payload["outputs"],
+            columns=output_types,
+            tables=tables or {},
+            query=query,
+        )
+    )
+    if mode == "existence" and payload["outputs"]:
+        raise QueryValidationError(
+            "Existence output is owned by the deterministic result contract"
+        )
+    public = tuple(
+        dict.fromkeys(column for output in outputs for column in output.columns)
+    )
+    mode = payload["mode"]
+    if mode == "scalar" and len(outputs) != 1:
+        raise QueryValidationError("Scalar answers require exactly one public output")
+    if "selection" in payload or "limit" in payload:
+        raise QueryValidationError(
+            "Result selection belongs to the grounded question request"
+        )
+    selection = (
+        {
+            "all_results": "all",
+            "first_rank_with_ties": "first_with_ties",
+            "take_with_boundary_ties": "take_with_ties",
+            "position_with_ties": "position_with_ties",
+        }[meaning.selection_kind]
+        if meaning is not None
+        else "all"
+    )
+    if mode != "rows" and (
+        ordering or selection != "all" or selection_limit is not None
+    ):
+        raise QueryValidationError("Only row answers may select or order results")
+    result = ResultContract(
+        mode, public if mode == "rows" else (), ordering, selection, selection_limit
+    )
+    if meaning is not None:
+        if mode == "existence" and meaning.result_kind != "scalar":
+            raise QueryValidationError(
+                "An existence output requires a population value request"
+            )
+        effective_kinds = (
+            ("value",)
+            if mode == "existence"
+            else tuple(
+                "identity" if output.identity is not None or output.record_fields else "value"
+                for output in outputs
+            )
+        )
+        if len(effective_kinds) != len(meaning.output_origins):
+            raise QueryValidationError(
+                "Query public outputs differ from the requested output inventory"
+            )
+        if len(ordering) != len(meaning.ordering_origins):
+            raise QueryValidationError(
+                "Query ordering differs from the requested ranking keys"
+            )
+        from fervis.lookup.question_contract.output_references import requested_value_output_index
+        for index, value_ref in enumerate(getattr(meaning, 'ordering_value_refs', ())):
+            if value_ref is None:
+                continue
+            try:
+                output_index = requested_value_output_index(meaning, value_ref)
+            except ValueError as exc:
+                raise QueryValidationError(str(exc)) from exc
+            if index >= len(ordering) or ordering[index].column != outputs[output_index].column:
+                raise QueryValidationError('Ordering must use the same expression as its declared requested value')
+        if effective_kinds != query_output_roles(meaning):
+            raise QueryValidationError(
+                "Query output identity/value roles differ from the request"
+            )
     return AuthoredQueryAnswer(
         query,
         output_types,
@@ -460,6 +460,8 @@ class QueryAnswerPrompt(TurnPromptBase):
         return asdict(self.meaning)
 
     def data_sections(self, builder):
+        tables = annotate_identity_columns(self.tables)
+        references = {name:table for name,table in tables.items() if table.get("kind") == "resolved_reference"}
         return (
             builder.json_section(
                 "Compilation scope:",
@@ -472,9 +474,11 @@ class QueryAnswerPrompt(TurnPromptBase):
                        "has_no_required_parameters": not any(parameter.get("required") for parameter in table.get("request_parameters", ()))}
                 for name, table in self.tables.items()
             }, indent=None),
+            *((builder.json_section("Resolved SQL inputs:", references, indent=None),
+               builder.text_section("", "Each input is a guarded SQL table, already planned from its supplied reference. Consume these tables or their typed REST argument symbols; do not repeat their name, role, or configuration resolution against API rows.")) if references else ()),
             builder.json_section("Declared API views:", {
                 name: {key: value for key, value in table.items() if key != "read_id"}
-                for name, table in annotate_identity_columns(self.tables).items()
+                for name, table in tables.items() if name not in references
             }, indent=None),
             builder.json_section(
                 "Declared output identity types:",
@@ -483,7 +487,7 @@ class QueryAnswerPrompt(TurnPromptBase):
             ),
             builder.json_section(
                 "Grounded parameter menu:", {
-                    name: {**{key:value for key,value in description.items() if not key.startswith("_")}, **({"sql_expression": "$" + name}
+                    name: {**{key:value for key,value in description.items() if not key.startswith("_") and key != "relation_id"}, **({"sql_expression": "$" + name}
                         if description.get("kind") not in {"reference_argument", "reference_literal", "definition"} else {})}
                     for name, description in self.parameters.items() if description.get("kind") != "definition"
                 }, indent=None
@@ -513,11 +517,11 @@ class QueryAnswerPrompt(TurnPromptBase):
                     "An aggregate can be computed from a complete row view. Missing inputs for a summary endpoint do not make the question unavailable when another declared view can supply the observations. Required parent traversal remains the compiler's responsibility.",
                     "Temporal parameter metadata declares the boundary convention and scalar type. Inclusive calendar end dates include that whole date; do not treat an inclusive end as the first excluded date.",
                     self._input_usage_instruction(),
-                    "Declare every returned SQL alias and its scalar type in columns. Separately declare exactly the requested public outputs. A value output selects one column. An identity output selects a declared candidate-key or entity-reference authority and maps all its key components to unchanged SQL key-column aliases. When an entity answer has no appropriate declared key authority, use a record output mapping descriptive and identifier fields to observed SQL columns. Do not include unrequested aggregate values or ordering scores inside a record. Those remain hidden SQL columns. This returns ordinary record data without certifying a nominal identity. Prefer a canonical identity when its authority is declared. Keep distinct records and ties; a display name is not a uniqueness key. Keep grouping and ties based on identity and the requested ranking keys, not display labels. Unrequested ordering columns stay out of outputs.",
+                    "Give calculated SQL expressions stable aliases. Public output columns may also name unambiguous properties in the query source scope; Fervis projects them. Fervis derives their scalar types and column inventory from SQL and the declared input schemas. Declare exactly the requested public outputs. A value output selects one column. An identity output selects a declared candidate-key or entity-reference authority and maps all its key components to unchanged SQL key-column aliases. When an entity answer has no appropriate declared key authority, use a record output mapping descriptive and identifier fields to unchanged API or remembered record properties selected by SQL. A computed column is not an observed record property; calculated ranking or grouping measures cannot be placed inside a record. Do not include unrequested aggregate values or ordering scores inside a record. Those remain hidden SQL columns. This returns ordinary record data without certifying a nominal identity. Prefer a canonical identity when its authority is declared. Keep distinct records and ties; a display name is not a uniqueness key. Keep grouping and ties based on identity and the requested ranking keys, not display labels. Unrequested ordering columns stay out of outputs.",
                     self._identity_display_instruction(),
                     "For a yes/no existence question use mode existence and return witness rows. Fervis determines true or false even when no witness exists. Do not count the whole population or return a Boolean in this mode.",
                     "For a scalar question use mode scalar and return exactly one public value and one row, including a directly observed property. An aggregate is required only when the question requests one.",
-                    "For row or grouped answers use mode rows. Return all candidates, including ordering columns. Declare only the ordering keys requested in the question; do not add name or identifier tie breakers. Fervis owns ordering, first rank, top-N with boundary ties and ordinal selection. Do not LIMIT or OFFSET the SQL query.",
+                    "For row or grouped answers use mode rows. Return all candidates. Express the requested sort expressions once in the outer SQL ORDER BY; do not add name or identifier tie breakers. Fervis projects hidden sort expressions and applies ordering, first rank, top-N with boundary ties and ordinal selection. Do not LIMIT or OFFSET the SQL query.",
                     "Use EXISTS and NOT EXISTS for presence and absence; preserve shared-row correlation. Aggregate independent child measures before joining them to avoid fanout. When ranking candidate entities by related-row counts, retain candidates with zero observations. Start from the candidate population and left join child counts unless the question restricts candidates to those with observations. DISTINCT on a measure is not a substitute for preserving observation identity.",
                     "No observations may imply a zero count, but a missing measured value is NULL unless the question or documented measure defines zero. Do not invent observations.",
                     "Return one submit_query_answer tool call, or report_query_unavailable when the available source contracts cannot support the requested fact. Do not substitute another measure, source population or question.",
@@ -534,29 +538,7 @@ class QueryAnswerPrompt(TurnPromptBase):
                 "api_invocations": argument_schema,
                 "query": string,
                 "mode": {"type": "string", "enum": self._result_modes()},
-                "columns": _array(
-                    _object(
-                        {
-                            "name": string,
-                            "value_type": {
-                                "type": "string",
-                                "enum": list(SQL_VALUE_TYPES),
-                            },
-                        }
-                    )
-                ),
                 "outputs": self._output_schema(),
-                "ordering": {
-                    **_array(
-                        _object({"column": string, "descending": {"type": "boolean"}})
-                    ),
-                    "minItems": len(self.meaning.ordering_origins)
-                    if self.meaning is not None
-                    else 0,
-                    "maxItems": len(self.meaning.ordering_origins)
-                    if self.meaning is not None
-                    else 0,
-                },
                 "interpretations": self._interpretation_schema(),
             }
         )
@@ -568,7 +550,7 @@ class QueryAnswerPrompt(TurnPromptBase):
         return schema
 
     def _input_usage_instruction(self):
-        return "Consume every supplied input assigned in Requested answer.input_refs. When the documented API population already satisfies a supplied category, population_bindings must still record its input symbol and contract basis, even though SQL needs no category predicate. Merely reading that API does not account for the supplied input in the compiled program. Catalog choices are optional unless needed for this request. For a lexical category whose API representation is a documented catalog choice, add an interpretations entry connecting the original input symbol to that choice, with its contract basis. The interpreted input symbol resolves to that choice in SQL and request arguments; explicit choice symbols are also valid. This fixes that interpretation for this compiled program. If a documented API population already implements a lexical category, declare that input and its semantic contract basis in the owning api_invocations.population_bindings. This fixes the category to that source population without inventing a field predicate. Use this only when the API contract itself restricts every returned row to that category; a resource label or an available filtering parameter does not establish that restriction. Other requested conditions still require their own predicates or arguments. Inputs supplied in the parameter menu remain direct parameter references unless explicitly interpreted; inputs supplied as resolved_reference views are consumed through those relations."
+        return "Consume every supplied input assigned in Requested answer.input_refs. When the documented API population already satisfies a supplied category, population_bindings must still record its input symbol and contract basis, even though SQL needs no category predicate. Merely reading that API does not account for the supplied input in the compiled program. Catalog choices are optional unless needed for this request. For a lexical category whose API representation is a documented catalog choice, add an interpretations entry connecting the original input symbol to that choice, with its contract basis. Use the choice symbol explicitly in SQL and request arguments. An interpretations entry documents why that used choice represents the original input; it never changes the value of an input symbol. For direct scalar comparisons, use the original input symbol and record choice: null. A non-null choice must be explicitly used by SQL or API arguments and supported by the source contract. This fixes genuine category interpretations for this compiled program. If a documented API population already implements a lexical category, declare that input and its semantic contract basis in the owning api_invocations.population_bindings. This fixes the category to that source population without inventing a field predicate. Use this only when the API contract itself restricts every returned row to that category; a resource label or an available filtering parameter does not establish that restriction. Other requested conditions still require their own predicates or arguments. Input symbols always retain their original scalar values; inputs supplied as resolved_reference views are consumed through those relations."
 
     def _identity_display_schema(self):
         return {"type": ["string", "null"]}
@@ -576,7 +558,7 @@ class QueryAnswerPrompt(TurnPromptBase):
     def reference_usage_instructions(self):
         return (
             "A reference_literal is an original resource-address value, not a SQL identity. It may be used only in compatible REST arguments.",
-            "A reference_argument menu symbol projects an established reference relation field into a REST argument. Use its declared relation and column in SQL. Resolved reference relations preserve missing and ambiguous outcomes and must be consumed as declared, rather than resolving the input again from raw text.",
+            "A reference_argument menu symbol is a REST-binding identifier, not a bare SQL column. Copy its sql_expression for a scoped scalar subquery, or use that subquery with IN for a reference collection. You may also join its declared relation. These uses consume current-run guarded fields; do not resolve the supplied reference again from raw text.",
         )
 
     def _identity_display_instruction(self):
@@ -663,13 +645,13 @@ class QueryAnswerPrompt(TurnPromptBase):
             for name, item in self.parameters.items()
             if item.get("kind") == "catalog_choice"
         ]
-        if not inputs or not choices:
+        if not inputs:
             return {"type": "array", "maxItems": 0, "items": _object({})}
         return _array(
             _object(
                 {
                     "input": {"type": "string", "enum": inputs},
-                    "choice": {"type": "string", "enum": choices},
+                    "choice": {"anyOf": [{"type": "null"}, {"type": "string", "enum": choices}]} if choices else {"type": "null"},
                     "basis": {"type": "string"},
                 }
             )
@@ -686,19 +668,14 @@ class QueryAnswerPrompt(TurnPromptBase):
                     if compatible_argument(parameter, description, literal_lookup=(
                         getattr(self.meaning, 'reference_kind', None) == 'literal' and
                         description.get('input_ref') == getattr(self.meaning, 'reference_input_ref', None))))
-                binding_options = []
-                if names:
-                    group = binding_groups.setdefault(names, "bound_value_" + str(len(binding_groups) + 1))
-                    binding_options.append({"$ref": "#/$defs/" + group})
-                if reference_binding := self.reference_argument_schema(parameter):
-                    binding_options.append(reference_binding)
-                if not binding_options:
+                if not names:
                     continue
-                binding_schema = binding_options[0] if len(binding_options) == 1 else {"anyOf": binding_options}
+                group = binding_groups.setdefault(names, "bound_value_" + str(len(binding_groups) + 1))
+                binding_schema = {"$ref": "#/$defs/" + group}
                 argument_variants.append(_object({
                     "parameter_ref": {"type":"string", "enum":[parameter['param_ref']]},
                     "binding": binding_schema}))
-            arguments = (_array(argument_variants[0] if len(argument_variants) == 1 else {'anyOf':argument_variants})
+            arguments = ({**_array(argument_variants[0] if len(argument_variants) == 1 else {'anyOf':argument_variants}), 'maxItems':len(argument_variants)}
                          if argument_variants else {'type':'array','maxItems':0,'items':_object({})})
             variants.append(_object({'view':{'type':'string','enum':[view]},
                 'name':{'type':'string','pattern':'^[a-z_][a-z0-9_]*$'}, 'arguments':arguments,
@@ -712,9 +689,6 @@ class QueryAnswerPrompt(TurnPromptBase):
         if not inputs or not table.get('description', '').strip():
             return {'type':'array', 'maxItems':0, 'items':_object({})}
         return _array(_object({'input':{'type':'string','enum':inputs}, 'basis':{'type':'string','minLength':1}}))
-
-    def reference_argument_schema(self, parameter):
-        return None
 
     def _unavailable_schema(self):
         return _object(

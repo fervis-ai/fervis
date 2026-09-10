@@ -64,8 +64,10 @@ def execute_sql_operation(operation, relations, *, environment, operation_refs=(
         types = {column.name:_sql_type((relation.field_types or {})[column.field_id],
                     values=tuple(row[column.name] for row in rows)) for column in item.columns}
         tables[item.name] = SqlTable(types, rows)
-    parameters = {item.name:evaluate_expression(item.expression, environment=environment).value for item in spec.parameters}
-    result = execute_query(spec.query, tables=tables, parameters=parameters, timezone=spec.timezone)
+    evaluated = {item.name:evaluate_expression(item.expression, environment=environment) for item in spec.parameters}
+    parameters = {name:item.value for name,item in evaluated.items()}
+    parameter_types = {name:_sql_type(item.value_type, values=(item.value,)) for name,item in evaluated.items()}
+    result = execute_query(spec.query, tables=tables, parameters=parameters, parameter_types=parameter_types, timezone=spec.timezone)
     from .column_usage import require_output_columns
     try:
         require_output_columns(result.columns, (item.id for item in spec.outputs))

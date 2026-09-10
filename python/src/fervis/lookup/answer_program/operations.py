@@ -302,8 +302,8 @@ class SqlQuerySpec:
         if self.reference_operand and not self.reference_input_ref:
             raise ValueError("Reference operand requires an owning input")
         if self.reference_input_ref:
-            if not self.scalar or len(self.entity_keys)!=1 or {item.id for item in self.outputs}!={item.field_id for item in self.entity_keys[0].components}:
-                raise ValueError('Reference query must return exactly one complete identity key')
+            if not self.scalar or len(self.entity_keys)>1 or (self.entity_keys and {item.id for item in self.outputs}!={item.field_id for item in self.entity_keys[0].components}):
+                raise ValueError('Reference query must guard one declared identity or observed record')
 
         if not self.query.strip() or not self.inputs or not self.outputs:
             raise ValueError('SQL operation requires a query, input views and output fields')

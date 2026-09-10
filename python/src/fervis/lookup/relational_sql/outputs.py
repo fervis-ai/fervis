@@ -44,7 +44,7 @@ def identity_authorities(tables):
             for kind, key, components in signatures}
 
 
-def parse_query_outputs(payload, *, columns: Mapping[str,str], tables, query: str) -> tuple[QueryOutput,...]:
+def query_output_shapes(payload, *, tables) -> tuple[QueryOutput,...]:
     authorities=identity_authorities(tables)
     outputs=[]
     for item in payload:
@@ -64,17 +64,31 @@ def parse_query_outputs(payload, *, columns: Mapping[str,str], tables, query: st
                 display_column=item.get('display_column') or '')
         else:
             raise QueryValidationError('Unknown public query output kind')
+        outputs.append(output)
+    if not outputs:
+        raise QueryValidationError('Query must declare its requested public outputs')
+    return tuple(outputs)
+
+
+def parse_query_outputs(payload, *, columns: Mapping[str,str], tables, query: str) -> tuple[QueryOutput,...]:
+    outputs = query_output_shapes(payload, tables=tables)
+    for output in outputs:
         if not set(output.columns)<=set(columns):
             raise QueryValidationError('Public output references an undeclared SQL column')
         try:
-            if item['kind']=='record':
+            if output.record_fields:
                 verify_record_fields(output.record_fields)
             verify_entity_display_type(output.display_column, columns)
         except ResultProjectionError as exc:
             raise QueryValidationError(str(exc)) from exc
-        outputs.append(output)
-    if not outputs:
-        raise QueryValidationError('Query must declare its requested public outputs')
+    record_columns = {column for output in outputs for column in output.record_fields.values()}
+    if record_columns:
+        from .record_lineage import record_field_origins
+        from fervis.lookup.plan_execution.errors import VerificationError
+        try:
+            record_field_origins(query, {name:table['columns'] for name,table in tables.items()}, record_columns)
+        except VerificationError as exc:
+            raise QueryValidationError(str(exc)) from exc
     _verify_authored_identity_outputs(query, columns, tables, tuple(outputs))
     return tuple(outputs)
 

@@ -1,3 +1,4 @@
+from tests.lookup.orchestration.test_reference_authoring import reference_contract_payload
 from tests.lookup.relational_sql.test_authoring import payload as query_payload
 import pytest
 from types import SimpleNamespace
@@ -237,20 +238,25 @@ def test_native_multi_answer_preserves_per_request_operand_ownership(monkeypatch
     assert [next(iter(row.values.values())) for row in executed.fact_result.outcome.projected_rows]==[1 if independent else 2,4 if case in {'shared_category','shared_mixed','source_population'} else 5]
 
 
-@pytest.mark.parametrize('dependency_failures', [0, 1, 2])
+@pytest.mark.parametrize('failure_stage',['none','reference_once','reference_twice','consumer','provider_reference','provider_consumer'])
 @pytest.mark.parametrize('key_type', ['integer', 'uuid'])
 @pytest.mark.parametrize('two_facts', [False, True])
 @pytest.mark.parametrize('opaque_consumer', [False, True])
-def test_normal_reference_compilation_replays_guard_before_required_rest_read(monkeypatch, key_type, two_facts, opaque_consumer, dependency_failures):
+def test_normal_reference_compilation_replays_guard_before_required_rest_read(monkeypatch, key_type, two_facts, opaque_consumer, failure_stage):
+    dependency_failures={'reference_once':1,'reference_twice':2}.get(failure_stage,0)
+    consumer_unavailable=failure_stage=='consumer'
     from uuid import UUID
     def key_value(number):
         return str(UUID(int=number)) if key_type == 'uuid' else number
-    from fervis.lookup.relation_catalog import CatalogField,CatalogParam,ParamSource,EntityKeyComponentTarget
+    from fervis.lookup.relation_catalog import CatalogField,CatalogParam,ParamSource,EntityKeyComponentTarget,CandidateKey,CandidateKeyComponent
     from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
     from fervis.lookup.source_reads.access_model import ReadAccessCatalog
     from fervis.lookup.query_enrichment.semantic import InputResourceSearchTerms
     areas=replace(_read('areas'),resource_names=('areas',),fields=(replace(_read('areas').fields[0], type=key_type),
         CatalogField('primary','boolean',path='is_primary',row_path_id='root')))
+    if consumer_unavailable:
+        areas=replace(areas,fields=(*areas.fields,CatalogField('areas.code','string',path='code',row_path_id='root')),
+            candidate_keys=(*areas.candidate_keys,CandidateKey('code','areas',(CandidateKeyComponent('code','areas.code'),),primary=False)))
     stores=replace(_read('stores',params=(CatalogParam('area_id','area_id',ParamSource.PATH,key_type,
         required=True,entity_target=None if opaque_consumer else EntityKeyComponentTarget('areas','primary','id')),)),resource_names=('stores',))
     foreign=replace(_read('foreign_areas', value_type=key_type), resource_names=('areas',))
@@ -259,6 +265,7 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
     monkeypatch.setattr(compilation,'_discover_read_access',lambda *args,**kwargs:ReadAccessCatalog(sources.sources))
     seen = []
     factual_prompts = []
+    authority_prompts = []
     reference_attempts = []
     def turn(purpose,*,prompt,parse,**kwargs):
         seen.append(purpose.value)
@@ -275,18 +282,24 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
             result=SemanticQueryEnrichmentResult(tuple(RecallBucketMatch(bucket.bucket_ref,('stores',),('stores',))
                 for bucket in prompt.request.recall_buckets),
                 tuple(InputResourceSearchTerms(task.input_use_ref,('areas',)) for task in prompt.request.reference_tasks))
+        elif purpose.value=='grounding' and prompt.turn_name=='reference contract selection':
+            authority_prompts.append(prompt)
+            authority='areas/code(code)' if consumer_unavailable and not prompt.failed_reference_plans else 'areas/primary(id)'
+            result=parse(reference_contract_payload({'i1':authority}))
         elif purpose.value=='grounding':
             reference_attempts.append(prompt)
+            if failure_stage=='provider_reference':
+                raise RuntimeError('Provider transport failed')
             if len(reference_attempts) <= dependency_failures:
                 return SimpleNamespace(result=parse({'unavailable':True,'reason':'The selected reference route is unavailable.'}))
-            assert 'source_realization' in seen
+            assert authority_prompts
             assert prompt.expected_key['entity_kind'] == 'areas'
             assert {authority['entity_kind'] for authority in prompt.output_identity_authorities().values()} == {'areas'}
             foreign_view = next(name for name, table in prompt.tables.items() if table.get('read_id') == 'foreign_areas')
             from fervis.lookup.relational_sql.execution import QueryValidationError
             with pytest.raises(QueryValidationError, match='consuming identity demand'):
                 parse(query_payload(**{'query':f'SELECT id FROM "{foreign_view}"', 'mode':'rows',
-                    'columns':[{'name':'id','value_type':key_type}],
+
                     'outputs':[{'kind':'identity','authority':'foreign_areas/primary(id)','components':{'id':'id'},'label':'area','display_column':None}],
                     'ordering':[], 'api_bindings':[], 'interpretations':[],
                     'reference_binding':{'kind':'description','basis':'The fixture tries the other namespace.'}}))
@@ -297,23 +310,31 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
             view=next(name for name, table in prompt.tables.items() if table.get('read_id') == 'areas')
             choice=next(name for name,desc in prompt.parameters.items() if desc.get('kind')=='catalog_choice' and desc['value']=='true')
             assert {desc['value'] for desc in prompt.parameters.values() if desc.get('kind')=='catalog_choice'}=={'false','true'}
-            result=parse(query_payload(**{'query':f'SELECT id FROM "{view}" WHERE is_primary=${choice}','mode':'rows',
-                'columns':[{'name':'id','value_type':key_type}],
-                'outputs':[{'kind':'identity','authority':'areas/primary(id)','components':{'id':'id'},'label':'area','display_column':None}],
+            field='code' if prompt.expected_key['key_id']=='code' else 'id'
+            result=parse(query_payload(**{'query':f'SELECT {field} FROM "{view}" WHERE is_primary=${choice}','mode':'rows',
+
+                'outputs':[{'kind':'identity','authority':f"areas/{prompt.expected_key['key_id']}({field})",'components':{field:field},'label':'area','display_column':None}],
                 'ordering':[],'api_bindings':[],
                 'interpretations':[],'reference_binding':{'kind':'description','basis':'The primary flag defines the configured primary area.'}}))
         elif purpose.value=='source_realization':
             factual_prompts.append(prompt)
+            if failure_stage=='provider_consumer':
+                raise RuntimeError('Provider transport failed')
             view=next(name for name,table in prompt.tables.items() if table.get('read_id')=='stores')
-            assert set(prompt.reference_inputs) == {'i1'}
-            assert not any(table.get('kind') == 'reference_slot' for table in prompt.tables.values())
-            assert not any(description.get('kind') == 'reference_argument' for description in prompt.parameters.values())
+            assert prompt.tables['i1']['kind']=='resolved_reference'
+            assert not any(table.get('kind')=='reference_slot' for table in prompt.tables.values())
+            assert not any(description.get('kind')=='reference_literal' for description in prompt.parameters.values())
+            reference_symbol=next(name for name,description in prompt.parameters.items() if description.get('kind')=='reference_argument')
             submitted=payload(query='SELECT COUNT(*) AS total FROM selected_items',
-                reference_demands=[{'input_ref':'i1','authority':'areas/primary(id)'}],
-                api_bindings=[{'view':view,'name':'selected_items','parameter_ref':prompt.tables[view]['request_parameters'][0]['param_ref'],'binding':{'reference_input':'i1', **({'component_id':None} if opaque_consumer else {})}}])
-            from jsonschema import validate
-            validate(submitted, prompt._schema())
-            result=parse(submitted)
+                api_bindings=[{'view':view,'name':'selected_items','parameter_ref':prompt.tables[view]['request_parameters'][0]['param_ref'],'binding':reference_symbol}])
+            from jsonschema import validate,ValidationError
+            if consumer_unavailable and prompt.parameters[reference_symbol]['identity']['key_id']=='code':
+                if not opaque_consumer or key_type=='integer':
+                    with pytest.raises(ValidationError):validate(submitted,prompt._schema())
+                result=parse({'unavailable':True,'reason':'The consumer requires the primary identifier, not the resolved code.'})
+            else:
+                validate(submitted,prompt._schema())
+                result=parse(submitted)
         else:raise AssertionError(purpose)
         return SimpleNamespace(result=result)
     monkeypatch.setattr(compilation,'_turn',turn)
@@ -327,23 +348,34 @@ def test_normal_reference_compilation_replays_guard_before_required_rest_read(mo
         def read(self,*,endpoint_name,args):
             assert endpoint_name in {'areas', 'stores'}
             self.calls.append((endpoint_name,args))
-            rows=([{'id':key_value(i),'is_primary':i in self.primary} for i in (1,2)] if endpoint_name=='areas'
+            rows=([{'id':key_value(i),'is_primary':i in self.primary,**({'code':'area-'+str(i)} if consumer_unavailable else {})} for i in (1,2)] if endpoint_name=='areas'
                   else [{'id':i} for i in range(next(i for i in (1,2) if str(key_value(i)) == str(args['area_id'])))])
             return {'responseStatus':200,'responseBody':rows}
     question='How many stores are in the primary area?'
     port=Port({1})
     request=compilation.SemanticCompilationRequest('reference-test',question,QuestionContractRequest(
         current_question=question,conversation_context={}),catalog,(),port,None,'openai',1,10,None,{},HostPromptContext())
+    if failure_stage.startswith('provider_'):
+        with pytest.raises(RuntimeError,match='Provider transport failed'):
+            compilation.compile_semantic_question(request)
+        assert len(authority_prompts)==1
+        assert len(reference_attempts)==1
+        assert port.calls==[]
+        return
     compiled=compilation.compile_semantic_question(request)
     if dependency_failures:
-        assert len(factual_prompts) >= 2
-        assert factual_prompts[1].failed_reference_plans[0]['reason']=='The selected reference route is unavailable.'
-        assert factual_prompts[1].failed_reference_plans[0]['reference_demands']==[{'input_ref':'i1','authority':'areas/primary(id)'}]
+        assert len(authority_prompts) >= 2
+        assert authority_prompts[1].failed_reference_plans[0]['reason']=='The selected reference route is unavailable.'
+        assert authority_prompts[1].failed_reference_plans[0]['reference_contracts']==reference_contract_payload({'i1':'areas/primary(id)'})['reference_contracts']
     if dependency_failures == 2:
         assert isinstance(compiled,compilation.SemanticCompilationImpossible)
         assert len(reference_attempts)==2
         assert port.calls==[]
         return
+    if consumer_unavailable:
+        assert len(authority_prompts)==(4 if two_facts else 2)
+        assert authority_prompts[1].failed_reference_plans[0]['stage']=='factual_query'
+        assert authority_prompts[1].failed_reference_plans[0]['reference_contracts']==reference_contract_payload({'i1':'areas/code(code)'})['reference_contracts']
     assert isinstance(compiled,compilation.SemanticCompilationSuccess)
     assert port.calls==[]
     persisted=decode_answer_program(canonical_answer_program_json(compiled.compilation.answer_program))
@@ -379,7 +411,7 @@ def test_selection_controls_do_not_become_sql_predicates_and_can_be_rebound(monk
         elif purpose.value=='source_realization':
             assert not any(item.get('input_ref')==prompt.meaning.selection_limit_input_ref for item in prompt.parameters.values())
             view=next(iter(prompt.tables))
-            result=parse(payload(query=f'SELECT id FROM "{view}"',mode='rows',columns=[{'name':'id','value_type':'integer'}],
+            result=parse(payload(query=f'SELECT id FROM "{view}"',mode='rows',
                 outputs=[{'kind':'identity','authority':'stores/primary(id)','components':{'id':'id'},'label':'store','display_column':None}],
                 ordering=[{'column':'id','descending':False}]))
         else:raise AssertionError(purpose)
@@ -425,7 +457,7 @@ def test_sql_calendar_uses_and_persists_the_question_timezone(monkeypatch,zone,i
         elif purpose.value == 'source_realization':
             view = next(iter(prompt.tables))
             result = parse(payload(query=f'SELECT CAST(recorded_at AS DATE) AS day FROM "{view}"',
-                columns=[{'name':'day','value_type':'date'}],outputs=[{'kind':'value','column':'day','label':'date'}]))
+                outputs=[{'kind':'value','column':'day','label':'date'}]))
         else: raise AssertionError(purpose)
         return SimpleNamespace(result=result)
     monkeypatch.setattr(compilation,'_turn',turn)
@@ -515,11 +547,13 @@ def test_literal_resource_address_does_not_require_an_invented_identity_namespac
             return SimpleNamespace(result=SemanticQueryEnrichmentResult(tuple(
                 RecallBucketMatch(bucket.bucket_ref, ('entries',), ('entries',)) for bucket in prompt.request.recall_buckets),
                 tuple(InputResourceSearchTerms(task.input_use_ref, ('entries',)) for task in prompt.request.reference_tasks)))
+        if purpose.value=='grounding':
+            assert prompt.turn_name=='reference contract selection'
+            return SimpleNamespace(result=parse(reference_contract_payload({'i1':None})))
         assert purpose.value == 'source_realization'
         view = next(name for name, table in prompt.tables.items() if table.get('read_id') == 'entries')
         symbol = next(name for name, description in prompt.parameters.items() if description.get('kind') == 'reference_literal')
         return SimpleNamespace(result=parse(payload(query=f'SELECT COUNT(*) AS total FROM "{view}"',
-            reference_demands=[{'input_ref':'i1','authority':None}],
             api_bindings=[{'view':view,'parameter_ref':'channel_id','binding':symbol}])))
     monkeypatch.setattr(compilation, '_turn', turn)
     monkeypatch.setattr(compilation, '_read_eligibility_turn', lambda eligibility_request, **kwargs: SemanticReadEligibilityResult(
@@ -536,7 +570,7 @@ def test_literal_resource_address_does_not_require_an_invented_identity_namespac
         current_question=question, conversation_context={}), catalog, (), Port(), None, 'openai', 1, 10,
         None, {}, HostPromptContext())
     result = compilation.compile_semantic_question(request)
-    assert stages == ['question_contract', 'query_enrichment', 'source_realization']
+    assert stages == ['question_contract', 'query_enrichment', 'grounding', 'source_realization']
     program = decode_answer_program(canonical_answer_program_json(result.compilation.answer_program))
     if persisted_mutation:
         from fervis.lookup.answer_program.operations import SqlNamedInput

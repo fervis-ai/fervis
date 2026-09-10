@@ -78,7 +78,7 @@ def plan_fact_references(*, fact, inputs, denotations, values, catalog, access, 
                 reference_is_collection_member=collection, timezone=timezone,
                 reference_kind="description" if (operand or term.operand) in denotation.reference_descriptions else "literal")
             prompt = ReferenceQueryPrompt(meaning=meaning,
-                                          tables=views.tables, parameters=member_menu.descriptions, consumer_view_refs=consumer_view_refs, expected_key=slot.key)
+                                          tables=views.tables, parameters=member_menu.descriptions, consumer_view_refs=consumer_view_refs, expected_key=slot.key, record_source=slot.record_source, record_fields=tuple(slot.table['columns']) if slot.record_source else ())
             authored = turn(ModelTurnPurpose.GROUNDING, prompt,
                             lambda payload:parse_reference_query(payload, prompt=prompt, menu=member_menu))
             if isinstance(authored, QueryUnavailable):

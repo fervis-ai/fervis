@@ -64,7 +64,7 @@ def test_normal_reference_planner_compiles_live_reference_relations(case,text,ex
     matching = "CONCAT(given, ' ', family)" if case == 'split' else 'name'
     extra = f', {matching} AS matched_name' if case != 'role' else ''
     payload={'query':f'SELECT id AS record_id{extra} FROM "{view.name}" WHERE {predicate}',
-        'mode':'rows','columns':[{'name':'record_id','value_type':'integer'}, *([{'name':'matched_name','value_type':'string'}] if case != 'role' else [])],
+        'mode':'rows',
         'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'record_id'},'label':'record','display_column':None}],
         'ordering':[],'api_bindings':[],'interpretations':[],
         'reference_binding':{'kind':'description','basis':'The primary property defines the role.'} if case=='role' else {'kind':'literal','match_column':'matched_name'}}
@@ -101,7 +101,7 @@ def test_normal_reference_planner_compiles_live_reference_relations(case,text,ex
         final_meaning=replace(meaning,result_kind='scalar',output_kinds=('value',))
         final_tables={final_view.name:view_catalog.tables[final_view.name],reference.view.name:reference.table}
         authored=parse_query_answer(query_payload(**{'query':f'SELECT COUNT(*) AS value FROM "{final_view.name}"',
-            'mode':'scalar','columns':[{'name':'value','value_type':'integer'}],
+            'mode':'scalar',
             'outputs':[{'kind':'value','column':'value','label':'count'}], 'ordering':[],
             'api_bindings':[{'view':final_view.name,'parameter_ref':view_catalog.tables[final_view.name]['request_parameters'][0]['param_ref'],'binding':'r1_1'}],
             'interpretations':[]}),table_names=set(final_tables),parameter_names=set(final_menu.expressions),
@@ -163,7 +163,7 @@ def test_interpreted_collection_member_keeps_the_original_collection_binding():
             condition='name=$p1_1'
         suffix = f' WHERE {condition}' if interpretations else ''
         return parse(query_payload(**{'query':f'SELECT id, name AS matched_name FROM "{view}"{suffix}','mode':'rows',
-            'columns':[{'name':'id','value_type':'integer'},{'name':'matched_name','value_type':'string'}],
+
             'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':None}],
             'ordering':[],'api_bindings':[],'interpretations':[],
             'reference_binding':{'kind':'description','basis':'The primary flag defines this member.'} if interpretations else {'kind':'literal','match_column':'matched_name'}}))
@@ -218,7 +218,7 @@ def test_reference_compilation_retains_prerequisites_outside_its_recalled_views(
     def turn(purpose,prompt,parse):
         view,=prompt.tables
         return parse(query_payload(**{'query':f'SELECT id, name AS matched_name FROM "{view}"','mode':'rows',
-            'columns':[{'name':'id','value_type':'integer'},{'name':'matched_name','value_type':'string'}],
+
             'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':None}],
             'ordering':[],'api_bindings':[],'interpretations':[],'reference_binding':{'kind':'literal','match_column':'matched_name'}}))
     reference,=plan_fact_references(selected_slots=_record_demand(),fact=ReferenceMeaning('fact_1','i1','records','Identify Alpha.',(origin,),('i1',),reference_text='Alpha'),
@@ -263,7 +263,7 @@ def test_configured_reference_can_use_a_keyless_settings_relation(monkeypatch):
         view,=prompt.tables
         assert not any(item.get('kind')=='catalog_choice' for item in prompt.parameters.values())
         payload={'query':f'SELECT default_record_id AS id FROM "{view}"','mode':'rows',
-            'columns':[{'name':'id','value_type':'integer'}],
+
             'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'default record','display_column':None}],
             'ordering':[],'api_bindings':[],'interpretations':[],
             'reference_binding':{'kind':'description','basis':'The settings relation exposes the configured default record identity.'}}
@@ -287,3 +287,84 @@ def test_configured_reference_can_use_a_keyless_settings_relation(monkeypatch):
             ports=RuntimePorts(Port(),LookupMemory()))
         assert result.issue is None
         assert next(iter(result.fact_result.outcome.projected_rows[0].values.values()))==configured
+
+
+def test_composite_reference_collection_keeps_rest_arguments_paired_after_replay():
+    from fervis.lookup.relation_catalog import CandidateKey, CandidateKeyComponent, CatalogParam, EntityKeyComponentTarget
+    from fervis.lookup.orchestration.reference_slots import ReferenceContract, reference_slots
+    from fervis.lookup.orchestration.reference_queries import plan_fact_references, reference_input_values, reference_prerequisites
+    from fervis.lookup.grounding.semantic import GroundingPartition
+    from fervis.lookup.semantic_types import CollectionType
+    from fervis.lookup.relational_sql.parameters import with_reference_arguments
+    from fervis.lookup.relational_sql.binding import bind_query_answer
+    from fervis.lookup.relational_sql.authoring import parse_query_answer
+    from fervis.lookup.contract_codec import canonical_answer_program_json, decode_answer_program
+
+    records = replace(_read('records'), fields=(*_read('records').fields,
+        CatalogField('records.country', 'string', path='country', row_path_id='root'),
+        CatalogField('records.name', 'string', path='name', row_path_id='root')),
+        candidate_keys=(CandidateKey('primary', 'records', (
+            CandidateKeyComponent('country', 'records.country'), CandidateKeyComponent('id', 'records.id')), primary=True),))
+    observations = _read('observations', params=tuple(CatalogParam(component, component, 'path', kind,
+        required=True, entity_target=EntityKeyComponentTarget('records', 'primary', component))
+        for component, kind in (('country', 'string'), ('id', 'integer'))))
+    catalog = RelationCatalog(reads=(records, observations))
+    origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, 'Alpha and Beta')
+    term = InputTerm('i1', origin, ('Alpha', 'Beta'), CollectionType(TextType()))
+    denotation = InputDenotation('d1', 'i1', 'the two named records', 'Identify each named record.',
+        'records', InputDenotationKind.IDENTITY_REFERENCE)
+    meaning = ReferenceMeaning('fact_1', 'i1', 'records', 'Count observations for the selected records.',
+        (origin,), ('i1',), reference_text=origin.meaning)
+    values = reference_input_values((GroundingPartition('i1', ('fact_1:sql_input:i1',), term.value_type,
+        None, 'named records', is_identity_reference=True),), inputs={'i1':term})
+    views = build_query_view_catalog(catalog)
+    slots = reference_slots(fact=meaning, inputs={'i1':term}, denotations={'i1':denotation},
+        tables=views.tables, selected_contracts={'i1':ReferenceContract('identity',authority='records/primary(country,id)')})
+
+    def turn(purpose, prompt, parse):
+        view = next(name for name, table in prompt.tables.items() if table.get('read_id') == 'records')
+        return parse(query_payload(query=f'SELECT country, id, name FROM "{view}"', mode='rows',
+
+            outputs=[{'kind':'identity','authority':'records/primary(country,id)',
+                'components':{'country':'country','id':'id'},'label':'record','display_column':None}],
+            ordering=[], api_bindings=[], interpretations=[],
+            reference_binding={'kind':'literal','match_column':'name'}))
+
+    references = plan_fact_references(fact=meaning, inputs={'i1':term}, denotations={'i1':denotation},
+        values=values, catalog=catalog, access=ReadAccessCatalog(), selected_slots={slot.input_refs[0]:slot for slot in slots},
+        responses=(), turn=turn)
+    menu = with_reference_arguments(query_parameter_menu(()), references)
+    view = next(view for view in views.views if views.tables[view.name]['read_id'] == 'observations')
+    table = views.tables[view.name]
+    bindings = [{'view':view.name, 'parameter_ref':parameter['param_ref'],
+        'binding':next(name for name, description in menu.descriptions.items()
+            if description['projection'] == 'key_component:'+parameter['entity_target']['component_id'])}
+        for parameter in table['request_parameters']]
+    tables = {view.name:table, **{reference.view.name:reference.table for reference in references}}
+    authored = parse_query_answer(query_payload(query=f'SELECT COUNT(*) AS total FROM "{view.name}"',
+        api_bindings=bindings), table_names=set(tables), parameter_names=set(menu.expressions),
+        meaning=replace(meaning,result_kind='scalar',output_kinds=('value',)), parameter_descriptions=menu.descriptions, tables=tables, expected_input_refs=('i1',))
+    bound = bind_query_answer(authored, menu, (view,))
+    prerequisites, bindings = reference_prerequisites(references, bound.bindings,
+        argument_operations=bound.argument_operations)
+    compiled = compile_query_answer(question=meaning.return_request_basis, query=authored.query, views=bound.views,
+        prerequisites=prerequisites, bindings=bindings, catalog=catalog, inputs=(term,),
+        input_denotations=(denotation,), expected_input_refs=('i1',), output_types={'total':'integer'},
+        result_contract=ResultContract('scalar'))
+    program = decode_answer_program(canonical_answer_program_json(compiled.program))
+    calls = []
+    class Port:
+        def read(self, *, endpoint_name, args):
+            calls.append((endpoint_name, args))
+            if endpoint_name == 'records':
+                rows = [{'country':'KE','id':1,'name':'Alpha'}, {'country':'UG','id':2,'name':'Beta'}]
+            else:
+                assert (args['country'], args['id']) in {('KE',1),('UG',2)}
+                rows = [{'id':args['id']}]
+            return {'responseStatus':200,'responseBody':rows}
+    result = invoke_answer_program(program=program, bindings=compiled.bindings,
+        environment=ExecutionEnvironment(catalog=catalog), ports=RuntimePorts(Port(), LookupMemory()))
+    assert result.issue is None
+    assert next(iter(result.fact_result.outcome.projected_rows[0].values.values())) == 2
+    assert [args for name,args in calls if name == 'observations'] == [
+        {'country':'KE','id':1}, {'country':'UG','id':2}]

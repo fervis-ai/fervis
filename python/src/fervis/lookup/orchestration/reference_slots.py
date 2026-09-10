@@ -1,11 +1,30 @@
-"""Typed reference demands selected by factual SQL before identity resolution."""
+"""Declared reference identity expectations before query compilation."""
 from dataclasses import dataclass, replace
 
-from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.question_contract.model import InputDenotationKind
 from fervis.lookup.relational_sql.acquisition import RelationView
 from fervis.lookup.relational_sql.execution import QueryValidationError
 from fervis.lookup.relational_sql.outputs import identity_carriers, identity_authorities
+
+
+@dataclass(frozen=True)
+class ReferenceContract:
+    kind: str
+    authority: str = ''
+    view: str = ''
+    fields: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        object.__setattr__(self, 'fields', tuple(self.fields))
+        valid = (self.kind == 'identity' and bool(self.authority) and not self.view and not self.fields
+                 or self.kind == 'record' and bool(self.view) and not self.authority and bool(self.fields) and len(set(self.fields)) == len(self.fields)
+                 or self.kind == 'address' and not self.authority and not self.view and not self.fields)
+        if not valid:
+            raise ValueError('Reference contract must select one identity, record carrier, or address')
+
+    def to_payload(self):
+        return {'kind':self.kind, **({'authority':self.authority} if self.authority else {}),
+                **({'view':self.view,'fields':list(self.fields)} if self.view else {})}
 
 
 @dataclass(frozen=True)
@@ -17,10 +36,14 @@ class ReferenceSlot:
 
     @property
     def key(self):
-        return self.table['candidate_keys'][0]
+        return self.table['candidate_keys'][0] if self.table['candidate_keys'] else None
+
+    @property
+    def record_source(self):
+        return self.table.get('record_source')
 
 
-def reference_slots(*, fact, inputs, denotations, tables, selected_authorities):
+def reference_slots(*, fact, inputs, denotations, tables, selected_contracts):
     """Lower declared logical demands to one stable relation per resolved input."""
     authorities = identity_authorities(tables)
     carriers = tuple(identity_carriers(tables).values())
@@ -28,9 +51,24 @@ def reference_slots(*, fact, inputs, denotations, tables, selected_authorities):
     for input_ref in fact.input_refs:
         if denotations[input_ref].kind is not InputDenotationKind.IDENTITY_REFERENCE:
             continue
-        authority_ref = selected_authorities.get(input_ref)
-        if authority_ref is None:
+        contract = selected_contracts[input_ref]
+        if contract.kind == 'address':
             continue
+        name = f'{fact.requested_fact_id}__reference_{input_ref}'
+        if contract.kind == 'record':
+            if contract.view not in tables or not tables[contract.view].get('columns'):
+                raise QueryValidationError('Observed reference requires a declared record carrier')
+            if not set(contract.fields) <= set(tables[contract.view]['columns']):
+                raise QueryValidationError('Observed reference fields are not declared by its carrier')
+            columns = {field:tables[contract.view]['columns'][field] for field in contract.fields}
+            slots.append(ReferenceSlot(RelationView(input_ref, name+'.rows', {column:column for column in columns}), {
+                'kind':'reference_slot', 'input_ref':input_ref, 'input_refs':[input_ref],
+                'record_source':contract.view, 'candidate_keys':[], 'entity_references':[],
+                'request_parameters':[], 'automatic_request_parameters':[], 'columns':dict(columns),
+                'supplied_reference':inputs[input_ref].operand, 'operand_meaning':denotations[input_ref].operand_meaning,
+            }, (input_ref,), name))
+            continue
+        authority_ref = contract.authority
         if authority_ref not in authorities:
             raise QueryValidationError('Reference demand selects an undeclared identity authority')
         authority = authorities[authority_ref]
@@ -56,47 +94,6 @@ def reference_slots(*, fact, inputs, denotations, tables, selected_authorities):
             'candidate_keys': [key],
         }, (input_ref,), name))
     return tuple(slots)
-
-
-def selected_reference_slots(authored, slots, menu):
-    used_views = set(authored.referenced_views)
-    used_views.update(menu.descriptions[argument.binding]['view'] for argument in authored.request_arguments
-        if menu.descriptions[argument.binding].get('kind') == 'reference_argument')
-    literals = {menu.descriptions[argument.binding]['input_ref'] for argument in authored.request_arguments
-                if menu.descriptions[argument.binding].get('kind') == 'reference_literal'}
-    selected = {}
-    for slot in slots:
-        if slot.view.name not in used_views:
-            continue
-        input_ref = slot.table['input_ref']
-        if input_ref in selected:
-            raise QueryValidationError('One supplied reference must have one initial identity authority; use a declared relationship for other domains')
-        selected[input_ref] = slot
-    expected = {slot.table['input_ref'] for slot in slots}
-    if set(selected) & literals:
-        raise QueryValidationError('A reference cannot be both a literal resource address and a resolved identity in one answer')
-    if set(selected) != expected - literals:
-        raise QueryValidationError('Factual SQL must select the required identity authority for every reference input')
-    return selected
-
-
-def bind_reference_slots(menu, references):
-    actual = {reference.view.name: reference for reference in references}
-    expressions = dict(menu.expressions)
-    descriptions = dict(menu.descriptions)
-    for name, description in menu.descriptions.items():
-        reference = actual.get(description.get('view'))
-        if description.get('kind') != 'reference_argument' or reference is None:
-            continue
-        key = reference.table['candidate_keys'][0]
-        if (description['identity']['entity_kind'], description['identity']['key_id'],
-            set(description['identity']['components'])) != (key['entity_kind'], key['key_id'], set(key['components'])):
-            raise QueryValidationError('Resolved reference differs from its consuming identity demand')
-        column = description['column']
-        expressions[name] = FieldRef(reference.view.columns[column])
-        descriptions[name] = {**description, 'relation_id': reference.view.relation_id,
-                              'value_type': reference.table['columns'][column]['type']}
-    return replace(menu, expressions=expressions, descriptions=descriptions)
 
 
 def reference_input_menu(menu, denotations):

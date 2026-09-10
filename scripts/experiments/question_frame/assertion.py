@@ -309,6 +309,9 @@ def _operand_value(raw_value: object) -> SuppliedValue | None:
             if identity_value.get("kind") == "single_identity"
             else identity_value.get("identity_values")
         )
+        # The production parser has already validated literal/description objects.
+        operands = ([item.get("value") if isinstance(item, dict) else None for item in operands]
+                    if isinstance(operands, list) else None)
         return _supplied_value(
             {
                 **common,

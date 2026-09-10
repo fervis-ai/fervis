@@ -1,5 +1,23 @@
 # Fervis Architecture Summary
 
+## Implementation status: September 11, 2026
+
+The remediation branch currently uses model-authored SQL for factual computation.
+It preserves authorized reads, typed bindings, reference guards and execution
+integrity, but does not yet meet the independent semantic-proof obligations
+described below. Fingerprints derived from a generated computation prove that
+it remains unchanged; they do not establish that it preserves the requested
+population, calculation, grouping or qualification.
+
+The replacement direction is an independently authored typed relational plan,
+verified API realization and deterministic execution. DuckDB as an execution
+backend is a separate decision from SQL as a model planning language. Reuse of
+the typed compiler must preserve observed-record support for REST APIs without
+nominal identity annotations. This migration and the full release gates remain
+unfinished; the branch is not deployment-ready.
+
+## Architectural intent
+
 Fervis is a compiler and runtime for verifiable factual answers over operational
 APIs. It turns a natural-language question into bounded model decisions, compiles
 a successful interpretation into an immutable `AnswerProgram`, and invokes that

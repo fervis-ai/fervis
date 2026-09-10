@@ -106,7 +106,18 @@ def verify_query_request(fact, program):
         raise VerificationError('SQL request input signature differs from its computation')
 
 
+def verify_observed_reference_guards(program):
+    from types import SimpleNamespace
+    from .record_lineage import verify_record_projection
+    for operation in program.operations:
+        spec = operation.spec
+        if isinstance(spec,SqlQuerySpec) and spec.reference_input_ref and not spec.entity_keys:
+            verify_record_projection(program, SimpleNamespace(relation_id=operation.output_relation,
+                record_fields={field.id:field.id for field in spec.outputs}), preserve_occurrences=True)
+
+
 def verify_query_output(fact, fulfillment, program, relation_contracts):
+    verify_observed_reference_guards(program)
     requested = next(output for output in fact.outputs if output.id == fulfillment.answer_output_id)
     projection = next((output for output in (*program.result_projection.relation_outputs,
                                              *program.result_projection.scalar_outputs)
@@ -137,6 +148,8 @@ def projected_query_output_type(projection, program, relation_contracts):
         if projection.entity_key is not None:
             return 'identity'
         if projection.record_fields:
+            from .record_lineage import verify_record_projection
+            verify_record_projection(program, projection)
             return 'object'
         return relation_contracts[projection.relation_id].field_types[projection.field_id]
     scalar_types = {f'parameter:{item.id}':parameter_runtime_type(item.value_type) for item in program.parameters}

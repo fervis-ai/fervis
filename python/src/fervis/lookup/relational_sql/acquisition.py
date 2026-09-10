@@ -92,6 +92,8 @@ def materialize_views(views: tuple[ApiView, ...], *, catalog, read_session: ApiR
 
 
 def _sql_type(kind: str, *, values: tuple[Any, ...] = ()) -> str:
+    if kind == 'uuid':
+        return 'UUID'
     if kind in {'integer', 'int', 'long'}:
         return 'BIGINT'
     if kind in {'number', 'numeric', 'decimal', 'float', 'double'}:

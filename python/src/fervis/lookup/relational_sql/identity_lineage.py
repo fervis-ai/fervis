@@ -1,8 +1,6 @@
 """Verify SQL identity columns against canonical input key contracts."""
 
-from sqlglot import exp, parse_one
-from sqlglot.lineage import lineage
-from sqlglot.errors import SqlglotError
+from .column_lineage import output_column_lineage, unchanged_field_origins
 from fervis.lookup.plan_execution.errors import VerificationError
 from fervis.lookup.plan_execution.verification.contract_types import (
     RelationEntityKey,
@@ -18,12 +16,7 @@ def sql_identity_keys(spec, contracts):
         for item in spec.inputs
         if item.columns
     }
-    try:
-        nodes = lineage(
-            None, spec.query, schema=schema, dialect="duckdb", trim_selects=False
-        )
-    except (SqlglotError, ValueError) as exc:
-        raise VerificationError("SQL identity output has no field lineage") from exc
+    nodes = output_column_lineage(spec.query, schema)
     from .acquisition import sql_value_type
 
     input_types = {
@@ -67,7 +60,10 @@ def sql_identity_keys(spec, contracts):
                 raise VerificationError(
                     "SQL identity component is not an output column"
                 )
-            origins = _origins(node)
+            try:
+                origins = unchanged_field_origins(node)
+            except VerificationError as exc:
+                raise VerificationError('SQL identity components must preserve key values without computation') from exc
             if not origins or any(
                 (view, column) not in allowed[component.component_id]
                 for view, column, _ in origins
@@ -114,31 +110,3 @@ def sql_identity_keys(spec, contracts):
             )
         )
     return tuple(dict.fromkeys(result))
-
-
-def _origins(node, path=()):
-    expression = node.expression
-    while isinstance(expression, exp.Alias):
-        expression = expression.this
-    if isinstance(expression, exp.Table):
-        column = parse_one(node.name, into=exp.Column, dialect="duckdb").name
-        return {(expression.name, column, (*path, expression.alias_or_name))}
-    if not isinstance(expression, exp.Column):
-        raise VerificationError(
-            "SQL identity components must preserve key values without computation. "
-            "Project a declared key column from an observed API view or typed reference slot; "
-            "input placeholders and casts cannot establish an output identity."
-        )
-    next_path = (*path, expression.table) if expression.table else path
-    # A projected column can have alternative producers without an explicit
-    # set-operation node: SQLGlot flattens UNIONs behind CTE references.
-    return {
-        origin
-        for index, child in enumerate(node.downstream)
-        for origin in _origins(
-            child,
-            (*next_path, ("set_branch", index))
-            if len(node.downstream) > 1
-            else next_path,
-        )
-    }

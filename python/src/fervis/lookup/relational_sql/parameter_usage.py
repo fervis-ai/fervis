@@ -42,11 +42,12 @@ def validate_identity_key_uses(query, tables, parameters):
     scopes = list(traverse_scope(parse_one(canonical, read="duckdb")))
     scope_index = {id(scope.expression): scope for scope in scopes}
     for scope in scopes:
-        for predicate in scope.find_all(exp.EQ, exp.NEQ, exp.LT, exp.LTE, exp.GT, exp.GTE, exp.NullSafeEQ, exp.In):
+        for predicate in scope.find_all(exp.EQ, exp.NEQ, exp.LT, exp.LTE, exp.GT, exp.GTE, exp.NullSafeEQ, exp.NullSafeNEQ, exp.In, exp.Between):
             if predicate.find_ancestor(exp.Select) is not scope.expression:
                 continue
-            right = (predicate.args.get('query') or tuple(predicate.expressions)
-                     if isinstance(predicate, exp.In) else predicate.expression)
+            right = ((predicate.args['low'], predicate.args['high']) if isinstance(predicate, exp.Between) else
+                     (predicate.args.get('query') or tuple(predicate.expressions)
+                      if isinstance(predicate, exp.In) else predicate.expression))
             pairs = [(predicate.this, right), (right, predicate.this)]
             left_keys = [authorities.get(origin, set()) for origin in _expression_origins(scope, predicate.this, scope_index)]
             right_keys = [authorities.get(origin, set()) for origin in _expression_origins(scope, right, scope_index)]
@@ -55,6 +56,13 @@ def validate_identity_key_uses(query, tables, parameters):
             for column, operand in pairs:
                 if column is None or operand is None:
                     continue
+                from fervis.lookup.plan_execution.declared_values import declared_comparison_types_compatible
+                left_types = _unchanged_operand_types(scope, column, tables, parameters, scope_index)
+                right_types = _unchanged_operand_types(scope, operand, tables, parameters, scope_index)
+                for actual_type, actual_choice in left_types:
+                    for expected_type, expected_choice in right_types:
+                        if (actual_choice or expected_choice) and not declared_comparison_types_compatible(actual_type, expected_type):
+                            raise QueryValidationError('Catalog interpretation type does not match its observed comparison field; preserve the literal input or explicitly cast the expression')
                 for placeholder in _placeholders(operand):
                     if placeholder.find_ancestor(exp.Select) is not scope.expression or placeholder.name not in keys:
                         continue
@@ -109,3 +117,48 @@ def _projection_origins(scope, index, scope_index):
     if scope.union_scopes:
         return set().union(*(_projection_origins(branch, index, scope_index) for branch in scope.union_scopes))
     return _expression_origins(scope, scope.expression.selects[index], scope_index)
+
+
+def _unchanged_operand_types(scope, expression, tables, parameters, scope_index):
+    """Trace values through projections; explicit computations own conversions."""
+    if isinstance(expression, tuple):
+        return tuple(origin for item in expression for origin in
+                     _unchanged_operand_types(scope, item, tables, parameters, scope_index))
+    while isinstance(expression, (exp.Paren, exp.Alias)):
+        expression = expression.this
+    if isinstance(expression, exp.Placeholder):
+        description = parameters.get(expression.name, {})
+        value_type = description.get('value_type') or description.get('type')
+        return ((value_type, description.get('kind') == 'catalog_choice'),) if value_type else ()
+    if isinstance(expression, exp.Subquery):
+        expression = expression.this
+    if isinstance(expression, exp.Query):
+        inner = scope_index.get(id(expression))
+        if inner is None or len(expression.selects) != 1:
+            return ()
+        return _unchanged_projection_types(inner, 0, tables, parameters, scope_index)
+    if not isinstance(expression, exp.Column):
+        return ()
+    while scope is not None and expression.table not in scope.sources:
+        scope = scope.parent
+    if scope is None:
+        return ()
+    source = scope.sources[expression.table]
+    if isinstance(source, exp.Table):
+        table = next((value for name, value in tables.items() if name.casefold() == source.name.casefold()), {})
+        definition = next((value for name, value in table.get('columns', {}).items()
+                           if name.casefold() == expression.name.casefold()), {})
+        return ((definition['type'], False),) if definition.get('type') else ()
+    if not isinstance(source, Scope):
+        return ()
+    names = source.outer_columns or source.expression.named_selects
+    if expression.name not in names:
+        return ()
+    return _unchanged_projection_types(source, names.index(expression.name), tables, parameters, scope_index)
+
+
+def _unchanged_projection_types(scope, index, tables, parameters, scope_index):
+    if scope.union_scopes:
+        return tuple(origin for branch in scope.union_scopes for origin in
+                     _unchanged_projection_types(branch, index, tables, parameters, scope_index))
+    return _unchanged_operand_types(scope, scope.expression.selects[index], tables, parameters, scope_index)

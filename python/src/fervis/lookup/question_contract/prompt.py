@@ -250,7 +250,7 @@ _UNRESOLVED_PRIOR_REFERENCE_INSTRUCTION = (
     "Return kind=unresolved_prior_turn_references when the factual result is "
     "identifiable and a required person, object, time, or value is expressed "
     "only by a pronoun or dependent phrase whose antecedent is absent. "
-    "A self-contained name, code, or role description remains a supplied entity "
+    "A self-contained reference to an entity by name, code, or role description remains a supplied entity "
     "reference; it does not require prior conversation merely because its "
     "identifier must be resolved from API data."
 )
@@ -425,12 +425,13 @@ supplied_values.operands contains one item for each independent supplied operand
 role. Each item writes meaning and denotation_basis, then chooses exactly one
 closed branch.
 
-entity_reference is a supplied name, code, identifier, or pre-existing definite
-entity description that denotes a person, organization, place, product, or other
-entity whose exact identity the
-question qualifies or returns. A name, code, or identifier used to locate that
-entity through a name, code, or identifier field remains an entity reference
-and requires canonical identity resolution or validation. Write instance_kind, then value. value is
+entity_reference denotes a particular referent, or individually specified alternatives,
+whose existence and uniqueness the question presupposes. The reference may be a
+name, code, identifier, or definite description. Do not choose this branch merely
+because a supplied value appears in a name, code, or identifier property. A property
+condition that selects every matching row is a non_entity_value, even when that
+property is a name; it permits zero or many matching records. A reference to one
+entity requires resolution and ambiguity checks. Decide by the duplicate-value counterfactual: if two different records share this value, should both contribute, or would the user need to disambiguate the referent? The former is a property value; the latter is an entity reference. An entity reference introduced as the entity named X still has literal value X; introducing words do not turn a supplied name into a description. Description is reserved for a role or relationship whose actual identifying name, code, or ID is not supplied. Write instance_kind, then value. value is
 single_identity with one identity_value, or identity_alternatives with distinct
 identity_values that fill the same role. Each identity operand declares kind
 literal for an explicitly supplied name or code, or description for a role or
@@ -442,8 +443,10 @@ identity_value copies the shown resolved_value_text; resolved_input_ref is copie
 only into origin.
 
 non_entity_value is a supplied category, status, time, quantity, Boolean,
-duration, or shared classification. It describes qualifying rows without
-naming, coding, or identifying an entity. Write kind, then value. kind is
+duration, shared classification, or ordinary property-comparison value. It
+qualifies all matching rows rather than selecting one referent. Names and codes
+can be property-comparison values when the question requests the matching
+population. Write kind, then value. kind is
 categorical_value for a category, status, or shared classification;
 temporal_scope for a date, time, interval, or relative period; number for a
 numeric operand; boolean for true or false; or duration for an elapsed amount

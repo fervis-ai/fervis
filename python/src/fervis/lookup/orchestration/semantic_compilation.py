@@ -683,8 +683,10 @@ def compile_semantic_question(request, *, on_turn=None):
             if ref.startswith(fact.requested_fact_id+':'))) for value in canonical if value.input_ref in fact.input_refs)
         menu=with_catalog_choices(query_parameter_menu(local_values),source_catalog=source_catalog,
             source_refs={view.row_source_id for view in views})
-        from .reference_slots import bind_reference_slots, reference_input_menu
-        from .reference_authoring import FactualQueryPrompt, parse_factual_query, reference_contracts
+        from .reference_slots import reference_input_menu
+        from .reference_authoring import ReferenceContractPrompt, parse_reference_contracts
+        from fervis.lookup.relational_sql.parameters import with_reference_arguments
+        from fervis.lookup.relational_sql.authoring import QueryAnswerPrompt, parse_query_answer
         consumer_catalog=RelationCatalog(reads=tuple(read for read in request.full_catalog.reads
             if read.id in {view_catalog.tables[view.name]['read_id'] for view in eligible_views}))
         reference_catalog=RelationCatalog(reads=tuple({read.id:read for read in (*resolver_catalog.reads,*consumer_catalog.reads)}.values()))
@@ -700,32 +702,44 @@ def compile_semantic_question(request, *, on_turn=None):
                 if description['input_ref'] == fact.selection_limit_input_ref and description['projection'] == 'value')
             menu=without_input_parameters(menu,{fact.selection_limit_input_ref})
         failed_reference_plans = []
+        planned_references = ()
+        authored = QueryUnavailable('No supported query plan was established')
         for source_attempt in range(2):
-            prompt=FactualQueryPrompt(question=request.question,meaning=fact,tables=tables,parameters=menu.descriptions,timezone=timezone,
+            selection_prompt=ReferenceContractPrompt(question=request.question,meaning=fact,tables=tables,parameters=menu.descriptions,
                 inputs=inputs,denotations={item.input_ref:item for item in meaning.input_denotations},reference_tables=reference_tables,
                 failed_reference_plans=failed_reference_plans)
-            declared=turn(ModelTurnPurpose.SOURCE_REALIZATION, prompt,
-                lambda payload:parse_factual_query(payload,prompt=prompt,menu=menu,selection_limit=selection_limit))
-            authored=declared if isinstance(declared,QueryUnavailable) else declared.authored
-            if isinstance(authored,QueryUnavailable):
-                return SemanticCompilationImpossible(question_contract=intent,canonical_values=canonical,
-                    blocked_fact_ids=(fact.requested_fact_id,),source_contract_snapshot=source_catalog.contract_snapshot,
-                    reviewed_read_ids=selection.selected_read_ids)
-            slots,planned_tables,planned_menu=reference_contracts(prompt,declared.demands,menu)
-            selected_slots={slot.table['input_ref']:slot for slot in slots}
+            selected=turn(ModelTurnPurpose.GROUNDING,selection_prompt,
+                lambda payload:parse_reference_contracts(payload,prompt=selection_prompt)) if selection_prompt.reference_inputs else None
+            if isinstance(selected,QueryUnavailable):
+                break
             planned_references=plan_fact_references(fact=fact,inputs=inputs,
                 denotations={item.input_ref:item for item in meaning.input_denotations},values=local_values,
                 catalog=request.full_catalog,reference_catalog=reference_catalog,consumer_catalog=consumer_catalog,
-                access=access,selected_slots=selected_slots,
+                access=access,selected_slots={slot.table['input_ref']:slot for slot in selected.slots} if selected else {},
                 responses=request.clarification_responses,turn=turn,discover_access=discover_access,timezone=timezone)
-            if not isinstance(planned_references,QueryUnavailable):
-                tables=planned_tables
-                menu=bind_reference_slots(planned_menu,planned_references)
+            contracts=selected.contracts if selected else {}
+            contract_payloads={ref:contract.to_payload() for ref,contract in contracts.items()}
+            if isinstance(planned_references,QueryUnavailable):
+                failed_reference_plans.append({'reference_contracts':contract_payloads,'stage':'reference_query','reason':planned_references.reason})
+                continue
+            resolved_inputs={ref for ref,contract in contracts.items() if contract.kind != 'address'}
+            planned_menu=with_reference_arguments(without_input_parameters(menu,resolved_inputs),planned_references)
+            planned_tables={**tables,**{reference.view.name:reference.table for reference in planned_references}}
+            prompt=QueryAnswerPrompt(question=request.question,meaning=fact,tables=planned_tables,
+                parameters=planned_menu.descriptions,timezone=timezone)
+            authored=turn(ModelTurnPurpose.SOURCE_REALIZATION,prompt,
+                lambda payload:parse_query_answer(payload,table_names=set(planned_tables),tables=planned_tables,
+                    parameter_names=set(planned_menu.expressions),parameter_descriptions=planned_menu.descriptions,
+                    meaning=fact,selection_limit=selection_limit,expected_input_refs=fact.input_refs))
+            if not isinstance(authored,QueryUnavailable):
+                tables,menu=planned_tables,planned_menu
                 break
-            failed_reference_plans.append({'reference_demands':[
-                {'input_ref':demand.input_ref,'authority':demand.authority} for demand in declared.demands],
-                'reason':planned_references.reason})
+            failed_reference_plans.append({'reference_contracts':contract_payloads,'stage':'factual_query','reason':authored.reason})
+            if not contracts:
+                break
         else:
+            authored=QueryUnavailable('No supported reference and factual query plan was established')
+        if isinstance(selected,QueryUnavailable) or isinstance(planned_references,QueryUnavailable) or isinstance(authored,QueryUnavailable):
             return SemanticCompilationImpossible(question_contract=intent,canonical_values=canonical,
                 blocked_fact_ids=(fact.requested_fact_id,),source_contract_snapshot=source_catalog.contract_snapshot,
                 reviewed_read_ids=tuple(read.id for read in reference_catalog.reads))

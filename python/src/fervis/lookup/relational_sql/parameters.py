@@ -115,26 +115,32 @@ def with_catalog_choices(
 
 
 def with_reference_arguments(menu, references):
-    """Expose guarded relation fields as per-row REST argument bindings."""
+    """Expose current-run guarded fields for REST bindings and scoped SQL use."""
     from fervis.lookup.answer_program.expressions import FieldRef
-
+    from sqlglot import exp
     expressions, descriptions = dict(menu.expressions), dict(menu.descriptions)
     for position, reference in enumerate(references, start=1):
-        key = reference.table['candidate_keys'][0]
-        for index, (component, column) in enumerate(key['components'].items(), start=1):
+        key = next(iter(reference.table['candidate_keys']), None)
+        components = {column:component for component,column in key['components'].items()} if key else {}
+        for index, column in enumerate(reference.view.columns, start=1):
             name = f'r{position}_{index}'
             if name in expressions:
                 raise ValueError('Reference argument symbol collides with an input')
             expressions[name] = FieldRef(reference.view.columns[column])
+            component = components.get(column)
+            sql = exp.select(exp.column(column, quoted=True)).from_(exp.Table(this=exp.to_identifier(reference.view.name, quoted=True)))
             descriptions[name] = {
                 'kind':'reference_argument', 'input_ref':reference.table['input_ref'],
                 'input_refs':list(reference.input_refs),
                 'relation_id':reference.view.relation_id, 'view':reference.view.name,
                 'column':column, 'value_type':reference.table['columns'][column]['type'],
-                'identity':{'entity_kind':key['entity_kind'], 'key_id':key['key_id'],
-                            'components':list(key['components'])},
-                'projection':'key_component:'+component,
-                'label':f"{reference.table.get('operand_meaning', reference.table['input_ref'])}: {component}",
+                'sql_expression':'('+sql.sql(dialect='duckdb')+')',
+                'reference_is_collection':isinstance(reference.table.get('supplied_reference'), (tuple,list)),
+                **({'identity':{'entity_kind':key['entity_kind'], 'key_id':key['key_id'],
+                                'components':list(key['components'])},
+                    'projection':'key_component:'+component,
+                    'label':f"Resolved {key['entity_kind']}/{key['key_id']} key component {component}"}
+                   if component is not None else {'projection':'field:'+column,'label':'Observed reference property '+column}),
             }
     return replace(menu, expressions=expressions, descriptions=descriptions)
 

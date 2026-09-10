@@ -29,7 +29,7 @@ def test_authoring_rejects_invalid_literal_cast_even_without_api_rows(expression
 ])
 def test_authoring_preserves_valid_casts_and_runtime_bound_values(expression):
     parse_query_answer(payload(query=f'SELECT COUNT(*) AS total FROM items WHERE {expression} IS NOT NULL'),
-        table_names={'items'},parameter_names={'p1'})
+        table_names={'items'},parameter_names={'p1'},parameter_descriptions={'p1':{'value_type':'string'}})
 
 
 def test_large_valid_interval_is_not_materialized_as_a_python_intermediate():

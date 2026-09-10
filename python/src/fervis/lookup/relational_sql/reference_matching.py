@@ -123,3 +123,30 @@ def verify_reference_candidate_completeness(program):
 
 def _normalized_columns(expression):
     return expression.transform(lambda node: exp.column(node.name.casefold()) if isinstance(node, exp.Column) else node)
+
+
+def require_record_candidate_source(authored, *, record_source, record_fields=()):
+    """Select source occurrences without assuming an undeclared uniqueness key."""
+    statement = parse_one(authored.query, read='duckdb')
+    if not isinstance(statement, exp.Select) or any(statement.args.get(name) for name in (
+        'joins','distinct','group','having','qualify','order','limit','offset','windows')):
+        raise QueryValidationError('Observed reference candidates must preserve one carrier occurrence without joins, grouping, or deduplication')
+    source = statement.args.get('from_')
+    table = source.this if source is not None else None
+    from sqlglot.optimizer.scope import build_scope
+    scope = build_scope(statement)
+    resolved = scope.sources.get(table.alias_or_name) if scope is not None and isinstance(table, exp.Table) else None
+    if not isinstance(resolved, exp.Table):
+        raise QueryValidationError('Observed reference must select its declared API carrier directly, not a shadowing CTE')
+    if any(statement.find_all(exp.SetOperation)):
+        raise QueryValidationError('Observed reference selection must use predicates instead of SQL set operations')
+    invocation = next((item for item in authored.api_invocations if item.name == table.name), None)
+    if invocation is None or invocation.view != record_source:
+        raise QueryValidationError('Observed reference selects a different record carrier')
+    for field in record_fields:
+        projection = next((item for item in statement.expressions if item.alias_or_name == field), None)
+        while isinstance(projection, (exp.Alias, exp.Paren)):
+            projection = projection.this
+        if (not isinstance(projection, exp.Column) or projection.name.casefold() != field.casefold()
+                or projection.table and projection.table.casefold() != table.alias_or_name.casefold()):
+            raise QueryValidationError('Observed reference field must preserve its selected carrier property')

@@ -4,6 +4,11 @@ from fervis.lookup.relational_sql.authoring import parse_query_answer
 from fervis.lookup.relational_sql.execution import QueryValidationError
 
 
+def _item_tables():
+    return {'items':{'columns':{name:{'type':kind} for name,kind in
+        (('id','integer'),('score','number'),('precision','integer'),('active','boolean'),('name','string'))}}}
+
+
 def api_invocations(query, bindings=(), relation_names=()):
     """Build explicit API declarations for these SQL fixtures."""
     from sqlglot import parse_one, exp
@@ -28,12 +33,19 @@ def api_invocations(query, bindings=(), relation_names=()):
 
 def payload(**changes):
     bindings = changes.pop('api_bindings', ())
+    ordering = changes.pop('ordering', ())
     relation_names = changes.pop('relation_names', ())
     value = {'query':'SELECT COUNT(*) AS total FROM items','mode':'scalar',
-        'columns':[{'name':'total','value_type':'integer'}],
+
         'outputs':[{'kind':'value','column':'total','label':'Item count'}],
-        'ordering':[],'interpretations':[]}
+        'interpretations':[]}
     result = {**value, **changes}
+    if ordering:
+        from sqlglot import parse_one, exp
+        statement = parse_one(result['query'], read='duckdb')
+        statement.set('order', exp.Order(expressions=[exp.Ordered(this=exp.column(item['column'], quoted=True),
+            desc=item['descending'], nulls_first=False) for item in ordering]))
+        result['query'] = statement.sql(dialect='duckdb')
     if 'api_invocations' not in result:
         result['api_invocations'] = api_invocations(result['query'],bindings,relation_names)
     for invocation in result['api_invocations']:
@@ -42,7 +54,7 @@ def payload(**changes):
 
 
 def test_scalar_answer_declares_a_single_public_value():
-    answer = parse_query_answer(payload(), table_names={'items'}, parameter_names=set())
+    answer = parse_query_answer(payload(), table_names={'items'}, parameter_names=set(), tables=_item_tables())
     assert answer.result.mode == 'scalar'
     assert answer.output_types == {'total': 'integer'}
     assert answer.output_labels == {'total': 'Item count'}
@@ -51,13 +63,13 @@ def test_scalar_answer_declares_a_single_public_value():
 @pytest.mark.parametrize('changes', [
     {'query': 'SELECT COUNT(*) AS total FROM invented'},
     {'query': 'SELECT COUNT(*) AS total FROM items WHERE id = $made_up'},
-    {'columns': [*payload()['columns'], *payload()['columns']]},
+    {'columns': [{'name':'total','value_type':'integer'}]},
     {'ordering': [{'column': 'missing', 'descending': True}]},
     {'api_bindings': [{'view': 'items', 'parameter_ref': 'limit', 'binding': 'invented'}]},
 ])
 def test_authoring_rejects_unknown_or_inconsistent_declarations(changes):
     with pytest.raises(QueryValidationError):
-        parse_query_answer(payload(**changes), table_names={'items'}, parameter_names=set())
+        parse_query_answer(payload(**changes), table_names={'items'}, parameter_names=set(), tables=_item_tables())
 
 
 def test_rank_column_is_hidden_but_has_declared_result_owner():
@@ -65,10 +77,10 @@ def test_rank_column_is_hidden_but_has_declared_result_owner():
     meaning=SimpleNamespace(result_kind='grouped_results',selection_kind='first_rank_with_ties',output_origins=('item',),ordering_origins=('score',),output_kinds=('value',))
     answer = parse_query_answer(payload(
         query='SELECT id, score FROM items', mode='rows',
-        columns=[{'name':'id','value_type':'integer'},{'name':'score','value_type':'number'}],
+
         outputs=[{'kind':'value','column':'id','label':'Item'}],
         ordering=[{'column':'score','descending':True}],
-    ), table_names={'items'}, parameter_names=set(),meaning=meaning)
+    ), table_names={'items'}, parameter_names=set(),meaning=meaning, tables=_item_tables())
     assert answer.result.output_columns == ('id',)
     assert answer.result.ordering[0].column == 'score'
     assert answer.result.selection == 'first_with_ties'
@@ -78,7 +90,7 @@ def test_single_property_can_be_scalar_without_inventing_a_population_aggregate(
     from types import SimpleNamespace
     meaning=SimpleNamespace(result_kind='qualifying_instances',selection_kind='all_results',output_origins=('precision',),ordering_origins=(),output_kinds=('value',))
     answer=parse_query_answer(payload(query='SELECT precision AS total FROM items WHERE id=$identity'),
-        table_names={'items'},parameter_names={'identity'},meaning=meaning)
+        table_names={'items'},parameter_names={'identity'},meaning=meaning,parameter_descriptions={'identity':{'value_type':'integer'}}, tables=_item_tables())
     assert answer.result.mode=='scalar'
     assert 'COUNT' not in answer.query
 
@@ -87,7 +99,7 @@ def test_query_cannot_omit_requested_outputs_even_when_it_declares_scalar():
     from types import SimpleNamespace
     meaning=SimpleNamespace(result_kind='grouped_results',selection_kind='all_results',output_origins=('instrument','precision'),ordering_origins=(),output_kinds=('identity','value'))
     with pytest.raises(QueryValidationError,match='output inventory'):
-        parse_query_answer(payload(),table_names={'items'},parameter_names=set(),meaning=meaning)
+        parse_query_answer(payload(),table_names={'items'},parameter_names=set(),meaning=meaning, tables=_item_tables())
 
 
 def test_provider_schema_excludes_automatically_supplied_arguments():
@@ -116,7 +128,7 @@ def test_explicit_catalog_interpretation_interns_equivalent_typed_sql_literal():
     descriptions={'p1':{'may_interpret':True},'c1':{'kind':'catalog_choice','type':'boolean','value':'true'}}
     answer=parse_query_answer(payload(query='SELECT COUNT(*) AS total FROM items WHERE active=TRUE',
         interpretations=[{'input':'p1','choice':'c1','basis':'The declared field maps this category to true.'}]),
-        table_names={'items'},parameter_names=set(descriptions),parameter_descriptions=descriptions)
+        table_names={'items'},parameter_names=set(descriptions),parameter_descriptions=descriptions, tables=_item_tables())
     assert answer.parameter_names==('c1',)
     assert '$c1' in answer.query
 
@@ -127,25 +139,61 @@ def test_catalog_interpretation_does_not_replace_a_different_typed_value(predica
     with pytest.raises(QueryValidationError):
         parse_query_answer(payload(query=f'SELECT COUNT(*) AS total FROM items WHERE {predicate}',
             interpretations=[{'input':'p1','choice':'c1','basis':'The declared field maps this category to true.'}]),
-            table_names={'items'},parameter_names=set(descriptions),parameter_descriptions=descriptions)
+            table_names={'items'},parameter_names=set(descriptions),parameter_descriptions=descriptions, tables=_item_tables())
 
 
-def test_explicit_interpretation_resolves_the_input_symbol_to_its_catalog_value():
-    descriptions={'p1':{'may_interpret':True},'c1':{'kind':'catalog_choice','type':'boolean','value':'true'}}
-    answer=parse_query_answer(payload(query='SELECT COUNT(*) AS total FROM items WHERE active=$p1',
-        interpretations=[{'input':'p1','choice':'c1','basis':'Declared acceptance state.'}]),
-        table_names={'items'},parameter_names=set(descriptions),parameter_descriptions=descriptions)
-    assert answer.parameter_names==('c1',)
-    assert '$p1' not in answer.query
+@pytest.mark.parametrize('use', ['sql', 'api'])
+def test_interpretation_evidence_cannot_rebind_explicit_input_uses(use):
+    descriptions={'p1':{'may_interpret':True,'value_type':'string','value':'Alpha'},
+                  'c1':{'kind':'catalog_choice','type':'boolean','value':'true'}}
+    body=payload(query='SELECT COUNT(*) AS total FROM items WHERE name=$p1' if use=='sql'
+                 else 'SELECT COUNT(*) AS total FROM items',
+        api_bindings=[] if use=='sql' else [{'view':'items','parameter_ref':'validated','binding':'p1'}],
+        interpretations=[{'input':'p1','choice':'c1','basis':'Unrelated evidence must not rewrite the executable value.'}])
+    with pytest.raises(QueryValidationError, match='not used'):
+        parse_query_answer(body,table_names={'items'},parameter_names=set(descriptions),
+            parameter_descriptions=descriptions,tables=_item_tables())
 
 
-def test_interpretation_resolves_a_request_argument_without_changing_its_owner():
-    descriptions={'p1':{'may_interpret':True},'c1':{'kind':'catalog_choice','type':'boolean','value':'false'}}
-    answer=parse_query_answer(payload(api_bindings=[{'view':'items','parameter_ref':'validated','binding':'p1'}],
-        interpretations=[{'input':'p1','choice':'c1','basis':'Pending validation is false.'}]),
-        table_names={'items'},parameter_names=set(descriptions),parameter_descriptions=descriptions,
-        request_parameters={'items':{'validated'}})
-    assert answer.request_arguments[0].binding=='c1'
+@pytest.mark.parametrize('use', ['sql', 'api'])
+def test_explicit_choice_is_the_only_executable_category_binding(use):
+    descriptions={'p1':{'may_interpret':True,'value_type':'string','value':'accepted'},
+                  'c1':{'kind':'catalog_choice','type':'boolean','value':'true'}}
+    body=payload(query='SELECT COUNT(*) AS total FROM items WHERE active=$c1' if use=='sql'
+                 else 'SELECT COUNT(*) AS total FROM items',
+        api_bindings=[] if use=='sql' else [{'view':'items','parameter_ref':'validated','binding':'c1'}],
+        interpretations=[{'input':'p1','choice':'c1','basis':'The declared acceptance flag represents accepted records.'}])
+    answer=parse_query_answer(body,table_names={'items'},parameter_names=set(descriptions),
+        parameter_descriptions=descriptions,tables=_item_tables())
+    assert answer.parameter_names == (('c1',) if use=='sql' else ())
+    if use=='api':
+        assert answer.request_arguments[0].binding == 'c1'
+
+
+@pytest.mark.parametrize('operator', ['=', 'IS NOT DISTINCT FROM', 'IS DISTINCT FROM'])
+def test_catalog_comparison_type_is_enforced_for_null_safe_predicates(operator):
+    descriptions={'c1':{'kind':'catalog_choice','type':'boolean','value':'false'}}
+    with pytest.raises(QueryValidationError, match='type'):
+        parse_query_answer(payload(query=f'SELECT COUNT(*) AS total FROM items WHERE name {operator} $c1'),
+            table_names={'items'},parameter_names=set(descriptions),parameter_descriptions=descriptions,
+            tables=_item_tables())
+
+
+@pytest.mark.parametrize('used', [True, False])
+def test_explicit_literal_use_preserves_the_original_value(used):
+    descriptions={'p1':{'may_interpret':True,'value_type':'string','value':'Alpha'}}
+    body=payload(query='SELECT COUNT(*) AS total FROM items'+(' WHERE name=$p1' if used else ''),
+        interpretations=[{'input':'p1','choice':None,'basis':'Compare the supplied property value directly.'}])
+    def parse():
+        return parse_query_answer(body,table_names={'items'},parameter_names=set(descriptions),
+            parameter_descriptions=descriptions,tables=_item_tables())
+    if used:
+        answer=parse()
+        assert answer.parameter_names == ('p1',)
+        assert answer.interpretations == ()
+    else:
+        with pytest.raises(QueryValidationError, match='directly used'):
+            parse()
 
 
 @pytest.mark.parametrize(('result_kind','roles'),[
@@ -159,7 +207,7 @@ def test_existence_cannot_replace_the_requested_public_contract(result_kind,role
         output_origins=tuple('requested' for _ in roles),output_kinds=roles,ordering_origins=())
     with pytest.raises(QueryValidationError,match='existence|output'):
         parse_query_answer(payload(mode='existence',outputs=[],query='SELECT id AS total FROM items'),
-            table_names={'items'},parameter_names=set(),meaning=meaning)
+            table_names={'items'},parameter_names=set(),meaning=meaning, tables=_item_tables())
 
 
 def test_existence_retains_a_single_population_value_obligation():
@@ -167,7 +215,7 @@ def test_existence_retains_a_single_population_value_obligation():
     meaning=SimpleNamespace(result_kind='scalar',selection_kind='all_results',
         output_origins=('whether any matches exist',),output_kinds=('value',),ordering_origins=())
     assert parse_query_answer(payload(mode='existence',outputs=[],query='SELECT id AS total FROM items'),
-        table_names={'items'},parameter_names=set(),meaning=meaning).result.mode=='existence'
+        table_names={'items'},parameter_names=set(),meaning=meaning, tables=_item_tables()).result.mode=='existence'
 
 
 def test_argument_schema_shares_the_binding_symbol_domain():
@@ -191,7 +239,7 @@ def test_provider_schema_preserves_requested_output_count_and_roles():
         output_origins=('item',),ordering_origins=('score',))
     tables={'items':{'candidate_keys':[{'entity_kind':'item','key_id':'pk','components':{'id':'id'}}]}}
     schema=QueryAnswerPrompt(question='Which item scored highest?',meaning=meaning,tables=tables,parameters={})._schema()
-    answer=payload(mode='rows',columns=[{'name':'id','value_type':'integer'},{'name':'score','value_type':'number'}],
+    answer=payload(mode='rows',
         outputs=[{'kind':'identity','authority':'item/pk(id)','components':{'id':'id'},'label':'item','display_column':None}],
         ordering=[{'column':'score','descending':True}])
     validate(answer,schema)
@@ -216,10 +264,10 @@ def test_authoring_does_not_redeclare_selection_owned_by_the_question(selection,
     schema=QueryAnswerPrompt(question='Rank the items.',meaning=meaning,tables={},parameters={})._schema()
     assert 'selection' not in schema['properties'] and 'limit' not in schema['properties']
     value=payload(query='SELECT id,score FROM items',mode='rows',
-        columns=[{'name':'id','value_type':'integer'},{'name':'score','value_type':'number'}],
+
         outputs=[{'kind':'value','column':'id','label':'item'}],ordering=[{'column':'score','descending':True}])
     value.pop('selection',None);value.pop('limit',None)
-    answer=parse_query_answer(value,table_names={'items'},parameter_names=set(),meaning=meaning,selection_limit=limit)
+    answer=parse_query_answer(value,table_names={'items'},parameter_names=set(),meaning=meaning,selection_limit=limit, tables=_item_tables())
     assert answer.result.selection==expected and answer.result.limit==limit
 
 
@@ -290,7 +338,7 @@ def test_unknown_key_column_is_diagnosed_before_identity_lineage():
     tables = {'records': {'columns': {'id': {'type':'integer'}, 'name': {'type':'string'}},
         'candidate_keys':[{'entity_kind':'record','key_id':'primary','components':{'id':'id'}}]}}
     query = payload(query='SELECT data_id AS id FROM records', mode='rows',
-        columns=[{'name':'id','value_type':'integer'}],
+
         outputs=[{'kind':'identity','authority':'record/primary(id)','components':{'id':'id'},'label':'record','display_column':None}])
     with pytest.raises(QueryValidationError) as caught:
         parse_query_answer(query, table_names=set(tables), parameter_names=set(), tables=tables)
@@ -299,16 +347,16 @@ def test_unknown_key_column_is_diagnosed_before_identity_lineage():
     assert 'records' in str(caught.value) and 'id' in str(caught.value)
 
 
-@pytest.mark.parametrize("declared", [["total", "inner_id"], ["wrong"], ["total"]])
+@pytest.mark.parametrize("declared", ["inner_id", "wrong", "total"])
 def test_authoring_output_inventory_belongs_to_outer_query_not_ctes(declared):
     body = payload(query="WITH members AS (SELECT id AS inner_id FROM items) SELECT COUNT(*) AS total FROM members",
-        columns=[{"name": name, "value_type": "integer"} for name in declared],
-        outputs=[{"kind": "value", "column": declared[0], "label": "count"}])
+
+        outputs=[{"kind": "value", "column": declared, "label": "count"}])
     arguments = dict(table_names={"items"}, parameter_names=set(), tables={"items": {"columns": {"id": {"type": "integer"}}}})
-    if declared == ["total"]:
+    if declared == "total":
         assert parse_query_answer(body, **arguments).output_types == {"total": "integer"}
     else:
-        with pytest.raises(QueryValidationError, match="result columns"):
+        with pytest.raises(QueryValidationError, match="undeclared column|SQL schema|validated bound plan"):
             parse_query_answer(body, **arguments)
 
 
@@ -318,7 +366,7 @@ def test_interpreted_api_argument_must_belong_to_destination_choices(allowed):
         'c1':{'kind':'catalog_choice','type':'choice','value':'APPROVED'}}
     tables = {'items':{'columns':{'id':{'type':'integer'}},'request_parameters':[
         {'param_ref':'selection','source':'query','type':'choice','choices':list(allowed)}]}}
-    body = payload(api_bindings=[{'view':'items','parameter_ref':'selection','binding':'p1'}],
+    body = payload(api_bindings=[{'view':'items','parameter_ref':'selection','binding':'c1'}],
         interpretations=[{'input':'p1','choice':'c1','basis':'The approved category maps to the declared APPROVED value.'}])
     args = dict(table_names={'items'},parameter_names=set(descriptions),parameter_descriptions=descriptions,tables=tables)
     if allowed == ('APPROVED',):
@@ -326,3 +374,22 @@ def test_interpreted_api_argument_must_belong_to_destination_choices(allowed):
     else:
         with pytest.raises(QueryValidationError, match='argument'):
             parse_query_answer(body,**args)
+
+
+def test_sorting_has_one_model_authoring_path():
+    body = payload()
+    body['ordering'] = []
+    with pytest.raises(QueryValidationError,match='SQL ORDER BY'):
+        parse_query_answer(body,table_names={'items'},parameter_names=set())
+
+
+def test_identity_display_uses_an_explicit_unambiguous_source_property():
+    tables = {'items':{'columns':{'id':{'type':'integer'},'name':{'type':'string'}},
+        'candidate_keys':[{'entity_kind':'item','key_id':'primary','components':{'id':'id'}}]}}
+    body = payload(query='SELECT id FROM items', mode='rows', outputs=[{
+        'kind':'identity','authority':'item/primary(id)','components':{'id':'id'},'label':'item','display_column':'name'}])
+    answer = parse_query_answer(body,table_names=set(tables),tables=tables,parameter_names=set())
+    assert answer.output_types == {'id':'integer','name':'string'}
+    from fervis.lookup.relational_sql.execution import execute_query, SqlTable
+    assert execute_query(answer.query,tables={'items':SqlTable({'id':'BIGINT','name':'TEXT'},
+        ({'id':1,'name':'Observed name'},))}).rows == ((1,'Observed name'),)

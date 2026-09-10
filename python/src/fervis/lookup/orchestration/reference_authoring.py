@@ -1,161 +1,141 @@
-"""Explicit reference meaning declarations at the factual SQL authoring boundary."""
-from dataclasses import dataclass
+"""Select reference contracts before their factual SQL consumer is authored."""
+from dataclasses import asdict, dataclass
 
-from fervis.lookup.question_contract.model import InputDenotationKind
-from fervis.lookup.relational_sql.authoring import QueryAnswerPrompt, QueryUnavailable, AuthoredQueryAnswer, parse_query_answer, _object, _array
-from fervis.lookup.relational_sql.outputs import identity_authorities, identity_carriers
-from fervis.lookup.relational_sql.parameters import with_reference_arguments
 from fervis.lookup.api_arguments import compatible_argument
+from fervis.lookup.question_contract.model import InputDenotationKind
+from fervis.lookup.relational_sql.authoring import parse_query_answer, _object
 from fervis.lookup.relational_sql.execution import QueryValidationError
-from .reference_slots import reference_slots, selected_reference_slots
+from fervis.lookup.relational_sql.outputs import identity_authorities
+from fervis.lookup.turn_prompts import TurnPromptBase, ProviderResponseContract, ProviderToolContract
+from fervis.model_io.structured_output.specs import required_tool_spec
+from .reference_slots import ReferenceSlot, ReferenceContract, reference_slots
 
 
 @dataclass(frozen=True)
-class ReferenceDemand:
-    input_ref: str
-    authority: str | None
+class ReferenceSelection:
+    contracts: dict[str, ReferenceContract]
+    slots: tuple[ReferenceSlot, ...]
 
 
-@dataclass(frozen=True)
-class AuthoredFactualQuery:
-    authored: AuthoredQueryAnswer
-    demands: tuple[ReferenceDemand, ...]
+class ReferenceContractPrompt(TurnPromptBase):
+    turn_name = 'reference contract selection'
+    turn_task = 'select supported reference contracts for the supplied references'
 
-
-class FactualQueryPrompt(QueryAnswerPrompt):
-    def __init__(self, *, inputs, denotations, reference_tables, failed_reference_plans=(), **kwargs):
-        super().__init__(**kwargs)
-        self.inputs, self.denotations, self.reference_tables = inputs, denotations, reference_tables
+    def __init__(self, *, question, meaning, inputs, denotations, tables, parameters, reference_tables, failed_reference_plans=()):
+        self.question, self.meaning = question, meaning
+        self.inputs, self.denotations = inputs, denotations
+        self.tables, self.parameters, self.reference_tables = tables, parameters, reference_tables
         self.failed_reference_plans = tuple(failed_reference_plans)
         self.reference_inputs = {
-            ref: {'relation': ref,
-                  'supplied_reference': inputs[ref].operand,
-                  'meaning': denotations[ref].operand_meaning,
-                  'allows_literal_address': not denotations[ref].reference_descriptions and isinstance(inputs[ref].operand, str) and self._has_literal_address(ref)}
-            for ref in self.meaning.input_refs if denotations[ref].kind is InputDenotationKind.IDENTITY_REFERENCE}
+            ref: {'supplied_reference':inputs[ref].operand, 'meaning':denotations[ref].operand_meaning,
+                  'instance_kind':denotations[ref].denoted_instance_kind,
+                  'reference_descriptions':list(denotations[ref].reference_descriptions),
+                  'allows_literal_address':not denotations[ref].reference_descriptions and isinstance(inputs[ref].operand,str)
+                      and any(description.get('input_ref')==ref and compatible_argument(parameter,description)
+                              for description in parameters.values() for table in tables.values()
+                              for parameter in table.get('request_parameters',()))}
+            for ref in meaning.input_refs if denotations[ref].kind is InputDenotationKind.IDENTITY_REFERENCE}
+        self.identities = identity_authorities(reference_tables)
+        self.record_views = {name:table for name,table in reference_tables.items() if table.get('columns')}
+        self.choices = {ref:self._contract_variants(info) for ref,info in self.reference_inputs.items()}
 
-    def _has_literal_address(self, input_ref):
-        return any(description.get('input_ref') == input_ref and compatible_argument(parameter, description)
-                   for description in self.parameters.values()
-                   for table in self.tables.values()
-                   for parameter in table.get('request_parameters', ()))
-
-    def output_identity_authorities(self):
-        return {**identity_authorities(self.reference_tables), **super().output_identity_authorities()}
+    def _contract_variants(self, info):
+        choices = []
+        if self.identities:
+            choices.append(_object({'kind':{'type':'string','enum':['identity']},
+                'authority':{'type':'string','enum':list(self.identities)}}))
+        for view,table in self.record_views.items():
+            choices.append(_object({'kind':{'type':'string','enum':['record']},
+                'view':{'type':'string','enum':[view]},
+                'fields':{'type':'array','items':{'type':'string','enum':list(table['columns'])},'minItems':1,'maxItems':len(table['columns'])}}))
+        if info['allows_literal_address']:
+            choices.append(_object({'kind':{'type':'string','enum':['address']}}))
+        return choices
 
     def data_sections(self, builder):
-        return (*super().data_sections(builder), *((builder.json_section('Supplied entity references:', self.reference_inputs, indent=None),) if self.reference_inputs else ()),
-                *((builder.json_section('Unavailable reference plans:', self.failed_reference_plans, indent=None),) if self.failed_reference_plans else ()))
-
-    def instruction_sections(self, builder):
-        return (*super().instruction_sections(builder),
-                *((builder.instruction_block('Reconsider the source plan', (
-                    'The prior source plan requires a reference query that the available contracts could not support. Reconsider its reference authority and API strategy while preserving the requested meaning. The dependency failure does not establish that the whole question is impossible. Use another supported strategy, or report unavailable if none preserves the question.',
-                )),) if self.failed_reference_plans else ()), *((builder.instruction_block('Reference demands', (
-            'Declare one reference_demands entry per supplied entity reference. Choose its logical identity authority explicitly; this is a semantic decision, not a SQL source selection.',
-            'For a resolved reference, use its stable relation from Supplied entity references as a SQL table. Its columns are the component IDs of the selected identity authority. The compiler resolves and guards that relation before executing the answer. Keep it as the population when references with no matching observations must be returned.',
-            'Bind a resolved reference into REST with {reference_input: input_ref}. A declared identity target fixes its component. For an opaque parameter, also supply component_id (or null when exactly one component is type-compatible); this is your explicit semantic mapping according to the API documentation and does not create a destination identity relationship. Do not invent reference argument symbols.',
-            'Use authority=null only for an allowed original literal resource address. Such an input must be used through its original parameter-menu binding in REST arguments; it does not establish an output identity. Do not mix literal-address and resolved-identity uses of one input.',
-        )),) if self.reference_inputs else ()))
-
-    def reference_usage_instructions(self):
+        consumers = {table.get('read_id') for table in self.tables.values()}
         return (
-            "Supplied entity references declare stable SQL relation names. For a resolved demand, FROM/JOIN that input's relation using the selected identity's component columns. These relations are valid SQL sources even though they are listed separately from API views. Do not reimplement reference matching against raw API rows.",
-            "An original reference_literal parameter-menu binding is available only when that input declares authority=null. A resolved demand uses its reference relation or a structured reference_input REST binding; declaring an authority without consuming its relation or binding is incomplete.",
+            builder.text_section('Question:',self.question),
+            builder.json_section('Assigned requested answer:',asdict(self.meaning),indent=None),
+            builder.json_section('Supplied references:',self.reference_inputs,indent=None),
+            builder.json_section('Declared identity contracts:',identity_authorities(self.reference_tables),indent=None),
+            builder.json_section('API relationship contracts:',{
+                name:{'path':table.get('path',''),'description':table.get('description',''),
+                      'possible_consumer':table.get('read_id') in consumers,
+                      'fields':{field:{'type':meta['type'],'description':meta.get('description','')}
+                                for field,meta in table.get('columns',{}).items()},
+                      'candidate_keys':table.get('candidate_keys',[]),'entity_references':table.get('entity_references',[]),
+                      'request_parameters':table.get('request_parameters',[])}
+                for name,table in self.reference_tables.items()},indent=None),
+            *((builder.json_section('Unavailable reference plans:',self.failed_reference_plans,indent=None),)
+              if self.failed_reference_plans else ()),
         )
 
+    def instruction_sections(self,builder):
+        return (builder.instruction_block('Reference contract selection',(
+            'Select one reference contract for each supplied reference, preserving its meaning in the assigned requested answer. This chooses a result type, not a known value. Current-data existence and uniqueness are checked by runtime guards, not by this contract-selection step.',
+            'Prefer identity when a declared nominal authority supports the reference. Otherwise record selects a declared API row carrier whose observed properties can resolve the reference and support the requested relationship. Choose only record fields needed to identify the observed record and support the consuming relationship; do not require unrelated optional properties. A record contract does not invent an entity namespace, key, or foreign-key authority. Missing nominal annotations alone do not make an observed name lookup unavailable.',
+            'The selected contract must both be establishable from the supplied literal or description and support the requested relationship through the declared API contracts. An endpoint that requires an identifier does not itself establish a supplied name.',
+            'Use address only for an allowed original resource address. That strategy sends the original scalar to a compatible API argument; it does not certify an identity output.',
+            'Reference queries will be compiled and guarded before factual SQL authoring. The consumer then receives concrete reference tables and typed key arguments.',
+            'If a prior reference or consumer plan was unavailable, reconsider its authority or address strategy without changing the requested fact. Report unavailable only when no supported strategy preserves the question.',
+        )),)
+
     def _schema(self):
-        schema = super()._schema()
-        if self.reference_inputs:
-            choices = list(identity_authorities(self.reference_tables))
+        import json
+        definitions, names, properties = {}, {}, {}
+        for ref, choices in self.choices.items():
             variants = []
-            for ref, description in self.reference_inputs.items():
-                authorities = [*choices, *([None] if description['allows_literal_address'] else [])]
-                if not authorities:
-                    continue
-                variants.append(_object({'input_ref': {'type': 'string', 'enum': [ref]},
-                    'authority': {'type': ['string', 'null'] if description['allows_literal_address'] else 'string', 'enum': authorities}}))
-            schema['properties']['reference_demands'] = {**_array({'anyOf': variants} if variants else _object({})),
-                'minItems': len(self.reference_inputs), 'maxItems': len(self.reference_inputs)}
-            schema['properties'] = {'reference_demands':schema['properties'].pop('reference_demands'), **schema['properties']}
-            schema['required'].insert(0, 'reference_demands')
+            for choice in choices:
+                signature = json.dumps(choice, sort_keys=True)
+                name = names.setdefault(signature, 'reference_contract_'+str(len(names)+1))
+                definitions[name] = choice
+                variants.append({'$ref':'#/$defs/'+name})
+            properties[ref] = {'anyOf':variants}
+        schema = _object({'reference_contracts':_object(properties)})
+        schema['$defs'] = definitions
         return schema
 
-    def reference_argument_schema(self, parameter):
-        if not self.reference_inputs:
-            return None
-        components = set()
-        for carrier in identity_carriers(self.reference_tables).values():
-            table = self.reference_tables[carrier['view']]
-            for component, column in carrier['components'].items():
-                description = {'kind':'reference_argument', 'identity':{'entity_kind':carrier['entity_kind'], 'key_id':carrier['key_id']},
-                    'projection':'key_component:'+component, 'value_type':table['columns'][column]['type']}
-                if compatible_argument(parameter, description):
-                    components.add(component)
-        if not components:
-            return None
-        properties = {'reference_input': {'type':'string', 'enum': list(self.reference_inputs)}}
-        if not parameter.get('entity_target'):
-            properties['component_id'] = {'type':['string','null'], 'enum':[*sorted(components), None]}
-        return _object(properties)
+    @staticmethod
+    def _unavailable_schema():
+        return _object({'unavailable':{'type':'boolean','enum':[True]},'reason':{'type':'string','minLength':1}})
+
+    def response_contract(self):
+        schemas = {}
+        if all(self.choices.values()):
+            schemas['submit_reference_contracts']=self._schema()
+        schemas['report_query_unavailable']=self._unavailable_schema()
+        return ProviderResponseContract(provider_schema=schemas)
+
+    def tool_contract(self):
+        return ProviderToolContract(tool_specs=tuple(required_tool_spec(tool_name=name,
+            tool_description='Select reference contracts or explain why they are unavailable.',input_schema=schema)
+            for name,schema in self.response_contract().provider_schema.items()))
 
 
-def reference_contracts(prompt, demands, menu):
-    slots = reference_slots(fact=prompt.meaning, inputs=prompt.inputs, denotations=prompt.denotations,
-        tables=prompt.reference_tables, selected_authorities={item.input_ref:item.authority for item in demands})
-    return slots, {**prompt.tables, **{slot.view.name:slot.table for slot in slots}}, with_reference_arguments(menu, slots)
-
-
-def parse_factual_query(payload, *, prompt, menu, selection_limit):
+def parse_reference_contracts(payload, *, prompt):
     if 'unavailable' in payload:
-        return parse_query_answer(payload, table_names=set(prompt.tables), parameter_names=set(menu.expressions))
-    raw_demands = payload.get('reference_demands', ())
-    if any(not isinstance(item, dict) or set(item) != {'input_ref', 'authority'} or
-           not isinstance(item['input_ref'], str) or item['authority'] is not None and not isinstance(item['authority'], str) for item in raw_demands):
-        raise QueryValidationError('Reference demand requires its input and logical authority')
-    demands = tuple(ReferenceDemand(**item) for item in raw_demands)
-    if len({item.input_ref for item in demands}) != len(demands) or {item.input_ref for item in demands} != set(prompt.reference_inputs):
-        raise QueryValidationError('Reference demands must declare each supplied entity reference exactly once')
-    for demand in demands:
-        if demand.authority is None and not prompt.reference_inputs[demand.input_ref]['allows_literal_address']:
-            raise QueryValidationError('This supplied reference requires resolved identity authority')
-    slots, tables, lowered_menu = reference_contracts(prompt, demands, menu)
-    invocations = []
-    for invocation in payload['api_invocations']:
-        arguments = []
-        for argument in invocation['arguments']:
-            binding = argument['binding']
-            if isinstance(binding, dict):
-                if 'reference_input' not in binding or set(binding) - {'reference_input', 'component_id'}:
-                    raise QueryValidationError('Reference REST binding requires one supplied input and an optional key component')
-                parameter = next((item for item in prompt.tables.get(invocation['view'], {}).get('request_parameters', ())
-                    if item['param_ref'] == argument['parameter_ref']), None)
-                names = [name for name, description in lowered_menu.descriptions.items()
-                         if description.get('kind') == 'reference_argument' and description.get('input_ref') == binding['reference_input']
-                         and (binding.get('component_id') is None or description.get('projection') == 'key_component:'+str(binding['component_id']))
-                         and parameter is not None and compatible_argument(parameter, description)]
-                if len(names) != 1:
-                    ref = binding['reference_input']
-                    demand = next((item for item in demands if item.input_ref == ref), None)
-                    available = {description['projection']:description['value_type'] for description in lowered_menu.descriptions.values()
-                                 if description.get('kind') == 'reference_argument' and description.get('input_ref') == ref}
-                    if demand is not None and demand.authority is None:
-                        raise QueryValidationError(f'Reference input {ref} declares literal-address mode and has no resolved key. A reference_input binding requires a resolved authority; original address values use parameter-menu bindings.')
-                    raise QueryValidationError(f'Reference binding for {ref} does not supply exactly one compatible component to {argument["parameter_ref"]}. '
-                        f'Parameter type/authority: {parameter}. Available key components: {available}. '
-                        f'Use a compatible identifier parameter or consume {prompt.reference_inputs.get(ref, {}).get("relation")} directly in SQL.')
-                argument = {**argument, 'binding': names[0]}
-            arguments.append(argument)
-        invocations.append({**invocation, 'arguments':arguments})
-    body = {key:value for key,value in payload.items() if key != 'reference_demands'}
-    body['api_invocations'] = invocations
-    authored = parse_query_answer(body, table_names=set(tables), parameter_names=set(lowered_menu.expressions),
-        meaning=prompt.meaning, selection_limit=selection_limit, expected_input_refs=prompt.meaning.input_refs,
-        parameter_descriptions=lowered_menu.descriptions, tables=tables,
-        request_parameters={name:{param['param_ref'] for param in table.get('request_parameters', ())} for name,table in tables.items()})
-    if isinstance(authored, QueryUnavailable):
-        return authored
-    selected = selected_reference_slots(authored, slots, lowered_menu)
-    if set(selected) != {item.input_ref for item in demands if item.authority is not None}:
-        raise QueryValidationError('Reference use differs from its declared resolution mode')
-    return AuthoredFactualQuery(authored, demands)
+        return parse_query_answer(payload,table_names=set(),parameter_names=set())
+    if set(payload)!={'reference_contracts'} or not isinstance(payload['reference_contracts'],dict):
+        raise QueryValidationError('Reference selection requires a complete contract map')
+    selected=payload['reference_contracts']
+    if set(selected)!=set(prompt.reference_inputs):
+        raise QueryValidationError('Select one supported contract for every reference')
+    contracts = {}
+    for ref, item in selected.items():
+        if not isinstance(item,dict) or not all(isinstance(value,str) for key,value in item.items() if key != 'fields'):
+            raise QueryValidationError('Reference contract must be a declared closed variant')
+        kind = item.get('kind')
+        expected = {'identity':{'kind','authority'}, 'record':{'kind','view','fields'}, 'address':{'kind'}}.get(kind)
+        if set(item) != expected:
+            raise QueryValidationError('Reference contract must be a declared closed variant')
+        if (kind == 'identity' and item['authority'] not in prompt.identities
+            or kind == 'record' and item['view'] not in prompt.record_views
+            or kind == 'address' and not prompt.reference_inputs[ref]['allows_literal_address']):
+            raise QueryValidationError('Reference contract is not supported by the declared sources')
+        if kind == 'record' and (not isinstance(item['fields'],list) or not item['fields'] or not all(isinstance(field,str) for field in item['fields']) or len(set(item['fields'])) != len(item['fields']) or not set(item['fields']) <= set(prompt.record_views[item['view']]['columns'])):
+            raise QueryValidationError('Observed reference fields must be a nonempty unique carrier projection')
+        contracts[ref] = ReferenceContract(**item)
+    slots=reference_slots(fact=prompt.meaning,inputs=prompt.inputs,denotations=prompt.denotations,
+        tables=prompt.reference_tables,selected_contracts=contracts)
+    return ReferenceSelection(contracts,slots)

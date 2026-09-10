@@ -4,7 +4,7 @@ from decimal import Decimal
 from uuid import UUID
 from fervis.lookup.answer_program.values import (
     IdentityValuePayload, IdentitySetValuePayload, TimeValuePayload,
-    LiteralValuePayload, LiteralType, NamedValuePayload, StringSetValuePayload,
+    LiteralValuePayload, NamedValuePayload, StringSetValuePayload,
 )
 
 
@@ -31,9 +31,6 @@ def _projection_type(payload, component):
     if isinstance(payload, TimeValuePayload):
         return "datetime" if payload.granularity == "hour" else "date"
     if isinstance(payload, LiteralValuePayload):
-        if payload.literal_type is LiteralType.NUMBER:
-            value = Decimal(str(payload.value))
-            return "integer" if value == value.to_integral_value() else "number"
         return payload.literal_type.value
     return "string"
 

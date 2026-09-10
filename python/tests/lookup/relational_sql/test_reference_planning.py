@@ -58,7 +58,7 @@ def test_reference_authoring_supports_observed_expressions_without_backend_name_
     matching = "CONCAT(given, ' ', family)" if case == 'split' else 'name'
     extra = f', {matching} AS matched_name' if case != 'role' else ''
     payload={'query':f'SELECT id AS record_id{extra} FROM "{view.name}" WHERE {predicate}',
-        'mode':'rows','columns':[{'name':'record_id','value_type':'integer'}, *([{'name':'matched_name','value_type':'string'}] if case != 'role' else [])],
+        'mode':'rows',
         'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'record_id'},'label':'record','display_column':None}],
         'ordering':[],'api_bindings':[],'interpretations':[],
         'reference_binding':{'kind':'description','basis':'The primary property defines the role.'} if case=='role' else {'kind':'literal','match_column':'matched_name'}}
@@ -117,7 +117,7 @@ def test_reference_output_contract_does_not_request_unused_presentation_fields(m
     menu=query_parameter_menu((CanonicalInputValue(value.id,'i1',('fact_1:sql_input:i1',),value,value.proof_refs),))
     prompt=ReferenceQueryPrompt(meaning=meaning,tables=views.tables,parameters=menu.descriptions)
     payload={'query':f'SELECT id, {match_expression} AS display_name FROM "{view.name}"','mode':'rows',
-        'columns':[{'name':'id','value_type':'integer'},{'name':'display_name','value_type':'string'}],
+
         'outputs':[{'kind':'identity','authority':'records/primary(id)','components':{'id':'id'},'label':'record','display_column':'display_name'}],
         'ordering':[],'api_bindings':[],'interpretations':[],'reference_binding':{'kind':'literal','match_column':'display_name'}}
     payload = query_payload(**payload)
@@ -189,7 +189,7 @@ def test_required_key_lookup_establishes_identity_from_observed_return_and_repla
     meaning = ReferenceMeaning('fact_1', 'i1', 'record', 'record ABC123', (origin,), ('i1',), reference_text=literal)
     prompt = ReferenceQueryPrompt(meaning=meaning, tables=views.tables, parameters=menu.descriptions)
     payload = {'query': f'SELECT id FROM "{view.name}"', 'mode': 'rows',
-        'columns': [{'name': 'id', 'value_type': key_type}],
+
         'outputs': [{'kind': 'identity', 'authority': 'records/primary(id)', 'components': {'id': 'id'}, 'label': 'record', 'display_column': None}],
         'ordering': [], 'interpretations': [], 'reference_binding': {'kind': 'literal', 'match_column': 'id'},
         'api_bindings': [{'name': None, 'view': view.name, 'parameter_ref': 'id', 'binding': 'p1_1'}]}
@@ -317,7 +317,7 @@ def test_literal_reference_keeps_compatible_control_values_from_noncarrier_sourc
     assert set(prompt.tables)=={'members'}
     assert 'c1' in prompt.parameters
     body=query_payload(query='SELECT id,name AS matched FROM members',mode='rows',
-        columns=[{'name':'id','value_type':'integer'},{'name':'matched','value_type':'string'}],
+
         outputs=[{'kind':'identity','authority':'member/primary(id)','components':{'id':'id'},'label':'member','display_column':None}],
         reference_binding={'kind':'literal','match_column':'matched'},
         api_bindings=[{'view':'members','parameter_ref':'representation','binding':'c1'}])

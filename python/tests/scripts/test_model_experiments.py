@@ -160,3 +160,20 @@ def test_population_assertion_checks_polarity_and_unknown_rows():
     assert validate(output({"kind": "boolean_field", "field_ref": "flag", "expected_value": True}), context)
     assert validate(output({"kind": "unary", "operator": "not", "operand": {"kind": "field", "field_ref": "flag"}}), context) == []
     assert validate({"populations": {"set": [{"population": {"kind": "exact_population"}}]}}, context)
+
+
+def test_question_frame_assertion_preserves_typed_reference_values():
+    from scripts.experiments.question_frame.assertion import validate
+    from tests.lookup.question_contract.test_question_frame import _frame_payload
+    for value,kind in [('Alpha','literal'),('the configured site','description')]:
+        question=f'How many events are associated with {value}?'
+        body=_frame_payload(supplied_values=[{'meaning':'the supplied site',
+            'denotation_basis':'The question denotes one site.',
+            'entity_reference':{'instance_kind':'site','value':{'operands':[value],
+                'reference_kind':kind,'origin':{'kind':'question'}}}}])
+        context={'question':question,'expected_request_count':1,
+            'required_supplied_values':{value:{'denotation':'identity_reference'}},
+            'accepted_supplied_value_inventories':[[value]]}
+        assert validate(body,context)==[]
+        changed={**context,'required_supplied_values':{value:{'denotation':'scalar'}}}
+        assert any('denotation' in error for error in validate(body,changed))

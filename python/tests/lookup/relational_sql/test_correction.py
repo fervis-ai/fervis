@@ -13,6 +13,15 @@ from tests.lookup.question_contract.test_question_frame import _frame_payload
 from tests.lookup.relational_sql.test_authoring import payload
 
 
+def assert_count_query(answer):
+    from fervis.lookup.relational_sql.execution import execute_query, SqlTable
+    assert answer.output_types == {'total':'integer'}
+    for count in (0,3):
+        rows = tuple({'id':i} for i in range(count))
+        result = execute_query(answer.query, tables={'items':SqlTable({'id':'BIGINT'}, rows)})
+        assert result.rows == ((count,),)
+
+
 @pytest.mark.parametrize('failure_kind',['repairable','repeated','provider'])
 def test_validation_repair_is_bounded_and_observable(monkeypatch,failure_kind):
     question='How many stores?'
@@ -38,7 +47,7 @@ def test_validation_repair_is_bounded_and_observable(monkeypatch,failure_kind):
     if failure_kind!='repairable':
         with pytest.raises(compilation.SemanticCompilationTurnError):run()
     else:
-        assert run().result.query=='SELECT COUNT(*) AS total FROM items'
+        assert_count_query(run().result)
         assert 'Compiler diagnostics' in attempts[-1].prompt_text
         assert 'Preserve the original task' in attempts[-1].prompt_text
         assert completed[0].usage['costUsd']==0.01
@@ -109,7 +118,7 @@ def test_real_structured_schema_failure_is_corrected_and_classified():
         validation_failure_observer=lambda purpose,failure:failures.append(failure))
     result=compilation._turn(ModelTurnPurpose.SOURCE_REALIZATION,prompt=prompt,context=TurnPromptContext(current_question=question),
         parse=lambda value:parse_query_answer(value,table_names={'items'},parameter_names=set()),request=request,on_turn=None)
-    assert result.result.query==payload()['query']
+    assert_count_query(result.result)
     assert model.calls==2
     assert failures[0].validation_kind is ModelValidationKind.SCHEMA
     assert failures[0].error_context['validator']=='required'
