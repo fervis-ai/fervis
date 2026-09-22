@@ -56,6 +56,9 @@ set cannot be substituted under an existing input ID.
   credential preparation: 2,715
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
   93 desktop tests and the desktop build.
+- A pull-request workflow now runs that full repository verifier with a
+  placeholder model key and browser downloads disabled. Its remote check has
+  not yet reported on this PR revision.
 
 ## Release gates still open
 
@@ -72,7 +75,9 @@ fallback is covered deterministically. Read Eligibility reviewed four positive
 batches in the passing Ozana receipt. The current code attempts typed
 realization after each batch and stops on a verified success. Representation
 inspection and pagination interpretation are also deferred to each visited
-batch. Their reduced live cost is not yet measured. The authorization
+batch. If a later read has no provably complete traversal, it is removed from
+the current selection without dropping other candidates or crashing. The
+reduced live cost of this last staging change is not yet measured. The authorization
 handoff is proved for this host and case; other APIs and question classes still
 need live coverage.
 

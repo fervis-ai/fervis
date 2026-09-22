@@ -347,6 +347,7 @@ def compile_logical_question(request, *, on_turn=None):
     deferred_access_ids = tuple(
         read_id for read_id in access_ids
         if read_id not in initial_access_ids
+        and read_id in {read.id for read in request.full_catalog.reads}
         and any(requires_caller_supplied_input(param)
                 for param in request.full_catalog.read(read_id).params)
     )
@@ -459,6 +460,7 @@ def _assess_catalog_batches(
     request, *, selection, access, indexes, grounding, resolver_catalog,
     context, on_turn, turn, trial=None,
 ):
+    selection = _retain_available_selection(selection, request.full_catalog)
     assessments, batches = [], []
     attempted = None
     batch = selection
@@ -482,6 +484,11 @@ def _assess_catalog_batches(
                 lambda payload: parse_pagination_discovery(payload, request=traversal),
             )
         request = replace(request, full_catalog=observed)
+        selection = _retain_available_selection(selection, observed)
+        batch = _retain_available_selection(batch, observed)
+        batches = [
+            _retain_available_selection(item, observed) for item in batches
+        ]
         batch = replace(
             batch,
             relation_catalog=RelationCatalog(
@@ -525,6 +532,36 @@ def _assess_catalog_batches(
     return (
         request, selection,
         combine_semantic_read_eligibility_results(tuple(assessments)), attempted,
+    )
+
+
+def _retain_available_selection(selection, catalog):
+    """Remove only reads whose current representation cannot prove traversal."""
+    from fervis.lookup.relation_catalog.selection.results import (
+        relation_catalog_for_read_ids,
+    )
+
+    available = {read.id for read in catalog.reads}
+    selected = tuple(read_id for read_id in selection.selected_read_ids if read_id in available)
+    facts = tuple(
+        replace(
+            item,
+            rankings=tuple(ranking for ranking in item.rankings
+                           if ranking.read_id in available),
+            selected_read_ids=tuple(read_id for read_id in item.selected_read_ids
+                                    if read_id in available),
+            unselected_positive_read_ids=tuple(
+                read_id for read_id in item.unselected_positive_read_ids
+                if read_id in available
+            ),
+        )
+        for item in selection.requested_fact_selections
+    )
+    return replace(
+        selection,
+        relation_catalog=relation_catalog_for_read_ids(catalog, read_ids=selected),
+        requested_fact_selections=facts,
+        selected_read_ids=selected,
     )
 
 

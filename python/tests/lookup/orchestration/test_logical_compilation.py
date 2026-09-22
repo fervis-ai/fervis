@@ -78,7 +78,11 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
             result = parse({"reads": {
                 read.id: {
                     "mapping_basis": "The declared response is a complete collection.",
-                    "mode": "single_response",
+                    "mode": (
+                        "unknown"
+                        if batched and outcome == "unavailable" and read.id == "fourth_stores"
+                        else "single_response"
+                    ),
                     "row_path_ref": None,
                     "position_parameter_ref": None,
                     "size_parameter_ref": None,
@@ -230,6 +234,8 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
         assert isinstance(result, shared.SemanticCompilationImpossible)
         assert result.question_contract is logical[0]
         assert result.blocked_fact_ids == ("fact_1",)
+        if batched and outcome == "unavailable":
+            assert "fourth_stores" not in result.reviewed_read_ids
         assert reads == (
             [("fourth_stores", {})]
             if batched and outcome == "unavailable" else []
