@@ -39,6 +39,7 @@ from fervis.lookup.answer_program.operations import (
     KeepAll,
     JoinKey,
     JoinSpec,
+    JoinBasis,
     JoinMode,
     Operation,
     OrderSpec,
@@ -125,6 +126,7 @@ from fervis.lookup.question_contract import (
     TemporalBucket,
 )
 from fervis.lookup.semantic_types import IdentifierType
+from fervis.lookup.source_binding.model import FactRealizationKind
 from fervis.lookup.source_binding import (
     FactRealization,
     SetRealization,
@@ -167,6 +169,7 @@ class _ProgramBuilder:
     global_relational_values: dict[FactLocalRef, RelationalValue] = field(
         default_factory=dict
     )
+    reference_values: dict[tuple[str, str, str], tuple[NodeOutputRef, ...]] = field(default_factory=dict)
 
 
 def compile_verified_source_strategy(
@@ -196,6 +199,28 @@ def compile_verified_source_strategy(
         for branch in verified.request.strategy.branches
     }
     _compile_requested_fact(builder)
+    from fervis.lookup.contract_codec import canonical_contract_fingerprint
+
+    addressed_inputs = {
+        use.input_ref
+        for use_ref, _, _, _ in verified.request.address_scope_values
+        for use in verified.request.index.input_use_sites
+        if use.use_ref == use_ref
+    }
+    input_bindings = {
+        item.parameter_id: item for item in inputs.program_inputs.bindings.bindings
+    }
+    parameters = tuple(
+        replace(
+            parameter,
+            fixed_value_fingerprint=canonical_contract_fingerprint(
+                input_bindings[parameter.id].value.payload
+            ),
+        )
+        if parameter.input_ref in addressed_inputs
+        else parameter
+        for parameter in inputs.program_inputs.parameters
+    )
     program = AnswerProgram(
         inputs=tuple(verified.request.index.input_by_ref.values()),
         input_denotations=tuple(
@@ -204,7 +229,7 @@ def compile_verified_source_strategy(
         fact_template=(verified.request.index.requested_fact,),
         fulfillment=tuple(builder.fulfillments),
         relation_guarantees=tuple(builder.relation_guarantees),
-        parameters=inputs.program_inputs.parameters,
+        parameters=parameters,
         relations=tuple(builder.relations),
         operations=tuple(builder.operations),
         result_projection=ResultProjection(
@@ -239,10 +264,9 @@ def compile_verified_source_strategies(
         compile_verified_source_strategy(verified) for verified in verified_strategies
     )
     programs = tuple(item.answer_program for item in compiled)
-    parameters = _unique_equal(
-        tuple(parameter for program in programs for parameter in program.parameters),
-        key=lambda item: item.id,
-        label="program parameter",
+    from fervis.lookup.answer_program.inputs import merge_parameter_declarations
+    parameters = merge_parameter_declarations(
+        tuple(parameter for program in programs for parameter in program.parameters)
     )
     bindings = _unique_equal(
         tuple(
@@ -705,6 +729,7 @@ def _compile_source_relation(
                 kind=_source_kind(source.kind),
                 read_id=source.read_id,
                 row_source_id=source.id,
+                pagination_binding=source.pagination_binding,
                 memory_relation_id=source.memory_ref,
                 param_bindings=tuple(
                     EndpointParamBinding(
@@ -929,6 +954,8 @@ def _compile_relational_scope(
                     current,
                     right_relation,
                     tuple(dict.fromkeys(keys)),
+                    basis=(JoinBasis.OBSERVED_EQUALITY if any(link.observed_equality for link in connecting)
+                           else JoinBasis.DECLARED_IDENTITY),
                     mode=_source_join_mode(
                         builder,
                         branch_id=branch_id,
@@ -1090,6 +1117,8 @@ def _relation_fields(
             ):
                 for field_ref in set_realization.identity_field_refs:
                     roles.setdefault(field_ref, set()).add(FieldBindingRole.IDENTITY)
+                for _, field_ref in set_realization.record_fields:
+                    roles.setdefault(field_ref, set()).add(FieldBindingRole.OUTPUT)
     for fact_realizations in plan.fact_bindings.values():
         for fact_realization in fact_realizations:
             if (
@@ -1098,6 +1127,13 @@ def _relation_fields(
             ):
                 for field_ref in fact_realization.field_refs:
                     roles.setdefault(field_ref, set()).add(FieldBindingRole.OUTPUT)
+    for reference in plan.reference_bindings:
+        if reference.branch_id != branch_id:
+            continue
+        for field_ref in reference.field_refs:
+            binding = builder.verified.request.source_catalog.field_binding(field_ref)
+            if binding.source_ref == source_ref:
+                roles.setdefault(binding.field.field_ref, set()).add(FieldBindingRole.PREDICATE)
     relation_evidence = {
         item.evidence_ref: item
         for item in builder.verified.request.source_catalog.relation_evidence
@@ -1107,8 +1143,14 @@ def _relation_fields(
             if (
                 realization.branch_id != branch_id
                 or source_ref not in realization.source_refs
-                or realization.relation_evidence_ref is None
             ):
+                continue
+            for pair in realization.field_pairs:
+                for property_ref in pair:
+                    binding = builder.verified.request.source_catalog.field_binding(property_ref)
+                    if binding.source_ref == source_ref:
+                        roles.setdefault(binding.field.field_ref, set()).add(FieldBindingRole.PREDICATE)
+            if realization.relation_evidence_ref is None:
                 continue
             evidence = relation_evidence[realization.relation_evidence_ref]
             field_ids = (
@@ -1525,6 +1567,8 @@ def _filter_missing_entity_groups(
         if (identity := _result_entity_key(builder, ref)) is not None
         for component in identity.components
     )
+    keys += tuple(_compiled_field(builder,ref,branch_id=_representative_branch(builder))
+        for ref in index.grouping_refs if ref.kind is FactLocalKind.FACT and _record_set_ref(builder,ref) is not None)
     if not keys:
         return input_relation
     relation_id = f"{index.requested_fact_id}.entity_groups"
@@ -1939,6 +1983,7 @@ def _compile_result(
                 )
             )
         else:
+            record_fields = _result_record_fields(builder, requirement.value_ref)
             entity_key = _result_entity_key(builder, requirement.value_ref)
             builder.relation_outputs.append(
                 RelationResultOutput(
@@ -1946,7 +1991,7 @@ def _compile_result(
                     relation_id=current,
                     field_id=(
                         ""
-                        if entity_key is not None
+                        if entity_key is not None or record_fields
                         else _result_field(
                             builder,
                             requirement.value_ref,
@@ -1954,6 +1999,7 @@ def _compile_result(
                         )
                     ),
                     entity_key=entity_key,
+                    record_fields=record_fields,
                     role="answer_value",
                 )
             )
@@ -2033,6 +2079,9 @@ def _compile_node(
         )
 
     if isinstance(node, Comparison):
+        reference = _compile_runtime_reference_comparison(builder, node, branch_id=branch_id)
+        if reference is not None:
+            return reference
         return _compile_comparison(
             builder,
             node,
@@ -2138,6 +2187,34 @@ def _set_scope_keys(
     )
 
 
+def _correlation_join(
+    builder: _ProgramBuilder,
+    left: str,
+    right: str,
+    *,
+    set_ref: str,
+    branch_id: str,
+) -> JoinSpec:
+    realization = next(
+        value
+        for value in builder.verified.binding_plan.set_bindings[set_ref]
+        if value.branch_id == branch_id
+    )
+    # A computed value is attached using the same keys used to group it.
+    # Anonymous records use their carried occurrence number, not an entity key.
+    return JoinSpec(
+        left,
+        right,
+        tuple(JoinKey(key, key) for key in _set_scope_keys(builder, set_ref, branch_id)),
+        JoinMode.LEFT,
+        basis=(
+            JoinBasis.OBSERVED_EQUALITY
+            if realization.identity_ref is None
+            else JoinBasis.DECLARED_IDENTITY
+        ),
+    )
+
+
 def _attach_relational_values(
     builder: _ProgramBuilder,
     relation_id: str,
@@ -2168,11 +2245,12 @@ def _attach_relational_values(
             Operation(
                 id=f"{output}.operation",
                 output_relation=output,
-                spec=JoinSpec(
+                spec=_correlation_join(
+                    builder,
                     relation_id,
                     value.relation_id,
-                    tuple(JoinKey(key, key) for key in value.key_fields),
-                    JoinMode.LEFT,
+                    set_ref=value.key_set_ref,
+                    branch_id=branch_id,
                 ),
             )
         )
@@ -2860,11 +2938,12 @@ def _lower_coverage_value(
         Operation(
             id=f"{joined}.operation",
             output_relation=joined,
-            spec=JoinSpec(
+            spec=_correlation_join(
+                builder,
                 candidate,
                 all_truth,
-                tuple(JoinKey(key, key) for key in candidate_keys),
-                JoinMode.LEFT,
+                set_ref=candidate_ref,
+                branch_id=branch_id,
             ),
         )
     )
@@ -2951,6 +3030,85 @@ def _temporal_bucket_expression(
             EnvironmentRef(key=timezone_ref),
         ),
     )
+
+
+def _compile_runtime_reference_comparison(builder, node, *, branch_id):
+    from fervis.lookup.source_binding.reference_bindings import (
+        runtime_reference_uses, ReferenceMatchKind,
+    )
+    from fervis.lookup.answer_program.operations import ReferenceGuardSpec
+
+    request = builder.verified.request
+    uses = {use.use_ref: use for use in runtime_reference_uses(request)
+            if use.expression_ref == request.index.fact_local_ref_by_local_id[node.id]}
+    matches = [binding for binding in builder.verified.binding_plan.reference_bindings
+               if binding.branch_id == branch_id and binding.input_use_ref in uses]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise ValueError('Reference comparison requires one input interpretation')
+    binding = matches[0]
+    use = uses[binding.input_use_ref]
+    target = use.identity_set_ref
+    occurrence = builder.occurrence_scopes[branch_id].for_set(target.token)
+    realization = next(item for item in builder.verified.binding_plan.set_bindings[target.token]
+                       if item.branch_id == branch_id)
+    entity_key = None
+    if realization.identity_ref is not None:
+        identity = request.source_catalog.identity(realization.identity_ref)
+        entity_key = EntityKeyProjection(identity.entity_kind, identity.key_id,
+            _identity_projection_components(builder, source_ref=realization.source_ref,
+                identity_ref=realization.identity_ref, logical_ref=target, branch_id=branch_id))
+        keys = tuple(component.field_id for component in entity_key.components)
+    else:
+        keys = (_occurrence_row_key(occurrence.id),)
+    cache_key = (branch_id, use.input_ref, target.token)
+    values = builder.reference_values.get(cache_key)
+    if values is None:
+        carrier = builder.occurrence_relations[branch_id, occurrence.id]
+        fields = tuple(_execution_field_id(builder, occurrence.source_ref,
+            request.source_catalog.field_binding(ref).field.id, occurrence_ref=occurrence.id)
+            for ref in binding.field_refs)
+        if binding.match_kind is ReferenceMatchKind.SINGLETON_VALUE:
+            condition = None
+        elif binding.match_kind is ReferenceMatchKind.DECLARED_CHOICE:
+            from fervis.lookup.available_sources import source_value_literal
+            selected_field = request.source_catalog.field_binding(binding.field_refs[0])
+            choice = source_value_literal(
+                value_ref=f"{branch_id}.reference.{use.input_ref}.choice",
+                value=binding.choice_value,
+                declared_type=selected_field.field.type,
+                label=selected_field.field.path,
+                source_ref=selected_field.source_ref,
+                proof_refs=(request.source_catalog.contract_snapshot.ref,
+                            selected_field.field.field_ref),
+            )
+            condition = BinaryExpression(
+                ExpressionBinaryOperator.EQUALS,
+                FieldRef(fields[0]),
+                ConstantRef(choice.id, "reference_descriptor@1", choice),
+            )
+        else:
+            literal = builder.inputs.expression_for_question_input(use.input_ref)
+            condition = _combine_boolean_expressions(tuple(FunctionExpression(
+                ExpressionFunction.REFERENCE_LITERAL_MATCH, (FieldRef(field), literal)) for field in fields),
+                operator=ExpressionBinaryOperator.OR)
+        prefix = f'{branch_id}.reference.{use.input_ref}.{target.local_id}'
+        filtered = (
+            Operation(prefix+'.match', FilterSpec(carrier,condition),prefix+'.candidates')
+            if condition is not None else None
+        )
+        guard_fields = keys if entity_key is not None else tuple(dict.fromkeys((*keys,*fields)))
+        guard = Operation(prefix+'.guard', ReferenceGuardSpec(
+            filtered.output_relation if filtered is not None else carrier,
+            guard_fields,use.input_ref,
+            entity_key=entity_key, occurrence_fields=keys if entity_key is None else ()),prefix+'.selected')
+        builder.operations.extend((filtered,guard) if filtered is not None else (guard,))
+        values = tuple(NodeOutputRef(guard.id,key) for key in keys)
+        builder.reference_values[cache_key] = values
+    comparisons = tuple(BinaryExpression(node.operator,FieldRef(key),value) for key,value in zip(keys,values,strict=True))
+    return _combine_boolean_expressions(comparisons, operator=(ExpressionBinaryOperator.AND
+        if node.operator is ExpressionBinaryOperator.EQUALS else ExpressionBinaryOperator.OR))
 
 
 def _compile_comparison(
@@ -3085,6 +3243,12 @@ def _compiled_field(
 ) -> str:
     realizations = builder.verified.binding_plan.fact_bindings.get(ref.token, ())
     matching = tuple(item for item in realizations if item.branch_id == branch_id)
+    if len(matching) == 1 and matching[0].kind is FactRealizationKind.ROW_OCCURRENCE:
+        term = builder.verified.request.index.term_by_ref[ref]
+        if not isinstance(term, FactTerm) or not isinstance(term.value_type, IdentifierType):
+            raise ValueError('Row occurrence realization requires a logical identity fact')
+        set_ref = builder.verified.request.index.fact_local_ref_by_local_id[term.value_type.set_ref]
+        return _set_scope_keys(builder,set_ref.token,branch_id)[0]
     if len(matching) != 1 or len(matching[0].field_refs) != 1:
         raise ValueError("semantic scalar requires one realized source field")
     [realization] = matching
@@ -3105,6 +3269,11 @@ def _compiled_field(
 def _result_key_fields(
     builder: _ProgramBuilder, ref, *, aggregate_fields
 ) -> tuple[str, ...]:
+    record = _result_record_fields(builder, ref)
+    if record:
+        set_ref = _record_set_ref(builder, ref)
+        assert set_ref is not None
+        return (*_set_scope_keys(builder, set_ref.token, _representative_branch(builder)), *record.values())
     identity = _result_entity_key(builder, ref)
     if identity is not None:
         return tuple(component.field_id for component in identity.components)
@@ -3131,8 +3300,44 @@ def _subject_grain_fields(
 ) -> tuple[str, ...]:
     identity = _result_entity_key(builder, index.subject_obligation.subject_set_ref)
     if identity is None:
-        raise ValueError("subject rows require a declared identity")
+        return _set_scope_keys(builder, index.subject_obligation.subject_set_ref.token, _representative_branch(builder))
     return tuple(component.field_id for component in identity.components)
+
+
+def _record_set_ref(builder: _ProgramBuilder, ref):
+    if not isinstance(ref, FactLocalRef):
+        return None
+    if ref.kind is FactLocalKind.SET:
+        return ref
+    if ref.kind is FactLocalKind.FACT:
+        values = builder.verified.binding_plan.fact_bindings.get(ref.token, ())
+        if values and all(value.kind is FactRealizationKind.ROW_OCCURRENCE for value in values):
+            term = builder.verified.request.index.term_by_ref[ref]
+            if not isinstance(term, FactTerm) or not isinstance(term.value_type, IdentifierType):
+                raise ValueError('Row occurrence realization requires a logical identity fact')
+            return builder.verified.request.index.fact_local_ref_by_local_id[term.value_type.set_ref]
+    return None
+
+
+def _result_record_fields(builder: _ProgramBuilder, ref) -> dict[str, str]:
+    ref = _record_set_ref(builder, ref)
+    if ref is None:
+        return {}
+    values = builder.verified.binding_plan.set_bindings.get(ref.token, ())
+    records = [value for value in values if value.record_fields]
+    if not records:
+        return {}
+    if len(records) != len(values):
+        raise ValueError('Output branches disagree on observed record representation')
+    projected = []
+    for value in records:
+        source = builder.verified.request.source_catalog.source(value.source_ref)
+        projected.append({name:_execution_field_id(builder,source.id,
+            next(field.id for field in source.fields if field.field_ref == field_ref),
+            logical_ref=ref,branch_id=value.branch_id) for name,field_ref in value.record_fields})
+    if any(item != projected[0] for item in projected[1:]):
+        raise ValueError('Observed record branches require a common property projection')
+    return projected[0]
 
 
 def _result_entity_key(
@@ -3152,6 +3357,9 @@ def _result_entity_key(
             return None
         realizations = builder.verified.binding_plan.fact_bindings.get(ref.token, ())
     else:
+        return None
+    if realizations and all(item.identity_ref is None for item in realizations) and (
+        ref.kind is FactLocalKind.SET or all(isinstance(item,FactRealization) and item.kind is FactRealizationKind.ROW_OCCURRENCE for item in realizations)):
         return None
     if not realizations or any(item.identity_ref is None for item in realizations):
         raise ValueError("identifier output requires one declared identity authority")

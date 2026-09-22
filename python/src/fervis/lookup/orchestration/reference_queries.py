@@ -2,37 +2,20 @@
 from dataclasses import replace
 
 from fervis.lookup.answer_program.model import RelationProgram
-from fervis.lookup.answer_program.values import BindingSet, FactValue
+from fervis.lookup.answer_program.values import BindingSet
 from fervis.lookup.available_sources import snapshot_source_catalog
 from fervis.lookup.clarification.model import GroundingIdentityResponse
 from fervis.lookup.clarification.context import clarification_response_ref
-from fervis.lookup.grounding.semantic import CanonicalInputValue
 from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
 from fervis.lookup.relational_sql.authoring import QueryUnavailable
 from fervis.lookup.relational_sql.catalog import build_query_view_catalog
-from fervis.lookup.relational_sql.compiler import _merge_parameter_declarations
+from fervis.lookup.answer_program.inputs import merge_parameter_declarations
 from fervis.lookup.relational_sql.parameters import query_parameter_menu, with_catalog_choices
-from fervis.lookup.relational_sql.reference_compilation import combine_reference_members
+from fervis.lookup.answer_program.reference_compilation import combine_reference_members
 from fervis.lookup.relational_sql.reference_planning import (
     ReferenceMeaning, ReferenceQueryPrompt, parse_reference_query, compile_reference_plan,
 )
 from fervis.model_io.turns import ModelTurnPurpose
-
-
-def reference_input_values(partitions, *, inputs):
-    """Certify the supplied text; entity identity remains an execution result."""
-    result = []
-    for partition in partitions:
-        if not partition.requires_identity_resolution:
-            continue
-        term = inputs[partition.input_ref]
-        arguments = dict(id=f'reference_text:{term.id}', known_input_id=term.id,
-                         proof_refs=(f'question_input:{term.id}',))
-        value = (FactValue.string_set(values=term.operand, **arguments)
-                 if isinstance(term.operand, tuple)
-                 else FactValue.named(text=term.operand, **arguments))
-        result.append(CanonicalInputValue(value.id, term.id, partition.use_refs, value, value.proof_refs))
-    return tuple(result)
 
 
 def plan_fact_references(*, fact, inputs, denotations, values, catalog, access, selected_slots,
@@ -118,7 +101,7 @@ def reference_prerequisites(references, bindings, *, argument_operations=()):
                 raise ValueError('Reference query bindings conflict with answer inputs')
             bound[item.parameter_id] = item
     return RelationProgram(
-        parameters=_merge_parameter_declarations(tuple(p for r in references for p in r.program.parameters)),
+        parameters=merge_parameter_declarations(tuple(p for r in references for p in r.program.parameters)),
         relations=tuple(item for r in references for item in r.program.relations),
         operations=(*tuple(item for r in references for item in r.program.operations), *argument_operations),
     ), BindingSet.from_bindings(tuple(bound.values()))

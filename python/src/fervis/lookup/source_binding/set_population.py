@@ -41,10 +41,20 @@ def population_request(realization):
     return replace(realization.request, canonical_values=(), catalog_values=())
 
 
+def _population_rows(values):
+    return tuple(
+        item for item in values
+        if not item.reference_proxy_field_ref and not item.address_parameter_ref
+    )
+
+
 def set_populations_schema(realization):
     request = population_request(realization)
     fields = {}
-    for ref, items in realization.set_bindings.items():
+    for ref, all_items in realization.set_bindings.items():
+        items = _population_rows(all_items)
+        if not items:
+            continue
         fields[ref] = {
             "type": "array",
             "minItems": len(items),
@@ -87,19 +97,27 @@ def apply_set_populations(payload, *, realization):
             raise ValueError("population failure must identify a logical set")
         return outcome
     parsed = SetPopulationsOutput.parse(payload)
-    if set(parsed.populations) != set(realization.set_bindings):
+    expected_refs = {
+        ref for ref, values in realization.set_bindings.items()
+        if _population_rows(values)
+    }
+    if set(parsed.populations) != expected_refs:
         raise ValueError("population decisions must cover the exact logical set scope")
     bindings = {}
     for ref, values in realization.set_bindings.items():
+        population_values = _population_rows(values)
+        if not population_values:
+            bindings[ref] = values
+            continue
         decisions = parsed.populations[ref]
-        if len(decisions) != len(values) or {item.branch_id for item in decisions} != {
-            item.branch_id for item in values
+        if len(decisions) != len(population_values) or {item.branch_id for item in decisions} != {
+            item.branch_id for item in population_values
         }:
             raise ValueError(
                 "population decisions must cover each selected branch exactly once"
             )
-        selected = []
-        for value in values:
+        selected = [item for item in values if item not in population_values]
+        for value in population_values:
             decision = next(
                 item for item in decisions if item.branch_id == value.branch_id
             )
@@ -173,9 +191,12 @@ class SetPopulationTurnPrompt(TurnPromptBase):
                                     "identity_ref": item.identity_ref,
                                 }
                                 for item in values
+                                if item in _population_rows(values)
                             ],
                         }
                         for ref, values in self.realization.set_bindings.items()
+                        if _population_rows(values)
+                        if any(not item.reference_proxy_field_ref for item in values)
                     ],
                     "source_contracts": [
                         {

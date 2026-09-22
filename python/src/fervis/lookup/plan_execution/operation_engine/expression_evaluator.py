@@ -318,6 +318,24 @@ def _function(
         return EvaluatedExpression(environment.row_number, "integer")
     if expression.function is ExpressionFunction.TEMPORAL_BUCKET:
         return _temporal_bucket(arguments)
+    if expression.function is ExpressionFunction.REFERENCE_LITERAL_MATCH:
+        from fervis.lookup.plan_execution.declared_values import declared_kind, DeclaredValueKind
+        from fervis.lookup.relation_catalog.parameter_values import (
+            parse_catalog_parameter_text, CatalogParameterValueError,
+        )
+        candidate, supplied = arguments
+        if declared_kind(candidate.value_type) in {DeclaredValueKind.RUNTIME, DeclaredValueKind.COLLECTION}:
+            raise RelationEngineError("Reference literal matching requires a declared scalar field")
+        if not isinstance(supplied.value, str):
+            raise RelationEngineError("Reference literal matching requires supplied text")
+        if candidate.value is None:
+            return EvaluatedExpression(False, "boolean")
+        try:
+            parsed = parse_catalog_parameter_text(supplied.value, type_name=candidate.value_type)
+        except CatalogParameterValueError:
+            return EvaluatedExpression(False, "boolean")
+        return EvaluatedExpression(
+            declared_equal(candidate.value, candidate.value_type, parsed, candidate.value_type), "boolean")
     assert_never(expression.function)
 
 

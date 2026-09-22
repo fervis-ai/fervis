@@ -77,7 +77,7 @@ def test_available_sources_are_a_bounded_projection_with_declared_relations() ->
     } == {relation.left_source_ref}
 
 
-def test_retained_read_fields_project_to_their_shallowest_row_sources() -> None:
+def test_retained_read_preserves_its_row_sources_for_realization() -> None:
     read = _nested_sales_read()
     row_sources = build_row_source_catalog(RelationCatalog(reads=(read,)))
     read_sources = tuple(
@@ -152,3 +152,18 @@ def _nested_sales_read() -> EndpointRead:
             ),
         ),
     )
+
+
+def test_summary_field_relevance_cannot_discard_the_counted_rows():
+    read = EndpointRead('inventory','inventory',row_paths=(
+        RowPath('envelope','',RowCardinality.ONE),
+        RowPath('records','records',RowCardinality.MANY),
+    ),fields=(CatalogField('total','integer',path='total',row_path_id='envelope'),
+              CatalogField('record_id','string',path='records.id',row_path_id='records')))
+    row_sources = build_row_source_catalog(RelationCatalog(reads=(read,)))
+    sources = tuple(source for source in row_sources.sources if source.read_id == read.id)
+    assessment = ReadRequirementAssessment('fact_1',read.id,tuple(source.id for source in sources),
+        read.id,('total',),'The endpoint contributes its collection and summary.',SemanticReadDecision.RETAIN)
+    available = build_available_source_catalog(row_sources,
+        read_eligibility=SemanticReadEligibilityResult((assessment,),()))
+    assert {source.row_path for source in available.sources} == {'','records'}

@@ -1,7 +1,7 @@
 from dataclasses import replace
 import pytest
 from fervis.lookup.relational_sql.compiler import compile_query_answer
-from fervis.lookup.relational_sql.reference_compilation import compile_reference_result,combine_reference_members
+from fervis.lookup.answer_program.reference_compilation import compile_reference_result,combine_reference_members
 from fervis.lookup.relational_sql.acquisition import ApiView
 from fervis.lookup.relational_sql.outputs import QueryOutput
 from fervis.lookup.relational_sql.results import ResultContract
@@ -45,7 +45,7 @@ def test_reference_collection_resolves_every_member_before_union(data_case):
             namespace=reference_id+'.', lookup_input_ref='i1')
         from fervis.lookup.canonical_data import EntityKeyValue,EntityKeyComponentValue
         selected=EntityKeyValue('sites','primary',(EntityKeyComponentValue('id',3),)) if data_case=='selected_member' and name=='Beta' else None
-        members.append(compile_reference_result(compiled,input_ref='i1',output_types={'key_id':'integer'},reference_id=reference_id,operand=name,selected_key=selected,selection_proof_ref='clarification_response:choose_beta' if selected else ''))
+        members.append(compile_reference_result(compiled.program,bindings=compiled.bindings,input_ref='i1',output_types={'key_id':'integer'},reference_id=reference_id,operand=name,selected_key=selected,selection_proof_ref='clarification_response:choose_beta' if selected else ''))
     combined=combine_reference_members(term,tuple(members))
     final=compile_query_answer(question='Count the referenced sites.',query='SELECT COUNT(*) AS total FROM reference_i1',
         views=(),relation_views=(combined.view,),prerequisites=combined.program,bindings=combined.bindings,catalog=catalog,

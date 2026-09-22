@@ -280,7 +280,10 @@ class SemanticSourceRealizationTurnPrompt(_SourcePromptBase):
                     "Sources describe logical row populations. complete_read_arguments supplies verified controls for retrieving every row with respect to that parameter. When union_identity_field_refs is nonempty, multiple arguments are alternative requests whose results the engine unions using that identity; one unrestricted HTTP request is not required. Population and invocation coverage are verified before execution.",
                     "request_parameters_supplied_by_complete_traversal are operational inputs obtained from other source rows by the execution engine. They do not require user-supplied identities. Select the resulting logical population on its declared row meaning and fields; its prerequisite reads are already part of the access plan.",
                     "Each logical set must have an explicit set_binding. Its mapping_basis explains why the selected rows or referenced identities represent that set's instance kind; structural link compatibility does not establish this meaning.",
-                    "Each association selects only relationship evidence connecting its already assigned endpoints. It cannot choose or change either endpoint population. Shared sets have exactly one assignment per branch.",
+                    "A reference-only related set may use a one-row reference_proxy variant when the selected source is not entity rows but exposes a scalar value identifying the described referent. Select reference_proxy_field_ref on that carrier. The association must compare this exact value with the consumer's observed field. The proxy cannot be used as the entity population or to supply its properties or output identity.",
+                    "A reference-only related set may use an address scope when its supplied literal fits a declared required path parameter on the candidate read. Select the shown address_parameter_ref and address_input_use_ref on that source, then realize its association on the same source with realization_ref equal to the source_ref and field_pairs=[]. This does not assert that candidate rows are the referenced entity; the next step must bind that exact input to the path parameter before the read. Do not use an address scope for negated or additional entity properties.",
+                    "For a returned set with anonymous rows, record_fields selects the observed properties to expose, each with a public name and a field_ref from that same carrier. Preserve occurrences; these fields do not certify a nominal identity. Select only needed properties. Use record_fields=[] for nominal identities and sets that are not returned.",
+                    "Each association connects its already assigned endpoints using declared relationship evidence, or realization_ref=null and explicit field_pairs comparing observed fields from the logical from/to sets. Observed equality asserts no uniqueness or foreign-key authority. Declared relationships require field_pairs=[]. It cannot choose or change either endpoint population. Shared sets have exactly one assignment per branch.",
                     "Each identity identifies its declared entity kind. A primary key identifies the source row; an entity-reference key identifies the referenced entity.",
                     "A fact used as a returned value or arithmetic operand requires a field_ref on its chosen rows. A referenced identity cannot supply scalar fields of the referenced entity.",
                     "For a qualification-only fact, bind a returned field only when it expresses that fact. When a request predicate supplies the qualification and no returned field expresses it, use an empty fact_bindings array. Do not attach another field as a placeholder for an invocation predicate. Input application and exact request predicates are bound in the next step.",
@@ -303,6 +306,19 @@ class SemanticSourceRealizationTurnPrompt(_SourcePromptBase):
                 )
             elif ref.kind.value == "set":
                 item["rows_refs"] = list(self.request.row_references_for_set(ref.token))
+                item["reference_proxy_options"] = {
+                    source: list(fields)
+                    for source, fields in self.request.reference_proxy_options_for_set(ref.token).items()
+                }
+                item["address_scope_options"] = [
+                    {
+                        "source_ref": option.source_ref,
+                        "parameter_ref": option.parameter_ref,
+                        "input_use_ref": option.input_use_ref,
+                        "declared_type": option.declared_type.value,
+                    }
+                    for option in self.request.address_scope_options_for_set(ref.token)
+                ]
         from fervis.lookup.source_binding.association_choices import (
             association_endpoints,
         )
@@ -380,6 +396,7 @@ class SemanticSourceBindingTurnPrompt(_SourcePromptBase):
                     {
                         "source_refs": list(value.source_refs),
                         "relation_evidence_ref": value.relation_evidence_ref,
+                        "field_pairs": list(value.field_pairs),
                     }
                     for value in values
                 ]

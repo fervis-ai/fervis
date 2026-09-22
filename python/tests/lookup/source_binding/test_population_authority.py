@@ -54,6 +54,7 @@ def test_unowned_lifecycle_classification_cannot_narrow_a_resource(resource, sta
                         "branch_id": branch,
                         "mapping_basis": resource,
                         "rows_ref": source.id,
+                        "record_fields": [],
                     }
                 ]
             },
@@ -199,6 +200,7 @@ def test_finite_filter_coverage_cannot_be_replaced_by_a_subset():
                         "branch_id": branch,
                         "mapping_basis": "Declared resource",
                         "rows_ref": request.row_references_for_set(set_ref)[0],
+                        "record_fields": [],
                     }
                 ]
             },

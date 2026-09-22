@@ -17,7 +17,6 @@ from fervis.lookup.question_contract import (
     FactLocalKind,
     FactLocalRef,
     FactTerm,
-    SubjectRows,
 )
 from fervis.lookup.question_contract.analysis import infer_expression_types
 from fervis.lookup.relation_catalog.row_sources import (
@@ -86,6 +85,23 @@ def verify_source_strategy(
             plan.fact_bindings,
             plan.association_bindings,
         )
+        from .observed_associations import validate_reference_proxy_associations
+        validate_reference_proxy_associations(
+            request, plan.set_bindings, plan.association_bindings
+        )
+    except ValueError:
+        return _failure(SourceStrategyVerificationFailureReason.INVALID_BINDING)
+    from .reference_bindings import validate_reference_bindings
+    try:
+        from .reference_bindings import validate_address_scope_bindings
+        validate_address_scope_bindings(request, plan.set_bindings)
+        from .reference_bindings import validated_address_applications
+        validated_address_applications(
+            request, plan.set_bindings, plan.invocation_applications
+        )
+        if plan.reference_bindings != request.reference_bindings:
+            raise ValueError('Reference bindings differ from their realized request')
+        validate_reference_bindings(request, plan.set_bindings, plan.reference_bindings)
     except ValueError:
         return _failure(SourceStrategyVerificationFailureReason.INVALID_BINDING)
     if plan.strategy != request.strategy:
@@ -138,17 +154,20 @@ def _verify_set_identities(
     *,
     request: SemanticSourceBindingRequest,
 ) -> SourceStrategyVerificationFailure | None:
+    from .record_outputs import validate_record_fields
+    record_failed: list[str] = []
+    for set_ref, set_realizations in plan.set_bindings.items():
+        for realization in set_realizations:
+            try:
+                validate_record_fields(request,set_ref=set_ref,source_ref=realization.source_ref,
+                    identity_ref=realization.identity_ref,fields=realization.record_fields)
+                if realization.identity_ref is not None:
+                    identity = request.source_catalog.identity(realization.identity_ref)
+                    if identity.source_ref != realization.source_ref or realization.identity_field_refs != identity.field_refs:
+                        raise ValueError('Nominal set realization must preserve its complete declared key')
+            except ValueError:
+                record_failed.append(set_ref)
     failed: list[str] = []
-    if isinstance(request.index.result_grain, SubjectRows):
-        subject_ref = request.index.subject_obligation.subject_set_ref.token
-        for realization in plan.set_bindings.get(subject_ref, ()):
-            if realization.identity_ref is None or not realization.identity_field_refs:
-                failed.append(subject_ref)
-        if failed:
-            return _failure(
-                SourceStrategyVerificationFailureReason.INCOMPLETE_SUBJECT_IDENTITY,
-                *failed,
-            )
     for fact_ref, realizations in plan.fact_bindings.items():
         fact = request.index.term_by_ref[FactLocalRef.from_token(fact_ref)]
         if not isinstance(fact, FactTerm) or not isinstance(
@@ -160,6 +179,15 @@ def _verify_set_identities(
         ].token
         set_realizations = plan.set_bindings.get(identified_set_ref, ())
         for fact_realization in realizations:
+            from .model import FactRealizationKind
+            from .record_outputs import allows_row_occurrence_identity
+            if fact_realization.kind is FactRealizationKind.ROW_OCCURRENCE:
+                owners = [item for item in set_realizations if item.branch_id == fact_realization.branch_id]
+                if (not allows_row_occurrence_identity(request, fact_ref) or len(owners) != 1
+                        or owners[0].source_ref != fact_realization.source_ref or owners[0].identity_ref is not None
+                        or fact_realization.identity_ref is not None or fact_realization.field_refs):
+                    failed.extend((fact_ref, identified_set_ref))
+                continue
             fact_contract = _identity_contract(
                 fact_realization.identity_ref, request=request
             )
@@ -179,6 +207,8 @@ def _verify_set_identities(
             SourceStrategyVerificationFailureReason.INCONSISTENT_IDENTIFIER,
             *failed,
         )
+    if record_failed:
+        return _failure(SourceStrategyVerificationFailureReason.INVALID_BINDING, *record_failed)
     return None
 
 
@@ -321,6 +351,37 @@ def _verify_associations(
     for requirement_ref, realizations in plan.association_bindings.items():
         for realization in realizations:
             branch = branches[realization.branch_id]
+            if realization.kind is AssociationRealizationKind.OBSERVED_EQUALITY:
+                from .observed_associations import observed_pairs
+
+                try:
+                    sources, _ = observed_pairs(request, association_ref=requirement_ref,
+                        branch_id=realization.branch_id, set_bindings=plan.set_bindings,
+                        field_pairs=realization.field_pairs)
+                    if (sources != realization.source_refs
+                            or realization.relation_evidence_ref is not None
+                            or realization.reference_from_set_ref is not None):
+                        failed.append(requirement_ref)
+                except ValueError:
+                    failed.append(requirement_ref)
+            elif realization.kind is AssociationRealizationKind.ADDRESS_SCOPE:
+                from .association_choices import association_endpoints
+                endpoints = association_endpoints(request, requirement_ref)
+                bound = tuple(
+                    item for ref in endpoints
+                    for item in plan.set_bindings.get(ref, ())
+                    if item.branch_id == realization.branch_id
+                )
+                if (
+                    len(bound) != 2
+                    or len({item.source_ref for item in bound}) != 1
+                    or realization.source_refs != (bound[0].source_ref,)
+                    or sum(bool(item.address_parameter_ref) for item in bound) != 1
+                    or realization.relation_evidence_ref is not None
+                ):
+                    failed.append(requirement_ref)
+            elif realization.field_pairs:
+                failed.append(requirement_ref)
             if not set(realization.source_refs) <= set(branch.source_refs):
                 failed.append(requirement_ref)
             if (

@@ -23,6 +23,7 @@ from fervis.lookup.question_contract.model import (
     Comparison,
     Coverage,
     FirstRankWithTies,
+    FactTerm,
     NullCheck,
     Quantify,
     RelatedRow,
@@ -65,6 +66,7 @@ def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
             f"{len(parsed.contract.requested_facts)}, expected {expected_count}"
         ]
     errors: list[str] = []
+    errors.extend(_input_property_scope_errors(parsed, context))
     expected_interpretation = context.get("expected_instance_interpretation")
     if expected_interpretation is not None:
         interpretations = [
@@ -504,3 +506,48 @@ def _expression_kind(value: object) -> str:
 
 
 __all__ = ["validate"]
+
+
+def _input_property_scope_errors(
+    parsed: ParsedSemanticQuestionContract, context: dict[str, Any]
+) -> list[str]:
+    """Check carrier ownership and correlation, independently of local IDs."""
+    expected = context.get("input_property_scopes", {})
+    errors: list[str] = []
+    checked: set[str] = set()
+    for index in parsed.semantic_indexes:
+        associations = {term.id for term in index.requested_fact.associations}
+        for use in index.input_use_sites:
+            if use.input_ref not in expected or use.expression_ref is None:
+                continue
+            node = index.expression_by_ref[use.expression_ref]
+            if not isinstance(node, Comparison):
+                errors.append(f"{use.input_ref} is not used in the expected property comparison")
+                continue
+            other = node.left_ref if node.right_ref == use.input_ref else node.right_ref
+            ref = index.fact_local_ref_by_local_id.get(other)
+            fact = index.term_by_ref.get(ref)
+            if not isinstance(fact, FactTerm):
+                errors.append(f"{use.input_ref} lacks its observed property operand")
+                continue
+            candidate = fact.owner_ref == index.requested_fact.subject.set_ref
+            scope = "candidate" if candidate else "related"
+            if scope != expected[use.input_ref]:
+                errors.append(
+                    f"{use.input_ref} property belongs to {scope} scope, "
+                    f"expected {expected[use.input_ref]}"
+                )
+            if not candidate and fact.owner_ref not in associations:
+                correlated = any(
+                    isinstance(expression, Quantify)
+                    and expression.over_set_ref == fact.owner_ref
+                    and bool(expression.association_refs)
+                    and use.expression_ref in index.transitive_dependencies_by_ref[expression_ref]
+                    for expression_ref, expression in index.expression_by_ref.items()
+                )
+                if not correlated:
+                    errors.append(f"{use.input_ref} related property lacks a correlated quantifier")
+            checked.add(use.input_ref)
+    if set(expected) != checked:
+        errors.append("Expected property-input ownership checks are not fully covered")
+    return errors

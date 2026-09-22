@@ -83,11 +83,20 @@ def build_row_source_catalog(
 def build_api_row_source_catalog(catalog: RelationCatalog) -> RowSourceCatalog:
     """Project only the API reads in one catalog-selection batch."""
 
+    from fervis.lookup.source_reads.pagination import bound_pagination_read, pagination_field_is_available
+    def logical_read(read):
+        read = bound_pagination_read(read)
+        binding = read.pagination_binding
+        if binding is None:
+            return read
+        return replace(read,
+            params=tuple(param for param in read.params if param.name not in {binding.position_query_param,binding.page_size_query_param}),
+            fields=tuple(field for field in read.fields if pagination_field_is_available(field.path,binding)))
     return RowSourceCatalog(
         sources=tuple(
             _with_declared_entity_kind(source)
             for read in catalog.reads
-            for source in _api_row_sources(read, catalog=catalog)
+            for source in _api_row_sources(logical_read(read), catalog=catalog)
         )
     )
 
@@ -252,6 +261,7 @@ def _api_row_sources_for_path(
             label=_source_label(label, params=read.params, defaults=source_defaults),
             read_id=read.id,
             endpoint_name=read.endpoint_name,
+            pagination_binding=read.pagination_binding,
             resource_names=read.resource_names,
             description=_source_description(
                 read,

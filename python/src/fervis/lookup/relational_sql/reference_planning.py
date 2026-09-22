@@ -6,7 +6,7 @@ from fervis.lookup.semantic_types import SourceOrigin
 from .authoring import QueryAnswerPrompt, QueryUnavailable, parse_query_answer, invocation_tables
 from .binding import bind_query_answer
 from .compiler import compile_query_answer
-from .reference_compilation import compile_reference_result
+from fervis.lookup.answer_program.reference_compilation import compile_reference_result
 
 
 @dataclass(frozen=True)
@@ -293,7 +293,8 @@ def compile_reference_plan(
         expected_input_refs=meaning.input_refs,
     )
     return compile_reference_result(
-        compiled,
+        compiled.program,
+        bindings=compiled.bindings,
         input_ref=meaning.reference_input_ref,
         output_types=authored.output_types,
         reference_id=reference_id,

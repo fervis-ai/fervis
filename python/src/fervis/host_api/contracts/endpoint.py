@@ -467,6 +467,7 @@ class EndpointContract:
     admin_access: bool = True
     public_access: bool = False
     pagination: PaginationContract | None = None
+    complete_single_response: bool = False
     query_schema_source: str = "missing"
     response_schema_source: str = "missing"
     response_cardinality: str = "unknown"
@@ -482,6 +483,8 @@ class EndpointContract:
     catalog_endpoint: CatalogEndpointContract | None = None
 
     def __post_init__(self) -> None:
+        if self.complete_single_response and self.pagination is not None:
+            raise ValueError("complete single response conflicts with pagination")
         key_identities = tuple(
             (key.entity_kind, key.key_id) for key in self.candidate_keys
         )
@@ -541,6 +544,7 @@ class EndpointContract:
             "pagination": (
                 None if self.pagination is None else self.pagination.to_public_dict()
             ),
+            "completeSingleResponse": self.complete_single_response,
             "schemaSources": {
                 "query": self.query_schema_source,
                 "response": self.response_schema_source,

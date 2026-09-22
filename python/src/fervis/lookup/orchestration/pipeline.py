@@ -103,9 +103,9 @@ from .semantic_compilation import (
     SemanticCompilationRequest,
     SemanticCompilationSuccess,
     SemanticCompilationTurnError,
-    compile_semantic_question,
     resolve_semantic_continuation_arguments,
 )
+from .logical_compilation import compile_logical_question
 from fervis.lookup.grounding import IdentityExecutionClarification
 
 
@@ -286,7 +286,7 @@ def _run_semantic_compile_question(
         run_id=state.request.run_id, sink=state.ports.lineage_step_sink
     )
     try:
-        outcome = compile_semantic_question(
+        outcome = compile_logical_question(
             replace(
                 _semantic_compilation_request(state),
                 representation_observer=inspection.observe,

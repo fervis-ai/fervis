@@ -2,7 +2,7 @@ from dataclasses import replace
 import pytest
 from fervis.lookup.answer_program.model import RelationProgram
 from fervis.lookup.answer_program.relations import Relation,RelationSource,SourceKind,RelationField,FieldBindingRole,EndpointParamBinding
-from fervis.lookup.answer_program.operations import Operation,SqlQuerySpec,SqlRelationInput,SqlColumnBinding,SqlOutputField
+from fervis.lookup.answer_program.operations import Operation,ReferenceGuardSpec,SqlQuerySpec,SqlRelationInput,SqlColumnBinding,SqlOutputField
 from fervis.lookup.answer_program.result_projection import EntityKeyProjection,EntityKeyProjectionComponent
 from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.api_reads import ApiReadSession
@@ -28,12 +28,14 @@ def reference_program():
         argument_relation_id='selected_site',param_bindings=(EndpointParamBinding('site_id',FieldRef('id')),)),())
     reference=Operation('reference',SqlQuerySpec('SELECT id FROM sites WHERE is_default',
         (SqlRelationInput('sites','sites',tuple(SqlColumnBinding(path,field) for path,field in fields.items())),),
-        (SqlOutputField('id','integer'),),scalar=True,
+        (SqlOutputField('id','integer'),),scalar=False,
         entity_keys=(EntityKeyProjection('sites','primary',(EntityKeyProjectionComponent('id','id'),)),),
-        reference_input_ref='default_site'),output_relation='selected_site')
+        ),output_relation='reference_rows')
+    guard=Operation('reference_guard',ReferenceGuardSpec('reference_rows',('id',),'default_site',
+        entity_key=reference.spec.entity_keys[0]),output_relation='selected_site')
     answer=Operation('answer',SqlQuerySpec('SELECT COUNT(*) AS total FROM observations',
         (SqlRelationInput('observations','observations',()),),(SqlOutputField('total','integer'),),scalar=True),output_relation='answer_rows')
-    return RelationProgram(relations=(root,child),operations=(reference,answer)),catalog
+    return RelationProgram(relations=(root,child),operations=(reference,guard,answer)),catalog
 
 
 class Port:
@@ -74,14 +76,15 @@ def test_unresolved_reference_prevents_all_dependent_requests(rows,reason):
 @pytest.mark.parametrize('dependent_api',[False,True])
 def test_reference_subplan_is_part_of_the_persisted_answer_program(dependent_api):
     from fervis.lookup.relational_sql.compiler import compile_query_answer
-    from fervis.lookup.relational_sql.acquisition import ApiView,RelationView
+    from fervis.lookup.relational_sql.acquisition import ApiView
+    from fervis.lookup.answer_program.relation_views import RelationView
     from fervis.lookup.relational_sql.results import ResultContract
     from fervis.lookup.contract_codec import canonical_answer_program_json,decode_answer_program
     from fervis.lookup.answer_program.invocation import invoke_answer_program,RuntimePorts
     from fervis.lookup.answer_program.instantiation import ExecutionEnvironment
     from fervis.lookup.memory.projection import LookupMemory
     base,catalog=reference_program()
-    prelude=RelationProgram(relations=(base.relations[0],),operations=(base.operations[0],))
+    prelude=RelationProgram(relations=(base.relations[0],),operations=base.operations[:2])
     source=next(s for s in build_api_row_source_catalog(catalog).sources if s.read_id=='observations')
     views=(ApiView('observations',source.id,{}, {'site_id':FieldRef('id')},argument_relation_id='selected_site'),) if dependent_api else ()
     compiled=compile_query_answer(question='Evaluate the current selected site.',
@@ -89,7 +92,7 @@ def test_reference_subplan_is_part_of_the_persisted_answer_program(dependent_api
         views=views,relation_views=() if dependent_api else (RelationView('selected','selected_site',{'id':'id'}),),
         prerequisites=prelude,catalog=catalog,output_types={'value':'integer'},result_contract=ResultContract('scalar'))
     program=decode_answer_program(canonical_answer_program_json(compiled.program))
-    assert any(op.spec.reference_input_ref=='default_site' for op in program.operations if isinstance(op.spec,SqlQuerySpec))
+    assert any(op.spec.reference_input_ref=='default_site' for op in program.operations if isinstance(op.spec,ReferenceGuardSpec))
     for selected in (1,2):
         port=Port([{'id':i,'is_default':i==selected} for i in (1,2,3)])
         execution=invoke_answer_program(program=program,bindings=compiled.bindings,
@@ -101,7 +104,7 @@ def test_reference_subplan_is_part_of_the_persisted_answer_program(dependent_api
 
 def test_compiled_reference_retains_original_input_provenance_in_the_final_query():
     from fervis.lookup.relational_sql.compiler import compile_query_answer
-    from fervis.lookup.relational_sql.reference_compilation import compile_reference_result
+    from fervis.lookup.answer_program.reference_compilation import compile_reference_result
     from fervis.lookup.relational_sql.acquisition import ApiView
     from fervis.lookup.relational_sql.outputs import QueryOutput
     from fervis.lookup.relational_sql.results import ResultContract
@@ -129,7 +132,7 @@ def test_compiled_reference_retains_original_input_provenance_in_the_final_query
         bindings=menu.program_inputs.bindings,inputs=inputs,input_denotations=denotations,
         public_outputs=(QueryOutput('site',identity=EntityKeyProjection('sites','primary',(EntityKeyProjectionComponent('id','site_key'),))),),
         namespace='lookup.', lookup_input_ref='i1')
-    reference=compile_reference_result(selected,input_ref='i1',output_types={'site_key':'integer'})
+    reference=compile_reference_result(selected.program,bindings=selected.bindings,input_ref='i1',output_types={'site_key':'integer'})
     assert reference.input_refs==('i1',)
     final=compile_query_answer(question='Return the identified site ID.',query='SELECT id AS value FROM reference_i1',
         views=(),relation_views=(reference.view,),prerequisites=reference.program,catalog=catalog,
@@ -146,9 +149,9 @@ def test_compiled_reference_retains_original_input_provenance_in_the_final_query
 
 def test_reference_runtime_failure_retains_its_collection_member():
     program,catalog=reference_program()
-    reference=program.operations[0]
-    program=replace(program,operations=(replace(reference,spec=replace(reference.spec,reference_operand='Beta')),
-        *program.operations[1:]))
+    reference=program.operations[1]
+    program=replace(program,operations=(program.operations[0],replace(reference,spec=replace(reference.spec,reference_operand='Beta')),
+        *program.operations[2:]))
     port=Port([{'id':1,'is_default':False}])
     result=execute_access_program(program,catalog=catalog,read_session=ApiReadSession(port))
     assert result.engine_output.issue.reference.operand=='Beta'
@@ -180,7 +183,7 @@ def test_persisted_reference_truncation_is_rejected_before_reads(nested):
     if nested:
         candidate = replace(reference, id='candidate', output_relation='candidate_rows',
             spec=replace(reference.spec, query='SELECT id FROM sites WHERE is_default LIMIT 1',
-                         scalar=False, reference_input_ref=''))
+                         scalar=False))
         reference = replace(reference, spec=replace(reference.spec, query='SELECT id FROM candidates',
             inputs=(SqlRelationInput('candidates','candidate_rows',(SqlColumnBinding('id','id'),)),)))
         program = replace(program, operations=(candidate, reference, *program.operations[1:]))
@@ -193,3 +196,66 @@ def test_persisted_reference_truncation_is_rejected_before_reads(nested):
     with pytest.raises(VerificationError, match='truncated'):
         execute_access_program(program, catalog=catalog, read_session=ApiReadSession(port))
     assert port.calls == []
+
+
+def test_record_guard_rejects_computed_candidates_before_any_read():
+    from fervis.lookup.plan_execution.errors import VerificationError
+    program,catalog=reference_program()
+    candidate=replace(program.operations[0],spec=replace(program.operations[0].spec,
+        query='SELECT 1 AS id FROM sites',entity_keys=()))
+    guard=replace(program.operations[1],spec=replace(program.operations[1].spec,entity_key=None))
+    program=replace(program,relations=program.relations[:1],operations=(candidate,guard))
+    port=Port([{'id':1,'is_default':True}])
+    with pytest.raises(VerificationError,match='observed'):
+        execute_access_program(program,catalog=catalog,read_session=ApiReadSession(port))
+    assert port.calls==[]
+
+
+def test_typed_limit_cannot_hide_competing_reference_candidates():
+    from fervis.lookup.answer_program.operations import OrderSpec,SortKey,SortDirection,Take
+    from fervis.lookup.relational_sql.compiler import _constant
+    from fervis.lookup.plan_execution.errors import VerificationError
+    program,catalog=reference_program()
+    order=Operation('truncate',OrderSpec('reference_rows',(SortKey('id',SortDirection.ASC),),Take(_constant('one',1))),output_relation='limited')
+    guard=replace(program.operations[1],spec=replace(program.operations[1].spec,input_relation='limited'))
+    program=replace(program,operations=(program.operations[0],order,guard,*program.operations[2:]))
+    port=Port([{'id':1,'is_default':True},{'id':2,'is_default':True}])
+    with pytest.raises(VerificationError,match='truncat'):
+        execute_access_program(program,catalog=catalog,read_session=ApiReadSession(port))
+    assert port.calls==[]
+
+
+def test_guard_cannot_relabel_the_observed_identity_authority_before_reads():
+    from fervis.lookup.plan_execution.errors import VerificationError
+    program,catalog=reference_program()
+    guard=program.operations[1]
+    changed=replace(guard,spec=replace(guard.spec,entity_key=replace(guard.spec.entity_key,entity_kind='unrelated')))
+    program=replace(program,relations=program.relations[:1],operations=(program.operations[0],changed))
+    port=Port([{'id':1,'is_default':True}])
+    with pytest.raises(VerificationError,match='identity authority'):
+        execute_access_program(program,catalog=catalog,read_session=ApiReadSession(port))
+    assert port.calls==[]
+
+
+def test_nominal_guard_preserves_its_grain_for_a_typed_anti_join():
+    from fervis.lookup.answer_program.operations import AntiJoinSpec,RelationRoleRef,RelationRole,JoinKey,NamedExpression
+    from fervis.lookup.answer_program.model import AnswerProgram
+    from fervis.lookup.contract_codec import canonical_answer_program_json,decode_answer_program
+    base,catalog=reference_program()
+    root=base.relations[0]
+    key_field=next(column.field_id for column in base.operations[0].spec.inputs[0].columns if column.name=='id')
+    root=replace(root,fields=tuple(replace(field,roles=(FieldBindingRole.IDENTITY,FieldBindingRole.OUTPUT))
+        if field.field_id==key_field else field for field in root.fields))
+    observed=replace(root,id='observed')
+    guard=Operation('guard',ReferenceGuardSpec(root.id,(key_field,),'i1',entity_key=EntityKeyProjection(
+        'sites','primary',(EntityKeyProjectionComponent('id',key_field),))),output_relation='selected')
+    anti=Operation('anti',AntiJoinSpec(
+        RelationRoleRef('selected',RelationRole.ANTI_JOIN_CANDIDATE,(key_field,)),
+        RelationRoleRef('observed',RelationRole.ANTI_JOIN_OBSERVED,(key_field,)),
+        (JoinKey(key_field,key_field),),(NamedExpression(key_field,FieldRef(key_field)),)),output_relation='unmatched')
+    program=decode_answer_program(canonical_answer_program_json(AnswerProgram(relations=(root,observed),operations=(guard,anti))))
+    port=Port([{'id':1,'is_default':True}])
+    result=execute_access_program(program,catalog=catalog,read_session=ApiReadSession(port))
+    assert result.engine_output.issue is None
+    assert result.engine_output.relation('selected').grain_keys==(key_field,)
+    assert result.engine_output.relation('unmatched').rows==()

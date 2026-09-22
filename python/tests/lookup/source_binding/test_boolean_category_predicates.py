@@ -107,6 +107,7 @@ def test_text_category_uses_boolean_predicate_without_casting_its_raw_value():
                     "branch_id": branch,
                     "mapping_basis": "Record population.",
                     "rows_ref": source.id,
+                    "record_fields": [],
                 }
             ]
         },

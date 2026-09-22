@@ -187,11 +187,14 @@ def _cached_api_read(
         endpoint_name=endpoint_name,
         catalog_endpoint=catalog_endpoint,
     )
+    if row_source.pagination_binding is not None:
+        cache_key = (cache_key[0], canonical_runtime_json({"arguments":args,"pagination":row_source.pagination_binding.to_public_dict()}))
     result = request_cache.get(cache_key)
     if result is None:
         try:
             result = data_access_port.read(
-                endpoint_name=endpoint_name, args=deepcopy(args)
+                endpoint_name=endpoint_name, args=deepcopy(args),
+                **({"pagination_binding":row_source.pagination_binding} if row_source.pagination_binding is not None else {}),
             )
         except Exception as exc:
             source_read_index += 1

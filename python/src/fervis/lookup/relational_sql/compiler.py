@@ -22,7 +22,9 @@ from fervis.lookup.question_contract import (
 from fervis.lookup.semantic_types import SourceOrigin, SourceOriginKind
 from fervis.lookup.contract_codec import canonical_contract_fingerprint
 from fervis.lookup.source_reads.access_model import ReadAccessCatalog
-from .acquisition import ApiView, RelationView, compile_api_views
+from .acquisition import ApiView, compile_api_views
+from fervis.lookup.answer_program.relation_views import RelationView
+from fervis.lookup.answer_program.inputs import merge_parameter_declarations
 from .execution import SqlTable, QueryValidationError, _validate
 from .results import ResultContract
 from .outputs import QueryOutput
@@ -75,7 +77,7 @@ def compile_query_answer(*, question: str, query: str, views: tuple[ApiView, ...
         for view in views if view.name in names)
     physical = compile_api_views(tuple(replace(view,name=identifier(view.name)) for view in selected),catalog=catalog,access=access)
     if prerequisites is not None:
-        parameters=_merge_parameter_declarations((*prerequisites.parameters,*parameters))
+        parameters=merge_parameter_declarations((*prerequisites.parameters,*parameters))
         physical=replace(physical,relations=(*prerequisites.relations,*physical.relations),
             operations=(*prerequisites.operations,*physical.operations))
     sql_inputs = tuple(SqlRelationInput(view.name,identifier(view.name),
@@ -160,7 +162,7 @@ def combine_query_answers(answers: tuple[CompiledQueryAnswer, ...], *, catalog) 
     if not answers:
         raise QueryValidationError('At least one requested answer is required')
     from fervis.lookup.answer_program.model import ProgramCompatibility
-    declarations = {item.id:item for item in _merge_parameter_declarations(tuple(
+    declarations = {item.id:item for item in merge_parameter_declarations(tuple(
         item for answer in answers for item in answer.program.parameters))}
     bindings: dict[str, ParameterBinding] = {}
     inputs, denotations = {}, {}
@@ -194,20 +196,3 @@ def combine_query_answers(answers: tuple[CompiledQueryAnswer, ...], *, catalog) 
     program,bound=compile_answer_program(program,question_contract=contract,catalog=catalog,
         bindings=BindingSet.from_bindings(tuple(bindings.values())))
     return CompiledQueryAnswer(program,bound,contract)
-
-
-def _merge_parameter_declarations(items):
-    declarations = {}
-    for item in items:
-        prior = declarations.get(item.id)
-        if prior is not None:
-            fixed_values = {value for value in (prior.fixed_value_fingerprint,item.fixed_value_fingerprint) if value}
-            if len(fixed_values)>1:
-                raise QueryValidationError('Shared query parameter fixed values conflict')
-            fixed_value = next(iter(fixed_values),'')
-            item = replace(item,fixed_value_fingerprint=fixed_value)
-            if replace(prior, input_use_refs=item.input_use_refs,fixed_value_fingerprint=fixed_value) != item:
-                raise QueryValidationError('Shared query parameter declarations conflict')
-            item = replace(item, input_use_refs=tuple(sorted(set(prior.input_use_refs) | set(item.input_use_refs))))
-        declarations[item.id] = item
-    return tuple(declarations.values())

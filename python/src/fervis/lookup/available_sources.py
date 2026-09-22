@@ -298,23 +298,15 @@ def build_available_source_catalog(
     read_access: ReadAccessCatalog = ReadAccessCatalog(),
     requested_fact_id: str | None = None,
 ) -> AvailableSourceCatalog:
-    retained_by_assessment = tuple(
-        (assessment, source_refs)
+    # Read eligibility preserves candidates. Exact row population and field
+    # selection belong to source realization; field relevance cannot stand in
+    # for a decision about which row sets remain available (COUNT needs no field).
+    retained_refs = {
+        source_ref
         for assessment in read_eligibility.read_assessments
         if requested_fact_id is None or assessment.requested_fact_id == requested_fact_id
         if assessment.decision is SemanticReadDecision.RETAIN
-        for source_refs in (
-            _retained_row_source_refs(
-                assessment.source_refs,
-                retained_field_refs=frozenset(assessment.relevant_field_refs),
-                row_sources=row_sources,
-            ),
-        )
-    )
-    retained_refs = {
-        source_ref
-        for _assessment, source_refs in retained_by_assessment
-        for source_ref in source_refs
+        for source_ref in assessment.source_refs
     }
     known_refs = {source.id for source in row_sources.sources}
     if not retained_refs <= known_refs:
@@ -348,41 +340,6 @@ def snapshot_source_catalog(
         relation_evidence=relations,
         read_access=read_access,
     )
-
-
-def _retained_row_source_refs(
-    source_refs: tuple[str, ...],
-    *,
-    retained_field_refs: frozenset[str],
-    row_sources: RowSourceCatalog,
-) -> tuple[str, ...]:
-    """Project each retained field onto its shallowest containing row set."""
-
-    if not retained_field_refs or len(source_refs) < 2:
-        return source_refs
-    sources = tuple(row_sources.source(source_ref) for source_ref in source_refs)
-    selected: set[str] = set()
-    for field_ref in retained_field_refs:
-        containing = tuple(
-            source
-            for source in sources
-            if field_ref in {field.field_ref for field in source.fields}
-        )
-        if not containing:
-            continue
-        shallowest_depth = min(_row_path_depth(source) for source in containing)
-        selected.update(
-            source.id
-            for source in containing
-            if _row_path_depth(source) == shallowest_depth
-        )
-    return (
-        tuple(source.id for source in sources if source.id in selected) or source_refs
-    )
-
-
-def _row_path_depth(source: RowSource) -> int:
-    return len(tuple(part for part in source.row_path.split(".") if part))
 
 
 __all__ = [

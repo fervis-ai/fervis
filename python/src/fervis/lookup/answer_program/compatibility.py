@@ -141,6 +141,8 @@ def verify_program_compatibility(
     ):
         raise VerificationError("incompatible_function_semantics")
 
+    from fervis.lookup.source_reads.pagination import pagination_catalog_for_program
+    catalog = pagination_catalog_for_program(program, catalog)
     row_sources = build_row_source_catalog(
         catalog,
         memory_relations=memory_relations,

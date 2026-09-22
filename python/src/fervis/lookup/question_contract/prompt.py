@@ -471,6 +471,10 @@ class SemanticQuestionFrameTurnPrompt(TurnPromptBase):
         self, builder: TurnPromptBuilder
     ) -> tuple[PromptSection, ...]:
         return (
+            builder.instruction_block("Explicit identifier operands", (
+                "A definite noun phrase may contain an explicitly supplied identifying value. When the user gives an entity's ID, code, UUID, or numbered identifier, choose identity_value.kind=literal and copy only the supplied value as identity_value.value, even when the surrounding phrase describes which entity it is.",
+                "Choose identity_value.kind=description only when the identifying name, code, or ID value is absent and must be determined from a role or relationship in data. A decimal number can be an ID when the question labels it as such; its numeric form does not turn the value into a role description.",
+            )),
             builder.text_section(
                 "Question frame rules:", SEMANTIC_QUESTION_FRAME_INSTRUCTIONS
             ),

@@ -17,6 +17,62 @@ from fervis.lookup.source_binding.model import (
 )
 
 
+def _record_fields_schema(request, set_ref):
+    from .record_outputs import is_record_output_set
+    from fervis.lookup.available_sources import SourceFieldBinding
+    is_output = is_record_output_set(request, set_ref)
+    rows = set(request.row_references_for_set(set_ref))
+    anonymous = tuple(source for source in request.source_catalog.sources if source.id in rows)
+    fields = sorted({SourceFieldBinding(source.id,field).ref for source in anonymous for field in source.fields}) if is_output else []
+    if not fields:
+        return {"type":"array","maxItems":0,"items":_closed_object({})}
+    return {"type":"array","minItems":1 if rows == {source.id for source in anonymous} else 0,
+        "items":output.RecordFieldRealizationOutput.schema({"name":_text(),"field_ref":{"enum":fields}})}
+
+
+def _set_realization_schema(request, set_ref, branch_ids):
+    available = tuple(request.row_references_for_set(set_ref))
+    proxies = request.reference_proxy_options_for_set(set_ref)
+    addresses = request.address_scope_options_for_set(set_ref)
+    address_sources = {item.source_ref for item in addresses}
+    normal = tuple(ref for ref in available if ref not in proxies and ref not in address_sources)
+    common = {
+        "branch_id": {"enum": list(branch_ids)},
+        "mapping_basis": _text(),
+    }
+    variants = []
+    if normal:
+        variants.append(output.SetRealizationOutput.schema({
+            **common,
+            "rows_ref": {"enum": list(normal)},
+            "record_fields": _record_fields_schema(request, set_ref),
+        }))
+    for source_ref, fields in proxies.items():
+        proxy_variant = output.SetRealizationOutput.schema({
+            **common,
+            "rows_ref": {"enum": [source_ref]},
+            "record_fields": {"type": "array", "maxItems": 0, "items": _closed_object({})},
+            "reference_proxy_field_ref": {"enum": list(fields)},
+        })
+        proxy_variant["required"] = list(proxy_variant["properties"])
+        variants.append(proxy_variant)
+    for option in addresses:
+        address_variant = output.SetRealizationOutput.schema({
+            **common,
+            "rows_ref": {"enum": [option.source_ref]},
+            "record_fields": {"type": "array", "maxItems": 0, "items": _closed_object({})},
+            "address_parameter_ref": {"enum": [option.parameter_ref]},
+            "address_input_use_ref": {"enum": [option.input_use_ref]},
+        })
+        address_variant["required"] = list(address_variant["properties"])
+        variants.append(address_variant)
+    if not variants:
+        raise ValueError("logical set has no source realization")
+    return _exact_realizations(
+        branch_ids, variants[0] if len(variants) == 1 else {"oneOf": variants}
+    )
+
+
 def build_unavailable_source_realization_schema(
     requirement_refs: tuple[str, ...],
 ) -> dict[str, object]:
@@ -58,18 +114,7 @@ def build_semantic_source_realization_schema(
         {
             "set_bindings": _closed_object(
                 {
-                    ref: _exact_realizations(
-                        branch_ids,
-                        output.SetRealizationOutput.schema(
-                            {
-                                "branch_id": {"enum": list(branch_ids)},
-                                "mapping_basis": _text(),
-                                "rows_ref": {
-                                    "enum": list(request.row_references_for_set(ref))
-                                },
-                            }
-                        ),
-                    )
+                    ref: _set_realization_schema(request, ref, branch_ids)
                     for ref in set_refs
                 }
             ),
@@ -138,6 +183,14 @@ def _association_realization_schema(
                 "mapping_basis": _text(),
                 "realization_ref": {"enum": [evidence]},
                 "reference_from_set_ref": {"enum": [orientation]},
+                "field_pairs": {
+                    "type": "array", "minItems": 1 if evidence is None else 0,
+                    **({} if evidence is None else {"maxItems": 0}),
+                    "items": output.AssociationFieldPairOutput.schema({
+                        key: {"enum": [field.ref for field in request.source_catalog.field_bindings]}
+                        for key in ("from_field_ref", "to_field_ref")
+                    }),
+                },
             }
         )
         if orientation is not None:
@@ -146,6 +199,7 @@ def _association_realization_schema(
                 "mapping_basis",
                 "realization_ref",
                 "reference_from_set_ref",
+                "field_pairs",
             ]
         variants.append(variant)
     if not variants:
@@ -160,22 +214,24 @@ def _fact_realizations_schema(
     branch_ids: tuple[str, ...],
     source_refs: tuple[str, ...],
 ) -> dict[str, object]:
-    observed = fact_ref in {item.token for item in request.index.observed_fact_refs}
+    required_branches = request.required_returned_fact_branches().get(fact_ref, ())
     if not request.returned_field_refs_for_fact(fact_ref):
-        if observed:
-            raise ValueError("observed fact has no returned-field realization")
+        if required_branches:
+            raise ValueError("required fact has no returned-field realization")
         return {
             "type": "array",
             "minItems": 0,
             "maxItems": 0,
             "items": _closed_object({}),
         }
-    return (_exact_realizations if observed else _optional_realizations)(
+    result = _optional_realizations(
         branch_ids,
         _fact_realization_schema(
             request, fact_ref=fact_ref, branch_ids=branch_ids, source_refs=source_refs
         ),
     )
+    result["minItems"] = len(required_branches)
+    return result
 
 
 def _fact_realization_schema(

@@ -22,6 +22,7 @@ from fervis.lookup.outcomes.errors import (
 from fervis.lookup.outcomes.model import Undefined
 from fervis.lookup.answer_program.operations import (
     SqlQuerySpec,
+    ReferenceGuardSpec,
     AggregateSpec,
     AntiJoinSpec,
     CrossJoinSpec,
@@ -220,6 +221,10 @@ def _execute_operation(
     operation_proof_refs: dict[str, tuple[str, ...]],
 ) -> RelationRows | RuntimeValue:
     spec = operation.spec
+    if isinstance(spec, ReferenceGuardSpec):
+        from fervis.lookup.plan_execution.reference_resolution import execute_reference_guard
+        return execute_reference_guard(operation, relations,
+            operation_refs=operation_proof_refs.get(operation.id, ()))
     if isinstance(spec, SqlQuerySpec):
         from fervis.lookup.relational_sql.operation import execute_sql_operation
         from .expression_evaluator import ExpressionEnvironment

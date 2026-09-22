@@ -8,6 +8,7 @@ from typing import Callable, Mapping, TypeAlias
 from fervis.lookup.plan_execution.errors import RelationEngineError, VerificationError
 from fervis.lookup.answer_program.operations import (
     SqlQuerySpec,
+    ReferenceGuardSpec,
     AggregateSpec,
     AntiJoinSpec,
     ComputeSpec,
@@ -45,7 +46,8 @@ class ResolvedOperationInput:
 
 
 ExecutableOperationSpec: TypeAlias = (
-    SqlQuerySpec
+    ReferenceGuardSpec
+    | SqlQuerySpec
     | FilterSpec
     | ProjectSpec
     | ProjectToKeySpec

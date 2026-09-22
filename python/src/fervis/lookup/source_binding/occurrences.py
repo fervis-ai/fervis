@@ -21,6 +21,7 @@ class OccurrenceLink:
     right_occurrence: str
     left_fields: tuple[str, ...]
     right_fields: tuple[str, ...]
+    observed_equality: bool = False
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,8 @@ def occurrence_scope(request, plan, branch_id: str) -> OccurrenceScope:
         return ref
 
     def owns_row(ref):
+        if bound[ref].address_parameter_ref:
+            return False
         identity = bound[ref].identity_ref
         return (
             identity is None
@@ -118,7 +121,10 @@ def occurrence_scope(request, plan, branch_id: str) -> OccurrenceScope:
         right = request.index.fact_local_ref_by_local_id[term.to_set_ref].token
         value = next(item for item in values if item.branch_id == branch_id)
         associations.append((ref, left, right, value))
-        if value.kind is AssociationRealizationKind.CO_RESIDENT:
+        if value.kind in {
+            AssociationRealizationKind.CO_RESIDENT,
+            AssociationRealizationKind.ADDRESS_SCOPE,
+        }:
             if bound[left].source_ref != bound[right].source_ref:
                 raise ValueError("co-resident roles require one producer")
             if value.source_refs != (bound[left].source_ref,):
@@ -157,7 +163,10 @@ def occurrence_scope(request, plan, branch_id: str) -> OccurrenceScope:
     temporary = OccurrenceScope(occurrences, ())
     links = []
     for ref, left_set, right_set, value in associations:
-        if value.kind is AssociationRealizationKind.CO_RESIDENT:
+        if value.kind in {
+            AssociationRealizationKind.CO_RESIDENT,
+            AssociationRealizationKind.ADDRESS_SCOPE,
+        }:
             left, right = temporary.for_set(left_set), temporary.for_set(right_set)
             if left.id != right.id:
                 source = request.source_catalog.source(left.source_ref)
@@ -166,6 +175,17 @@ def occurrence_scope(request, plan, branch_id: str) -> OccurrenceScope:
                     raise ValueError("separate co-resident memberships require a stable source row key")
                 fields = tuple(next(field.id for field in source.fields if field.field_ref == field_ref) for field_ref in grain)
                 links.append(OccurrenceLink(ref, left.id, right.id, fields, fields))
+            continue
+        if value.kind is AssociationRealizationKind.OBSERVED_EQUALITY:
+            from .observed_associations import observed_pairs
+
+            _, pairs = observed_pairs(request, association_ref=ref,
+                branch_id=branch_id, set_bindings=plan.set_bindings,
+                field_pairs=value.field_pairs)
+            left, right = temporary.for_set(left_set), temporary.for_set(right_set)
+            links.append(OccurrenceLink(ref, left.id, right.id,
+                tuple(a.field.id for a, _ in pairs),
+                tuple(b.field.id for _, b in pairs), observed_equality=True))
             continue
         evidence = next(
             e

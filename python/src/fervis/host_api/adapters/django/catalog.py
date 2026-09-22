@@ -46,7 +46,7 @@ from .schema_introspection import (
     path_param_entity_target,
     query_params_from_serializer,
 )
-from .pagination import pagination_contract
+from .pagination import complete_single_response, pagination_contract
 
 
 def clear_endpoint_contract_cache() -> None:
@@ -307,6 +307,9 @@ def _build_contract(
         admin_access=True,
         public_access=public_access,
         pagination=pagination,
+        complete_single_response=complete_single_response(
+            view_class, get_action=get_action
+        ),
         query_schema_source=(
             f"{query_serializer_class.__module__}.{query_serializer_class.__name__}"
             if query_serializer_class is not None

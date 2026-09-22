@@ -28,7 +28,8 @@ def test_observed_record_reference_replays_and_guards_dependent_reads(substituti
     from fervis.lookup.relational_sql.catalog import build_query_view_catalog
     from fervis.lookup.relational_sql.reference_planning import ReferenceMeaning
     from fervis.lookup.orchestration.reference_slots import ReferenceContract, reference_slots
-    from fervis.lookup.orchestration.reference_queries import plan_fact_references, reference_input_values, reference_prerequisites
+    from fervis.lookup.orchestration.reference_queries import plan_fact_references, reference_prerequisites
+    from fervis.lookup.grounding.reference_literals import reference_input_values
     from fervis.lookup.relational_sql.parameters import query_parameter_menu, with_reference_arguments
     from fervis.lookup.relational_sql.authoring import parse_query_answer
     from fervis.lookup.relational_sql.binding import bind_query_answer
@@ -101,7 +102,7 @@ def test_observed_record_reference_replays_and_guards_dependent_reads(substituti
     program=decode_answer_program(canonical_answer_program_json(compiled.program))
     if substitution == 'persisted':
         from fervis.lookup.answer_program.operations import SqlQuerySpec
-        from fervis.lookup.relational_sql.request_contract import verify_observed_reference_guards
+        from fervis.lookup.plan_execution.reference_resolution import verify_observed_reference_guards
         from fervis.lookup.plan_execution.errors import VerificationError
         from sqlglot import exp, parse_one
         operation = next(op for op in program.operations if isinstance(op.spec, SqlQuerySpec) and op.spec.lookup_input_ref)

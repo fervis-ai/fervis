@@ -124,15 +124,19 @@ def compile_source_realization(
         )
         for ref, values in authored_sets.items()
     }
+    from .reference_bindings import validate_address_scope_bindings
+    validate_address_scope_bindings(request, set_bindings)
     association_bindings = {
         ref: tuple(
-            _association_realization(item, request=request, association_ref=ref)
+            _association_realization(item, request=request, association_ref=ref, set_bindings=set_bindings)
             for item in _exact_branch_realizations(
                 values, branch_ids=branch_ids, label="association realization"
             )
         )
         for ref, values in parsed.association_bindings.items()
     }
+    from .observed_associations import validate_reference_proxy_associations
+    validate_reference_proxy_associations(request, set_bindings, association_bindings)
     for ref, values in parsed.fact_bindings.items():
         allowed = frozenset(request.returned_field_refs_for_fact(ref))
         if any(value.field_ref not in allowed for value in values):
@@ -187,6 +191,18 @@ def compile_source_realization(
     request = request.for_bindings(
         set_bindings, returned_fact_bindings, association_bindings
     )
+    for ref, required_branches in request.required_returned_fact_branches().items():
+        if ref not in request.model_authored_fact_refs:
+            continue
+        realized_branches = {
+            value.branch_id for value in returned_fact_bindings.get(ref, ())
+        }
+        if not set(required_branches) <= realized_branches:
+            raise ValueError(
+                f"Source realization requires returned fields for {ref}: "
+                "the selected sources cannot enforce this predicate through "
+                "a request parameter. Bind its property on the declared owner."
+            )
     realization = SourceRealization(
         request, set_bindings, returned_fact_bindings, association_bindings
     )
@@ -273,6 +289,7 @@ def compile_source_binding_plan(
         invocation_applications=invocation_applications,
         boolean_bindings=boolean_bindings,
         subject_binding=subject_binding,
+        reference_bindings=request.reference_bindings,
     )
 
     from dataclasses import replace
@@ -555,17 +572,60 @@ def _set_realization(
     source = _branch_source(item.branch_id, source_ref, request=request)
     identity_ref = identity.identity_ref if identity is not None else None
     fields = identity.field_refs if identity is not None else ()
+    proxy_ref = item.reference_proxy_field_ref or ""
+    address_param = item.address_parameter_ref or ""
+    address_use = item.address_input_use_ref or ""
+    proxy_options = request.reference_proxy_options_for_set(set_ref)
+    address_options = request.address_scope_options_for_set(set_ref)
+    if address_param or address_use:
+        if (
+            not address_param or not address_use or proxy_ref
+            or identity_ref is not None or item.record_fields
+            or not any(
+                option.source_ref == source.id
+                and option.parameter_ref == address_param
+                and option.input_use_ref == address_use
+                for option in address_options
+            )
+        ):
+            raise ValueError("Address scope must bind one compatible required path parameter")
+    elif source.id in {option.source_ref for option in address_options}:
+        raise ValueError("An address scope carrier cannot be declared as entity rows")
+    if proxy_ref:
+        if (
+            identity_ref is not None
+            or item.record_fields
+            or proxy_ref not in proxy_options.get(source.id, ())
+        ):
+            raise ValueError("Reference proxy must select one declared scalar on its one-row carrier")
+    elif source.id in proxy_options:
+        raise ValueError("A reference proxy carrier cannot be declared as entity rows")
+    properties = tuple((value.name.strip(),request.source_catalog.field_binding(value.field_ref)) for value in item.record_fields)
+    if any(binding.source_ref != source.id for _,binding in properties):
+        raise ValueError('Observed record properties must belong to their selected carrier')
+    record_fields = tuple((name,binding.field.field_ref) for name,binding in properties)
+    from .record_outputs import validate_record_fields
+    validate_record_fields(request,set_ref=set_ref,source_ref=source.id,
+        identity_ref=identity_ref,fields=record_fields)
     return SetRealization(
         branch_id=item.branch_id,
         mapping_basis=_text(item.mapping_basis),
         source_ref=source.id,
         identity_ref=identity_ref,
         identity_field_refs=fields,
+        record_fields=record_fields,
+        reference_proxy_field_ref=proxy_ref,
+        address_parameter_ref=address_param,
+        address_input_use_ref=address_use,
         contract_evidence_refs=_local_evidence(
             request.source_catalog.contract_snapshot.ref,
             source.id,
             identity_ref,
             *fields,
+            *(value.field_ref for value in item.record_fields),
+            proxy_ref or None,
+            address_param or None,
+            address_use or None,
         ),
     )
 
@@ -621,10 +681,11 @@ def _identifier_fact_realizations(
     output: list[FactRealization] = []
     for branch_id in branch_ids:
         set_realization = realizations_by_branch.get(branch_id)
-        if set_realization is None or set_realization.identity_ref is None:
-            raise ValueError(
-                "identifier fact requires an identified-set identity contract"
-            )
+        if set_realization is None:
+            raise ValueError('Identifier fact requires its selected row carrier')
+        from .record_outputs import allows_row_occurrence_identity
+        if set_realization.identity_ref is None and not allows_row_occurrence_identity(request, fact_ref):
+            raise ValueError('Identifier fact requires an identified-set identity contract')
         output.append(
             FactRealization(
                 branch_id=branch_id,
@@ -632,7 +693,7 @@ def _identifier_fact_realizations(
                     "The selected set identity realizes its identifier fact."
                 ),
                 source_ref=set_realization.source_ref,
-                kind=FactRealizationKind.ENTITY_KEY,
+                kind=FactRealizationKind.ENTITY_KEY if set_realization.identity_ref is not None else FactRealizationKind.ROW_OCCURRENCE,
                 identity_ref=set_realization.identity_ref,
                 field_refs=set_realization.identity_field_refs,
                 contract_evidence_refs=set_realization.contract_evidence_refs,
@@ -646,8 +707,28 @@ def _association_realization(
     *,
     request: SemanticSourceBindingRequest,
     association_ref: str,
+    set_bindings: dict[str, tuple[SetRealization, ...]],
 ) -> AssociationRealization:
     sources: tuple[str, ...]
+    if item.realization_ref is None:
+        from .observed_associations import observed_pairs
+
+        pairs = tuple((pair.from_field_ref, pair.to_field_ref) for pair in item.field_pairs)
+        sources, _ = observed_pairs(request, association_ref=association_ref,
+            branch_id=item.branch_id, set_bindings=set_bindings, field_pairs=pairs)
+        if item.reference_from_set_ref is not None:
+            raise ValueError("observed equality uses logical endpoint orientation")
+        for source_ref in sources:
+            _branch_source(item.branch_id, source_ref, request=request)
+        return AssociationRealization(
+            branch_id=item.branch_id, mapping_basis=_text(item.mapping_basis),
+            kind=AssociationRealizationKind.OBSERVED_EQUALITY, source_refs=sources,
+            relation_evidence_ref=None, field_pairs=pairs,
+            contract_evidence_refs=_association_evidence(request=request,
+                source_refs=sources, relation_evidence_ref=None),
+        )
+    if item.field_pairs:
+        raise ValueError("declared associations cannot override relationship fields")
     relation = next(
         (
             value
@@ -658,7 +739,20 @@ def _association_realization(
     )
     if relation is None:
         _branch_source(item.branch_id, item.realization_ref, request=request)
-        kind = AssociationRealizationKind.CO_RESIDENT
+        from .association_choices import association_endpoints
+        endpoints = association_endpoints(request, association_ref)
+        address = tuple(
+            value
+            for set_ref in endpoints
+            for value in set_bindings.get(set_ref, ())
+            if value.branch_id == item.branch_id
+            and value.address_parameter_ref
+        )
+        kind = (
+            AssociationRealizationKind.ADDRESS_SCOPE
+            if len(address) == 1 and address[0].source_ref == item.realization_ref
+            else AssociationRealizationKind.CO_RESIDENT
+        )
         sources = (item.realization_ref,)
         relation_ref = None
     else:
@@ -859,6 +953,8 @@ def _derive_boolean_bindings(
     subject_binding: SubjectObligationBinding,
     request: SemanticSourceBindingRequest,
 ) -> dict[str, tuple[BooleanRequirementRealization, ...]]:
+    from .reference_bindings import validated_address_applications
+    addressed = validated_address_applications(request, set_bindings, applications)
     output_bindings: dict[str, tuple[BooleanRequirementRealization, ...]] = {}
     for requirement in request.index.boolean_requirements:
         realizations: list[BooleanRequirementRealization] = []
@@ -873,7 +969,7 @@ def _derive_boolean_bindings(
             choice_mechanics = subject_binding.choice_mechanics(
                 branch.branch_id, requirement.requirement_ref
             )
-            row_mechanics = choice_mechanics or _returned_mechanics(
+            row_mechanics = () if (branch.branch_id, requirement.requirement_ref) in addressed else choice_mechanics or _returned_mechanics(
                 branch.branch_id, fact_refs=fact_refs, fact_bindings=fact_bindings,
                 requirement_ref=requirement.requirement_ref,
             )

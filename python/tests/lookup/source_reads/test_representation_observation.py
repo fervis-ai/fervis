@@ -565,6 +565,7 @@ def test_saved_count_executes_when_paginated_data_becomes_empty():
                         "branch_id": "branch",
                         "mapping_basis": "The API returns item rows.",
                         "rows_ref": source.id,
+                        "record_fields": [],
                     }
                 ]
             },

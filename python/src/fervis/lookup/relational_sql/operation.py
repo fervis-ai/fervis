@@ -76,10 +76,6 @@ def execute_sql_operation(operation, relations, *, environment, operation_refs=(
     positions = {name:index for index,name in enumerate(result.columns)}
     rows = tuple({item.id:_sql_output_value(row[positions[item.id]], item.value_type)
                   for item in spec.outputs} for row in result.rows)
-    if spec.reference_input_ref:
-        from .reference_results import require_unique_reference
-        rows=require_unique_reference(spec,rows,relation_id=operation.output_relation,
-            proof_refs=tuple(dict.fromkeys((*operation_refs,*(ref for relation in inputs for ref in relation.evidence.proof_refs)))))
     return _operation_relation(operation, rows, grain_keys=(), inputs=inputs,
         field_types={item.id:item.value_type for item in spec.outputs}, scalar_refs=operation_refs)
 

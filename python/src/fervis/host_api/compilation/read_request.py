@@ -24,6 +24,8 @@ def compile_read_request(
     invocation: ReadInvocation,
     transport_overlay: ReadTransportOverlay | None = None,
 ) -> CompiledReadRequest:
+    from .pagination_binding import bind_pagination_policy
+    contract = bind_pagination_policy(contract, invocation.page_policy)
     overlay = transport_overlay or ReadTransportOverlay()
     _validate_pagination(contract, invocation.page_policy)
     path_params = dict(invocation.path_params)

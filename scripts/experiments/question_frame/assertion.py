@@ -64,9 +64,32 @@ def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
     errors.extend(_candidate_origin_errors(requests, context=context))
     values = _supplied_values(supplied)
     errors.extend(_supplied_value_errors(values, context=context))
+    errors.extend(_identity_literal_errors(supplied, context=context))
     errors.extend(_entity_reference_group_errors(values, context=context))
     errors.extend(_semantic_coverage_errors(arguments, context=context))
     return errors
+
+
+def _identity_literal_errors(supplied: dict[str, object], *, context: dict[str, Any]) -> list[str]:
+    required = set(context.get("required_identity_literal_operands") or ())
+    if not required:
+        return []
+    operands = supplied.get("operands")
+    if not isinstance(operands, list):
+        return ["identity literal inventory is missing"]
+    actual = {
+        identity.get("value")
+        for item in operands
+        if isinstance(item, dict)
+        for reference in (item.get("entity_reference"),)
+        if isinstance(reference, dict)
+        for value in (reference.get("value"),)
+        if isinstance(value, dict) and value.get("kind") == "single_identity"
+        for identity in (value.get("identity_value"),)
+        if isinstance(identity, dict) and identity.get("kind") == "literal"
+    }
+    missing = required - actual
+    return [f"Explicit identifier {item!r} is not a literal operand" for item in sorted(missing)]
 
 
 def _candidate_origin_errors(

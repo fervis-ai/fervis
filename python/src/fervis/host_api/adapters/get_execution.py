@@ -8,6 +8,7 @@ from typing import Any
 from fervis.host_api.contracts.response_page import ResponsePage, ResponseFormat
 
 from fervis.host_api.compilation import compile_read_request
+from fervis.host_api.compilation.pagination_binding import bind_pagination_policy
 from fervis.host_api.contracts import EndpointContract, PaginationKind
 from fervis.host_api.contracts.execution import ReadTransportOverlay
 from fervis.host_api.contracts.read import ReadInvocation
@@ -73,6 +74,7 @@ def execute_prepared_get(
     page_policy: dict[str, Any] | None = None,
     get_page: PageGetter,
 ) -> EndpointExecutionResult:
+    contract = bind_pagination_policy(contract, page_policy)
     if contract.pagination is not None and _all_pages_requested(page_policy):
         return execute_all_pages(
             contract=contract,
@@ -134,6 +136,7 @@ async def execute_prepared_get_async(
     page_policy: dict[str, Any] | None,
     get_page: AsyncPageGetter,
 ) -> EndpointExecutionResult:
+    contract = bind_pagination_policy(contract, page_policy)
     if contract.pagination is None or not _all_pages_requested(page_policy):
         query_params, page_size = _single_page_request(
             contract,
@@ -461,12 +464,12 @@ def _page_has_more(
     returned_rows: int,
     page_size: int,
 ) -> bool:
-    if continuation is True:
-        return True
+    if continuation is not None:
+        if total is not None and continuation != (total > collected_rows):
+            raise EndpointExecutionError("Paginated endpoint completion evidence is inconsistent.")
+        return continuation
     if total is not None and total > collected_rows:
         return True
-    if continuation is False:
-        return False
     return returned_rows >= page_size
 
 

@@ -6,6 +6,8 @@ from typing import Any
 
 
 def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
+    if "runtime_references" in context:
+        return _runtime_reference_errors(arguments, context["runtime_references"])
     if "identity_task_ref" not in context or "expected_route_id" not in context:
         return ["grounding assertion requires an expected identity route"]
     task_ref = str(context["identity_task_ref"])
@@ -48,6 +50,36 @@ def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
         resolution.get("lookup_request_params") or ()
     ):
         errors.append(f"lookup parameters omit {expected_param!r}")
+    return errors
+
+
+def _runtime_reference_errors(
+    arguments: dict[str, Any], expected: dict[str, dict[str, Any]]
+) -> list[str]:
+    actual = arguments.get("references")
+    if not isinstance(actual, dict) or set(actual) != set(expected):
+        return ["Runtime reference tasks do not cover the expected scope"]
+    errors = []
+    for task_ref, outcome in expected.items():
+        selected = actual.get(task_ref)
+        if not isinstance(selected, dict):
+            errors.append(f"{task_ref}: missing reference selection")
+        elif outcome["kind"] == "literal":
+            fields = selected.get("field_refs")
+            if (
+                not isinstance(fields, list)
+                or len(fields) != len(set(fields))
+                or set(fields) != set(outcome["field_refs"])
+            ):
+                errors.append(f"{task_ref}: incorrect literal matching properties")
+        elif outcome["kind"] == "descriptor":
+            if (
+                selected.get("field_ref") != outcome["field_ref"]
+                or selected.get("choice_value") != outcome["choice_value"]
+            ):
+                errors.append(f"{task_ref}: incorrect descriptor property choice")
+        else:
+            errors.append(f"{task_ref}: unknown reference assertion kind")
     return errors
 
 

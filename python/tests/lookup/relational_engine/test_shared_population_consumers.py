@@ -64,6 +64,7 @@ def test_filtered_aggregate_and_opposite_exists_keep_both_row_states():
                         "branch_id": branch,
                         "mapping_basis": "Source rows",
                         "rows_ref": source.id,
+                        "record_fields": [],
                     }
                 ]
             },

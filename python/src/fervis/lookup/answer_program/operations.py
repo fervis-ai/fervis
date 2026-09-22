@@ -14,6 +14,7 @@ from fervis.lookup.answer_program.result_projection import EntityKeyProjection
 
 class OperationKind(StrEnum):
     SQL_QUERY = "sql_query"
+    REFERENCE_GUARD = "reference_guard"
     FILTER = "filter"
     PROJECT = "project"
     PROJECT_TO_KEY = "project_to_key"
@@ -121,12 +122,18 @@ class JoinMode(StrEnum):
     LEFT = "left"
 
 
+class JoinBasis(StrEnum):
+    DECLARED_IDENTITY = "declared_identity"
+    OBSERVED_EQUALITY = "observed_equality"
+
+
 @dataclass(frozen=True)
 class JoinSpec:
     left: str
     right: str
     join_keys: tuple[JoinKey, ...]
     mode: JoinMode = JoinMode.INNER
+    basis: JoinBasis = JoinBasis.DECLARED_IDENTITY
     kind: OperationKind = field(default=OperationKind.JOIN, init=False)
 
 
@@ -284,8 +291,6 @@ class SqlQuerySpec:
     # this query. They carry evidence and cannot be rebound as runtime values.
     meaning_inputs: tuple[ParameterRef, ...] = ()
     entity_keys: tuple[EntityKeyProjection, ...] = ()
-    reference_input_ref: str = ""
-    reference_operand: str = ""
     lookup_input_ref: str = ""
     timezone: str = "UTC"
     kind: OperationKind = field(default=OperationKind.SQL_QUERY, init=False)
@@ -295,16 +300,6 @@ class SqlQuerySpec:
             raise ValueError('Literal lookup input ref must be a nonempty string when present')
         if not isinstance(self.timezone, str) or not self.timezone.strip():
             raise ValueError("SQL timezone must be a nonempty name")
-        if not isinstance(self.reference_input_ref,str) or (self.reference_input_ref and not self.reference_input_ref.strip()):
-            raise ValueError('Reference query input ref must be a nonempty string when present')
-        if not isinstance(self.reference_operand,str):
-            raise ValueError("Reference operand must be text")
-        if self.reference_operand and not self.reference_input_ref:
-            raise ValueError("Reference operand requires an owning input")
-        if self.reference_input_ref:
-            if not self.scalar or len(self.entity_keys)>1 or (self.entity_keys and {item.id for item in self.outputs}!={item.field_id for item in self.entity_keys[0].components}):
-                raise ValueError('Reference query must guard one declared identity or observed record')
-
         if not self.query.strip() or not self.inputs or not self.outputs:
             raise ValueError('SQL operation requires a query, input views and output fields')
         for names in (tuple(item.name for item in self.inputs),
@@ -314,8 +309,36 @@ class SqlQuerySpec:
                 raise ValueError('SQL operation names must be nonempty and unique')
 
 
+@dataclass(frozen=True)
+class ReferenceGuardSpec:
+    input_relation: str
+    fields: tuple[str, ...]
+    reference_input_ref: str
+    reference_operand: str = ""
+    entity_key: EntityKeyProjection | None = None
+    occurrence_fields: tuple[str, ...] = ()
+    kind: OperationKind = field(default=OperationKind.REFERENCE_GUARD, init=False)
+
+    def __post_init__(self):
+        if (not isinstance(self.input_relation, str) or not self.input_relation.strip()
+                or not isinstance(self.reference_input_ref, str) or not self.reference_input_ref.strip() or not self.fields
+                or len(self.fields) != len(set(self.fields)) or any(not field for field in self.fields)):
+            raise ValueError('Reference guard requires an input, owning reference and unique observed fields')
+        if not isinstance(self.reference_operand, str):
+            raise ValueError('Reference guard operand must be text')
+        if self.occurrence_fields and (
+            self.entity_key is not None or len(set(self.occurrence_fields)) != len(self.occurrence_fields)
+            or not set(self.occurrence_fields) < set(self.fields)
+        ):
+            raise ValueError('Occurrence guards require observed properties and distinct local occurrence fields')
+
+        if self.entity_key is not None and set(self.fields) != {item.field_id for item in self.entity_key.components}:
+            raise ValueError('Nominal reference guard must preserve its complete key')
+
+
 OperationSpec: TypeAlias = (
-    SqlQuerySpec
+    ReferenceGuardSpec
+    | SqlQuerySpec
     | FilterSpec
     | ProjectSpec
     | ProjectToKeySpec
@@ -362,6 +385,7 @@ def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
             RoleExpandSpec,
             AggregateSpec,
             OrderSpec,
+            ReferenceGuardSpec,
         ),
     ):
         return (spec.input_relation,)
@@ -417,6 +441,8 @@ def operation_scalar_output_ids(spec: OperationSpec) -> tuple[str, ...]:
         return (spec.output_scalar,) if spec.output_scalar else ()
     if isinstance(spec, SqlQuerySpec) and spec.scalar:
         return tuple(item.id for item in spec.outputs)
+    if isinstance(spec, ReferenceGuardSpec):
+        return spec.fields
     if isinstance(spec, AggregateSpec) and not spec.group_by:
         return tuple(aggregation.output_field for aggregation in spec.aggregations)
     return ()

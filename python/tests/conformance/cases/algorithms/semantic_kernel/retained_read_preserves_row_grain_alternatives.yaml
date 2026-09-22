@@ -1,5 +1,5 @@
-id: retained_read_prefers_shallow_covering_row_source
-description: A retained endpoint exposes the shallowest row set that covers its selected fields while deeper row sets remain available for their own fields.
+id: retained_read_preserves_row_grain_alternatives
+description: Field relevance does not silently select a row grain before explicit source realization.
 kind: algorithm
 algorithm: semantic.kernel
 input:
@@ -18,5 +18,5 @@ input:
   retained_field_tokens: [sold_at]
 expect:
   result_contains:
-    retained_source_refs: [sales]
-    retained_source_count: 1
+    retained_source_refs: [sales, sale_items]
+    retained_source_count: 2

@@ -19,6 +19,7 @@ from .values import ConstantRef, EnvironmentRef, NodeOutputRef, ParameterRef
 class ExpressionFunction(StrEnum):
     TEMPORAL_BUCKET = "temporal_bucket"
     ROW_NUMBER = "row_number"
+    REFERENCE_LITERAL_MATCH = "reference_literal_match"
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,8 @@ class FunctionExpression:
     arguments: tuple[Expression, ...]
 
     def __post_init__(self) -> None:
-        required_arity = {ExpressionFunction.TEMPORAL_BUCKET:3, ExpressionFunction.ROW_NUMBER:0}[self.function]
+        required_arity = {ExpressionFunction.TEMPORAL_BUCKET:3, ExpressionFunction.ROW_NUMBER:0,
+                          ExpressionFunction.REFERENCE_LITERAL_MATCH:2}[self.function]
         if len(self.arguments) != required_arity:
             raise ValueError("function expression has invalid arity")
 

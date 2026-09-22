@@ -89,6 +89,7 @@ def _endpoint_read(contract: EndpointContract) -> EndpointRead:
         entity_references=_entity_references(contract, fields=fields),
         response_envelope=_response_envelope(contract),
         pagination=_pagination(contract),
+        complete_single_response=contract.complete_single_response,
         access=_access(contract),
         catalog_endpoint=_catalog_endpoint_metadata(contract),
         source_metadata=_source_metadata(contract),

@@ -129,6 +129,7 @@ def test_unknown_dynamic_default_is_not_proven_to_preserve_population():
                         "branch_id": branch,
                         "mapping_basis": "Rows",
                         "rows_ref": source.id,
+                        "record_fields": [],
                     }
                 ]
             },

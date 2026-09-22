@@ -9,7 +9,7 @@ from fervis.host_api.contracts import ParameterSemantics
 from fervis.host_api.contracts.population import ParameterPopulation
 from hashlib import sha256
 
-from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
+from fervis.lookup.relation_catalog.model import RowCardinality, requires_caller_supplied_input
 from fervis.lookup.relation_catalog.row_sources import (
     row_source_type_supports_semantic_type,
 )
@@ -46,6 +46,7 @@ from fervis.lookup.relation_catalog.row_sources import RowSourceValueType
 from fervis.lookup.semantic_types import BooleanType, IdentifierType, TextType, CollectionType
 from fervis.lookup.source_binding.param_values import compatible_fact_value_projections
 from fervis.types.enums import StrEnum
+from .reference_bindings import ReferenceBinding
 
 
 @dataclass(frozen=True)
@@ -67,11 +68,14 @@ class CandidateSourceStrategy:
 class FactRealizationKind(StrEnum):
     RETURNED_FIELD = "RETURNED_FIELD"
     ENTITY_KEY = "ENTITY_KEY"
+    ROW_OCCURRENCE = "ROW_OCCURRENCE"
 
 
 class AssociationRealizationKind(StrEnum):
     CO_RESIDENT = "CO_RESIDENT"
     DECLARED_RELATION = "DECLARED_RELATION"
+    OBSERVED_EQUALITY = "OBSERVED_EQUALITY"
+    ADDRESS_SCOPE = "ADDRESS_SCOPE"
 
 
 class SourceMechanicKind(StrEnum):
@@ -91,6 +95,10 @@ class SetRealization:
 
     membership: Expression | None = None
     population_basis: str = ""
+    record_fields: tuple[tuple[str, str], ...] = ()
+    reference_proxy_field_ref: str = ""
+    address_parameter_ref: str = ""
+    address_input_use_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -113,6 +121,7 @@ class AssociationRealization:
     relation_evidence_ref: str | None
     contract_evidence_refs: tuple[str, ...]
     reference_from_set_ref: str | None = None
+    field_pairs: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -235,6 +244,7 @@ class SourceBindingPlan:
     invocation_applications: tuple[InvocationValueApplication, ...]
     boolean_bindings: dict[str, tuple[BooleanRequirementRealization, ...]]
     subject_binding: SubjectObligationBinding
+    reference_bindings: tuple[ReferenceBinding, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -298,7 +308,9 @@ class SemanticSourceBindingRequest:
     catalog_values: tuple[CatalogProvidedValue, ...] = ()
     realized_fact_fields: tuple[tuple[str, str, str, tuple[str, ...]], ...] = ()
     realized_set_sources: tuple[tuple[str, str, str], ...] = ()
+    address_scope_values: tuple[tuple[str, str, str, str], ...] = ()
     population_interpretations: tuple[SourcePopulationInterpretation, ...] = ()
+    reference_bindings: tuple[ReferenceBinding, ...] = ()
 
     def parameter_population(self, source_ref: str, parameter_ref: str) -> ParameterPopulation | None:
         param = next(p for p in self.source_catalog.source(source_ref).params if p.param_ref == parameter_ref)
@@ -310,6 +322,34 @@ class SemanticSourceBindingRequest:
 
     def row_references_for_set(self, set_ref: str) -> tuple[str, ...]:
         return self._connected_row_domains[set_ref]
+
+    def address_reference_options(self):
+        from .reference_bindings import address_reference_options
+        return address_reference_options(self)
+
+    def reference_proxy_options_for_set(self, set_ref: str) -> dict[str, tuple[str, ...]]:
+        """One-row sources may carry a referent value without being entity rows."""
+        from .reference_bindings import described_reference_uses, descriptor_options
+
+        target = FactLocalRef.from_token(set_ref)
+        uses = tuple(
+            use for use in described_reference_uses(self)
+            if use.identity_set_ref == target
+        )
+        if not uses or set_ref == self.index.subject_obligation.subject_set_ref.token:
+            return {}
+        result = {}
+        for source in self.source_catalog.sources:
+            if (
+                source.id not in self.row_references_for_set(set_ref)
+                or source.row_cardinality is not RowCardinality.ONE
+            ):
+                continue
+            options = descriptor_options(self, source.id)
+            fields = tuple(ref for ref, values in options.items() if not values)
+            if fields:
+                result[source.id] = fields
+        return result
 
     @cached_property
     def _connected_row_domains(self) -> dict[str, tuple[str, ...]]:
@@ -331,15 +371,25 @@ class SemanticSourceBindingRequest:
             ref for ref in owned_refs if ref in self.index.observed_fact_refs
         )
         eligible_identities = frozenset(self.identity_refs_for_set(set_ref))
+        from .record_outputs import allows_row_occurrence_identity
         identity_required = any(
             isinstance(term, FactTerm)
             and isinstance(term.value_type, IdentifierType)
             and term.value_type.set_ref == semantic_ref.local_id
             for ref, term in self.index.term_by_ref.items()
-            if ref in self.index.source_requirement_refs
-        ) or any(
-            output.value_ref == semantic_ref
-            for output in self.index.output_requirements
+            if ref in self.index.source_requirement_refs and not allows_row_occurrence_identity(self, ref.token)
+        )
+        from .reference_bindings import (
+            runtime_reference_uses, reference_match_options, address_reference_options,
+        )
+        reference_uses = tuple(use for use in runtime_reference_uses(self) if use.identity_set_ref == semantic_ref)
+        address_options = (
+            tuple(
+                item for item in address_reference_options(self)
+                if any(use.use_ref == item.input_use_ref for use in reference_uses)
+            )
+            if reference_uses and semantic_ref != self.index.subject_obligation.subject_set_ref
+            else ()
         )
         refs: list[str] = []
         for source in self.source_catalog.sources:
@@ -374,15 +424,33 @@ class SemanticSourceBindingRequest:
                 identity.identity_ref
                 for identity in source.identity_evidence
                 if identity.identity_ref in eligible_identities
+                and all(reference_match_options(self, use, source.id, identity_ref=identity.identity_ref)
+                        for use in reference_uses)
                 and (
                     not observed_refs
                     or identity.kind is RowSourceIdentityKind.ENTITY_ROW
                 )
             )
             refs.extend(identities)
-            if not identities and not identity_required:
+            if not identities and not identity_required and all(reference_match_options(self, use, source.id) for use in reference_uses):
+                refs.append(source.id)
+            if any(item.source_ref == source.id for item in address_options):
                 refs.append(source.id)
         return tuple(refs)
+
+    def address_scope_options_for_set(self, set_ref: str):
+        from .reference_bindings import address_reference_options
+
+        return tuple(
+            option for option in address_reference_options(self)
+            if option.source_ref in self.row_references_for_set(set_ref)
+            and any(
+                use.use_ref == option.input_use_ref
+                and use.identity_set_ref is not None
+                and use.identity_set_ref.token == set_ref
+                for use in self.index.input_use_sites
+            )
+        )
 
     def for_bindings(
         self,
@@ -475,6 +543,15 @@ class SemanticSourceBindingRequest:
                 (ref, value.branch_id, value.source_ref)
                 for ref, values in set_bindings.items()
                 for value in values
+            ),
+            address_scope_values=tuple(
+                (
+                    value.address_input_use_ref, value.branch_id,
+                    value.source_ref, value.address_parameter_ref,
+                )
+                for values in set_bindings.values()
+                for value in values
+                if value.address_parameter_ref
             ),
             realized_fact_fields=self.realized_fact_fields
             or tuple(
@@ -684,23 +761,75 @@ class SemanticSourceBindingRequest:
         applications: tuple[InvocationValueApplication, ...],
         subject_binding: SubjectObligationBinding | None = None,
     ) -> dict[str, tuple[str, ...]]:
+        application_owners = {
+            (application.branch_id, application.owner_ref)
+            for application in applications
+            if application.owner_ref is not None
+        }
+        if subject_binding is not None:
+            application_owners.update(
+                (branch.branch_id, requirement.requirement_ref)
+                for branch in self.strategy.branches
+                for requirement in self.index.boolean_requirements
+                if subject_binding.choice_mechanics(
+                    branch.branch_id, requirement.requirement_ref
+                )
+            )
+        return self._required_fact_branches_for_owners(application_owners)
+
+    def required_returned_fact_branches(self) -> dict[str, tuple[str, ...]]:
+        """Require a field unless a declared alternate predicate surface exists."""
+        possible_request_owners = {
+            (branch.branch_id, requirement.requirement_ref)
+            for branch in self.strategy.branches
+            for requirement in self.index.boolean_requirements
+            if self.invocation_options_for_owner(
+                requirement.requirement_ref, branch_id=branch.branch_id
+            )
+            or self.finite_choice_options_for_owner(
+                requirement.requirement_ref, branch_id=branch.branch_id
+            )
+            or self._returned_choice_without_direct_field(
+                requirement.requirement_ref, branch_id=branch.branch_id
+            )
+        }
+        return self._required_fact_branches_for_owners(possible_request_owners)
+
+    def _returned_choice_without_direct_field(
+        self, requirement_ref: str, *, branch_id: str
+    ) -> bool:
+        facts = self.requirement_fact_refs(requirement_ref)
+        if len(facts) != 1:
+            return False
+        fact_ref = facts[0]
+        value_type = self.index.value_type(FactLocalRef.from_token(fact_ref))
+        if any(
+            row_source_type_supports_semantic_type(
+                self.source_catalog.field_binding(field_ref).field.type,
+                value_type,
+            )
+            for field_ref in self.returned_field_refs_for_fact(fact_ref)
+        ):
+            return False
+        return any(
+            surface.kind is SourceChoiceSurfaceKind.RETURNED_FIELD
+            and requirement_ref in self.choice_requirement_refs(
+                surface, branch_id=branch_id
+            )
+            for surface in self.source_catalog.choice_surfaces
+        )
+
+    def _required_fact_branches_for_owners(
+        self, application_owners: set[tuple[str, str]]
+    ) -> dict[str, tuple[str, ...]]:
         branch_ids = tuple(branch.branch_id for branch in self.strategy.branches)
         required: dict[str, set[str]] = {
             fact_ref: set(branch_ids) for fact_ref in self.observed_fact_refs
         }
-        application_owners = {
-            (application.branch_id, application.owner_ref)
-            for application in applications
-        }
         for requirement in self.index.boolean_requirements:
             fact_refs = self.requirement_fact_refs(requirement.requirement_ref)
             for branch_id in branch_ids:
-                if (branch_id, requirement.requirement_ref) in application_owners or (
-                    subject_binding is not None
-                    and subject_binding.choice_mechanics(
-                        branch_id, requirement.requirement_ref
-                    )
-                ):
+                if (branch_id, requirement.requirement_ref) in application_owners:
                     continue
                 for fact_ref in fact_refs:
                     required.setdefault(fact_ref, set()).add(branch_id)
@@ -715,11 +844,18 @@ class SemanticSourceBindingRequest:
 
     @property
     def invocation_projection_options(self) -> tuple[InvocationProjectionOption, ...]:
-        return (
+        from .reference_bindings import runtime_reference_uses
+        addressed = {use_ref for use_ref, _, _, _ in self.address_scope_values}
+        pending_uses = {
+            use.use_ref for use in runtime_reference_uses(self)
+            if use.use_ref not in addressed
+        }
+        ordinary = (
             tuple(
                 option
                 for source in self.source_catalog.sources
                 for value in self.canonical_values
+                if not pending_uses.intersection(value.use_refs)
                 for param in source.params
                 for option in _canonical_projection_options(
                     source_ref=source.id,
@@ -755,6 +891,19 @@ class SemanticSourceBindingRequest:
                 if value.surface_kind is SourceChoiceSurfaceKind.REQUEST_PARAMETER
             )
         )
+        address = tuple(
+            _invocation_projection_option(
+                source_ref=source_ref,
+                target_ref=parameter_ref,
+                value_ref=value.canonical_value_id,
+                projection=ValueProjectionKind.WHOLE_VALUE,
+                component_ref=None,
+            )
+            for use_ref, _, source_ref, parameter_ref in self.address_scope_values
+            for value in self.canonical_values
+            if use_ref in value.use_refs
+        )
+        return tuple(dict.fromkeys((*ordinary, *address)))
 
     @property
     def authored_invocation_projection_options(
@@ -1001,6 +1150,28 @@ class SemanticSourceBindingRequest:
 
     def invocation_target_matches_owner(self, source_ref: str, target_ref: str, *, owner_ref: str, branch_id: str, projection: ValueProjectionKind = ValueProjectionKind.WHOLE_VALUE, value_ref: str | None = None) -> bool:
         """A returned fact fixes the property an invocation may constrain."""
+        for use_ref, scope_branch, scope_source, scope_param in self.address_scope_values:
+            if (scope_branch, scope_source, scope_param) != (branch_id, source_ref, target_ref):
+                continue
+            use = next(item for item in self.index.input_use_sites if item.use_ref == use_ref)
+            if (
+                projection is ValueProjectionKind.WHOLE_VALUE
+                and any(
+                    value.canonical_value_id == value_ref
+                    and value.input_ref == use.input_ref
+                    and use_ref in value.use_refs
+                    for value in self.canonical_values
+                )
+                and any(
+                    requirement.requirement_ref == owner_ref
+                    and use.expression_ref is not None
+                    and requirement.atom_ref.value_ref == use.expression_ref.token
+                    for requirement in self.index.boolean_requirements
+                )
+                and self.invocation_preserves_population(owner_ref, branch_id=branch_id)
+            ):
+                return True
+            return False
         if not self._parameter_controls_rows(source_ref, target_ref):
             return False
         source = self.source_catalog.source(source_ref)

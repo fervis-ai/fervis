@@ -65,6 +65,10 @@ def prepare_answer_program(
         raise VerificationError(f"{exc.code}: {exc}") from exc
     prepared = prepare_relation_program(answer,compiled_inputs=compiled_inputs,catalog=catalog,
         memory_relations=memory_relations,catalog_selection=catalog_selection,authorized_sources=authorized_sources)
+    from fervis.lookup.plan_execution.verification.record_lineage import verify_record_projection
+    for output in answer.result_projection.relation_outputs:
+        if output.record_fields:
+            verify_record_projection(answer, output, relation_contracts=prepared.structural_contracts)
     _verify_answer_uses_evidence_input(answer)
     _verify_result_output_targets(answer, require_output=False)
     if prepared.structural_contracts:

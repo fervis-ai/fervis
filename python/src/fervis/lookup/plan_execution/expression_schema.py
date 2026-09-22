@@ -20,6 +20,8 @@ def expression_value_type(
     def function_type(node, arguments):
         if node.function is ExpressionFunction.ROW_NUMBER:
             return "integer"
+        if node.function is ExpressionFunction.REFERENCE_LITERAL_MATCH:
+            return "boolean"
         if node.function is ExpressionFunction.TEMPORAL_BUCKET:
             if len(arguments) != 3:
                 raise RelationEngineError('temporal bucket requires value, grain, and timezone')

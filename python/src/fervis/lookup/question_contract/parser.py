@@ -743,6 +743,25 @@ def parse_semantic_question_contract(
         )
         for item in requested_facts
     )
+    for index in indexes:
+        used_associations = {
+            ref.local_id for ref in index.association_requirement_refs
+        }
+        unused = {
+            association.id for association in index.requested_fact.associations
+        } - used_associations
+        if unused:
+            raise ValueError(
+                "unused relationship declarations in "
+                f"{index.requested_fact_id}: {', '.join(sorted(unused))}. "
+                "Declaring a relationship does not apply it to a qualification, "
+                "grouping, ordering, or output; its intended use must be explicit "
+                "in the computation. A fact with observed_for_ref=s1 does not "
+                "traverse a relationship. A related property can use the "
+                "association as observed_for_ref, or a quantify expression "
+                "with association_refs, over_set_ref, and a condition whose "
+                "facts belong to that related set."
+            )
     used_input_refs = {
         use.input_ref for index in indexes for use in index.input_use_sites
     }
@@ -1153,7 +1172,9 @@ class _SemanticTermInterner:
     ) -> None:
         if set_ref in self._canonical_set_ref_by_authored_ref:
             raise ValueError(f"duplicate semantic set declaration: {set_ref}")
-        self._sets.append(SetTerm(set_ref, origin))
+        # The declared population kind owns the domain. Provenance explains
+        # where it came from; it cannot add a second membership predicate.
+        self._sets.append(SetTerm(set_ref, replace(origin, meaning=instance_kind.strip())))
         self._canonical_set_ref_by_authored_ref[set_ref] = set_ref
         self._instance_kind_by_set_ref[set_ref] = instance_kind.strip()
 

@@ -56,6 +56,7 @@ def _compile(request, source, population, fact_bindings=None):
                     "branch_id": branch,
                     "mapping_basis": "Materialize the requested set exactly",
                     "rows_ref": source.id,
+                    "record_fields": [],
                 }
             ]
         },
@@ -519,6 +520,7 @@ def test_population_prompt_excludes_question_and_consumer_predicates():
                         "branch_id": branch,
                         "mapping_basis": "UNTRUSTED_PREVIOUS_POPULATION_PROMISE",
                         "rows_ref": source.id,
+                        "record_fields": [],
                     }
                 ]
             },

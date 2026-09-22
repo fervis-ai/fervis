@@ -37,6 +37,8 @@ def compile_answer_program(
 ) -> tuple[AnswerProgram, BindingSet]:
     """Close, statically verify, pin, and canonicalize a reusable program."""
 
+    from fervis.lookup.source_reads.pagination import pagination_catalog_for_program
+    catalog = pagination_catalog_for_program(program, catalog)
     row_sources = build_row_source_catalog(
         catalog,
         memory_relations=memory_relations,

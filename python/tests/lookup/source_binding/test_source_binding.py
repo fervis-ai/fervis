@@ -371,7 +371,7 @@ def test_association_realization_schema_encodes_realization_kind_coherence() -> 
     payload = {
         "branch_id": branch.branch_id,
         "mapping_basis": "Both set instances occur in one returned row.",
-        "realization_ref": source.id,
+        "field_pairs": [], "realization_ref": source.id,
     }
 
     validate(payload, realization_schema)
@@ -723,6 +723,7 @@ def test_semantic_binding_maps_requirements_once_per_strategy_branch() -> None:
                     "branch_id": branch_id,
                     "mapping_basis": "Staff rows represent the requested set.",
                     "rows_ref": identity_evidence.identity_ref,
+                    "record_fields": [],
                 }
             ]
         },

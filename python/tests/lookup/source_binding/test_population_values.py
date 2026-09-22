@@ -137,6 +137,7 @@ def test_explicit_multivalue_predicate_requires_executable_union_identity():
                         "branch_id": branch,
                         "mapping_basis": "Requested rows",
                         "rows_ref": request.source_catalog.sources[0].id,
+                        "record_fields": [],
                     }
                 ]
             },

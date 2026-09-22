@@ -80,7 +80,7 @@ def test_predicate_date_must_be_available_on_its_owning_rows(can_filter_date):
     ) is can_filter_date
 
 
-def test_associated_roles_reject_a_disconnected_type_compatible_source():
+def test_associated_roles_allow_explicit_equality_without_relationship_metadata():
     from dataclasses import replace
     from tests.lookup.relational_engine.test_scoped_compilation import employee_query
 
@@ -90,5 +90,5 @@ def test_associated_roles_reject_a_disconnected_type_compatible_source():
     request = replace(request, source_catalog=replace(
         request.source_catalog, sources=(source, disconnected)
     ))
-    assert 'unrelated_rows' not in request.row_references_for_set('fact_1:set:manager')
-    assert 'unrelated_rows' not in request.row_references_for_set('fact_1:set:employee')
+    assert 'unrelated_rows' in request.row_references_for_set('fact_1:set:manager')
+    assert 'unrelated_rows' in request.row_references_for_set('fact_1:set:employee')

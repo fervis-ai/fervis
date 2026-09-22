@@ -354,6 +354,7 @@ def test_only_bound_sources_become_executable_reads(unused_has_choices) -> None:
                     "branch_id": branch.branch_id,
                     "mapping_basis": "The event rows alone realize the counted set.",
                     "rows_ref": source.id,
+                    "record_fields": [],
                 }
             ]
         },

@@ -1,5 +1,5 @@
 id: retained_read_keeps_deep_row_source_for_its_field
-description: A retained endpoint keeps a nested row set when the selected value exists only on that row set.
+description: A retained endpoint preserves its row sets for explicit source realization instead of inferring grain from relevant fields.
 kind: algorithm
 algorithm: semantic.kernel
 input:
@@ -18,5 +18,5 @@ input:
   retained_field_tokens: [sale_item_id]
 expect:
   result_contains:
-    retained_source_refs: [sale_items]
-    retained_source_count: 1
+    retained_source_refs: [sales, sale_items]
+    retained_source_count: 2

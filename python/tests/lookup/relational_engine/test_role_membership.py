@@ -175,6 +175,7 @@ def _run_role_membership(
                     "branch_id": v.branch_id,
                     "mapping_basis": v.mapping_basis,
                     "rows_ref": v.identity_ref or v.source_ref,
+                    "record_fields": [],
                 }
                 for v in values
             ]
@@ -196,7 +197,7 @@ def _run_role_membership(
                 {
                     "branch_id": value.branch_id,
                     "mapping_basis": value.mapping_basis,
-                    "realization_ref": value.relation_evidence_ref,
+                    "field_pairs": [], "realization_ref": value.relation_evidence_ref,
                     "reference_from_set_ref": value.reference_from_set_ref,
                 }
                 for value in values

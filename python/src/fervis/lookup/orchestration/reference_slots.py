@@ -2,7 +2,7 @@
 from dataclasses import dataclass, replace
 
 from fervis.lookup.question_contract.model import InputDenotationKind
-from fervis.lookup.relational_sql.acquisition import RelationView
+from fervis.lookup.answer_program.relation_views import RelationView
 from fervis.lookup.relational_sql.execution import QueryValidationError
 from fervis.lookup.relational_sql.outputs import identity_carriers, identity_authorities
 

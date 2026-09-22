@@ -450,6 +450,7 @@ class TimelineRunView:
     program_derivation: ProgramDerivationView | None = None
     base_run_id: str | None = None
     clarification_responses: tuple[ClarificationResponseView, ...] = ()
+    runtime_errors: tuple[RuntimeErrorView, ...] = ()
 
 
 @dataclass(frozen=True)

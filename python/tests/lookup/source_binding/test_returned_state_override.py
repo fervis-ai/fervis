@@ -272,6 +272,13 @@ def test_optional_state_disjunct_preserves_ordinary_rows_and_is_not_pushed_into_
     )
     assert not request.invocation_preserves_population(state_requirement)
     payload["finite_choice_applications"] = {branch.branch_id: {}}
+    payload["fact_bindings"]["fact_1:fact:f1"] = [
+        {
+            "branch_id": branch.branch_id,
+            "mapping_basis": "The returned Boolean owns the local cancellation test.",
+            "field_ref": "source_field:source_sales:state_bit",
+        }
+    ]
     payload["fact_bindings"]["fact_1:fact:f_amount"] = [
         {
             "branch_id": branch.branch_id,

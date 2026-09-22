@@ -89,7 +89,7 @@ def test_required_nonfiltering_control_is_bindable_without_becoming_a_predicate(
     branch = request.strategy.branches[0].branch_id
     realized = compile_source_realization({
         'set_bindings': {request.index.subject_obligation.subject_set_ref.token: [
-            { 'branch_id': branch, 'mapping_basis': 'Requested rows', 'rows_ref': source.id}]},
+            { 'branch_id': branch, 'mapping_basis': 'Requested rows', 'rows_ref': source.id, "record_fields": []}]},
         'fact_bindings': {}, 'association_bindings': {},
     }, request=request)
     surface = request.source_catalog.choice_surfaces[0]
@@ -171,7 +171,7 @@ def test_documented_open_numeric_control_reaches_the_compiled_invocation(require
     branch = request.strategy.branches[0].branch_id
     realized = compile_source_realization({
         'set_bindings': {request.index.subject_obligation.subject_set_ref.token: [
-            { 'branch_id': branch, 'mapping_basis': 'Rows', 'rows_ref': source.id}]},
+            { 'branch_id': branch, 'mapping_basis': 'Rows', 'rows_ref': source.id, "record_fields": []}]},
         'fact_bindings': {}, 'association_bindings': {},
     }, request=request)
     plan = compile_source_binding_plan({'resolved_input_applications': {branch: []},

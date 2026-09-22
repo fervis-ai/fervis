@@ -8,10 +8,20 @@ from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
 
 
 @dataclass(frozen=True)
+class RecordFieldRealizationOutput(ProviderOutput):
+    name: str
+    field_ref: str
+
+
+@dataclass(frozen=True)
 class SetRealizationOutput(ProviderOutput):
     branch_id: str
     mapping_basis: str
     rows_ref: str
+    record_fields: tuple[RecordFieldRealizationOutput, ...]
+    reference_proxy_field_ref: str | None = None
+    address_parameter_ref: str | None = None
+    address_input_use_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -22,10 +32,17 @@ class ReturnedFactRealizationOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class AssociationFieldPairOutput(ProviderOutput):
+    from_field_ref: str
+    to_field_ref: str
+
+
+@dataclass(frozen=True)
 class AssociationRealizationOutput(ProviderOutput):
     branch_id: str
     mapping_basis: str
-    realization_ref: str
+    realization_ref: str | None
+    field_pairs: tuple[AssociationFieldPairOutput, ...]
     reference_from_set_ref: str | None = None
 
 

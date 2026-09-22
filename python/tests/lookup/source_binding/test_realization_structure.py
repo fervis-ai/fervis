@@ -14,6 +14,7 @@ def test_realization_rejects_co_resident_independent_rows_before_membership():
                     "branch_id": value.branch_id,
                     "mapping_basis": f"Explicit role {ref}",
                     "rows_ref": value.identity_ref or value.source_ref,
+                    "record_fields": [],
                 }
                 for value in values
             ]
@@ -34,7 +35,7 @@ def test_realization_rejects_co_resident_independent_rows_before_membership():
                 {
                     "branch_id": "branch",
                     "mapping_basis": "Shared producer.",
-                    "realization_ref": source.id,
+                    "field_pairs": [], "realization_ref": source.id,
                 }
             ]
             for ref in verified.binding_plan.association_bindings
@@ -98,6 +99,7 @@ def _self_relationship_payload():
                     "branch_id": value.branch_id,
                     "mapping_basis": f"Explicit role {ref}",
                     "rows_ref": value.identity_ref or value.source_ref,
+                    "record_fields": [],
                 }
                 for value in values
             ]
@@ -118,7 +120,7 @@ def _self_relationship_payload():
                 {
                     "branch_id": "branch",
                     "mapping_basis": "Employee manager reference.",
-                    "realization_ref": edge,
+                    "field_pairs": [], "realization_ref": edge,
                     "reference_from_set_ref": "fact_1:set:employee",
                 }
             ],

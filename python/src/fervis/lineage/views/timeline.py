@@ -62,6 +62,8 @@ def _timeline_run(run, *, model_calls: tuple[ModelCallInspectionView, ...]):
         ),
         base_run_id=run.base_run_id,
         clarification_responses=run.clarification_responses,
+        runtime_errors=tuple(error for error in run.runtime_errors
+            if error.failed_step_id not in {step.step_id for step in run.steps}),
     )
 
 

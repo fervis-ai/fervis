@@ -209,7 +209,8 @@ def instantiate_answer_program(
 
     if not program.fact_template:
         raise VerificationError("answer program requires persisted fact template")
-    catalog = environment.execution_catalog
+    from fervis.lookup.source_reads.pagination import pagination_catalog_for_program
+    catalog = pagination_catalog_for_program(program, environment.execution_catalog)
     verify_program_compatibility(
         program,
         catalog=catalog,

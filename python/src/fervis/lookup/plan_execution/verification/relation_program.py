@@ -55,6 +55,9 @@ def prepare_relation_program(
     catalog_selection=None,
     authorized_sources=None,
 ) -> PreparedRelationProgram[_Program]:
+    from fervis.lookup.source_reads.pagination import pagination_catalog_for_program
+    if catalog is not None:
+        catalog = pagination_catalog_for_program(answer, catalog)
     bindings = compiled_inputs.bindings
     row_sources = (
         build_row_source_catalog(catalog, memory_relations=memory_relations)
@@ -73,8 +76,9 @@ def prepare_relation_program(
     for operation in answer.operations:
         verify_operation(operation)
     _verify_operation_references(answer)
-    from fervis.lookup.relational_sql.reference_matching import verify_reference_candidate_completeness
+    from fervis.lookup.plan_execution.reference_resolution import verify_reference_candidate_completeness, verify_observed_reference_guards
     verify_reference_candidate_completeness(answer)
+    verify_observed_reference_guards(answer)
     _verify_program_expression_targets(
         answer,
         bindings=bindings,

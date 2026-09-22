@@ -121,6 +121,7 @@ def test_direct_boolean_requirement_owns_matching_truth_choice_application() -> 
                     "branch_id": branch.branch_id,
                     "mapping_basis": "Sale rows realize the requested sale set.",
                     "rows_ref": source.id,
+                    "record_fields": [],
                 }
             ]
         },
@@ -454,6 +455,7 @@ def _source_required_choice_payload(
                     "branch_id": branch_id,
                     "mapping_basis": "Sale rows realize the requested set.",
                     "rows_ref": source.id,
+                    "record_fields": [],
                 }
             ]
         },

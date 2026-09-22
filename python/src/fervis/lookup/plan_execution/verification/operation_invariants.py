@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fervis.lookup.answer_program.operations import JoinMode, SqlQuerySpec
+from fervis.lookup.answer_program.operations import JoinMode, JoinBasis, SqlQuerySpec, ReferenceGuardSpec
 
 from typing_extensions import assert_never
 
@@ -42,7 +42,10 @@ def verify_operation(operation: Operation) -> None:
     spec = operation.spec
     if not isinstance(spec, ComputeSpec) and not operation.output_relation:
         raise VerificationError(f"{operation.id} requires output relation")
-    if isinstance(spec, SqlQuerySpec):
+    if isinstance(spec, ReferenceGuardSpec):
+        _require_input(spec.input_relation, "reference_guard")
+        _require_unique_fields(spec.fields, "reference_guard")
+    elif isinstance(spec, SqlQuerySpec):
         from fervis.lookup.relational_sql.operation import validate_sql_operation
         validate_sql_operation(spec)
     elif isinstance(spec, FilterSpec):
@@ -62,6 +65,8 @@ def verify_operation(operation: Operation) -> None:
             raise VerificationError("project_to_key requires key fields")
         _require_unique_fields((*spec.key_fields, *spec.carry_fields), "project_to_key")
     elif isinstance(spec, JoinSpec):
+        if not isinstance(spec.basis, JoinBasis):
+            raise VerificationError("join basis must be explicit")
         if not isinstance(spec.mode, JoinMode):
             raise VerificationError("join requires a declared join mode")
         _require_binary_join(spec.left, spec.right, spec.join_keys, "join")

@@ -17,6 +17,7 @@ def example():
                     "branch_id": item.branch_id,
                     "mapping_basis": f"Independent role: {ref}",
                     "rows_ref": item.identity_ref or item.source_ref,
+                    "record_fields": [],
                 }
                 for item in values
             ]
@@ -37,7 +38,7 @@ def example():
                 {
                     "branch_id": item.branch_id,
                     "mapping_basis": "Declared reporting link.",
-                    "realization_ref": item.relation_evidence_ref
+                    "field_pairs": [], "realization_ref": item.relation_evidence_ref
                     or item.source_refs[0],
                     "reference_from_set_ref": item.reference_from_set_ref,
                 }

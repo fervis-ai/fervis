@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fervis.host_api.contracts.pagination import PaginationContract
+
 from fervis.host_api.contracts import ParameterSemantics
 
 from fervis.host_api.contracts.population import ParameterPopulation
@@ -275,6 +277,7 @@ class RowSource:
     entity_references: tuple[RowSourceEntityReference, ...] = ()
     params: tuple[RowSourceParam, ...] = ()
     blocked_facts: tuple[RowSourceBlockedFact, ...] = ()
+    pagination_binding: PaginationContract | None = None
 
     @property
     def stable_grain_field_refs(self) -> tuple[str, ...]:

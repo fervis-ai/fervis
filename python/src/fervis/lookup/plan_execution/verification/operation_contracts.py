@@ -2,7 +2,7 @@
 
 from typing_extensions import assert_never
 
-from fervis.lookup.answer_program.operations import JoinMode, SqlQuerySpec
+from fervis.lookup.answer_program.operations import JoinMode, JoinBasis, SqlQuerySpec, ReferenceGuardSpec
 from fervis.lookup.plan_execution.expression_schema import expression_value_type
 
 from ._shared import (
@@ -59,6 +59,9 @@ def _operation_relation_contract(
     node_output_types: dict[str, dict[str, str]],
 ) -> RelationContract:
     spec = operation.spec
+    if isinstance(spec, ReferenceGuardSpec):
+        from fervis.lookup.plan_execution.reference_resolution import reference_guard_contract
+        return reference_guard_contract(operation, contracts, proof_context)
     if isinstance(spec, SqlQuerySpec):
         from fervis.lookup.relational_sql.operation import sql_relation_contract
         return sql_relation_contract(operation, contracts, proof_context)
@@ -288,7 +291,7 @@ def _join_contract(
         left,
         right,
         spec.join_keys,
-        require_identity_authority=True,
+        require_identity_authority=spec.basis is JoinBasis.DECLARED_IDENTITY,
     )
     fields = {**left.fields}
     field_proofs = {

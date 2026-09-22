@@ -177,3 +177,68 @@ def test_question_frame_assertion_preserves_typed_reference_values():
         assert validate(body,context)==[]
         changed={**context,'required_supplied_values':{value:{'denotation':'scalar'}}}
         assert any('denotation' in error for error in validate(body,changed))
+
+
+def test_property_scope_assertion_distinguishes_related_from_candidate_properties():
+    from dataclasses import replace
+    from fervis.lookup.question_contract import QuestionContract
+    from fervis.lookup.question_contract.analysis import analyze_requested_fact
+    from fervis.lookup.question_contract.model import Quantifier
+    from fervis.lookup.question_contract.parser import ParsedSemanticQuestionContract
+    from scripts.experiments.question_contract.assertion import _input_property_scope_errors
+    from tests.lookup.relational_engine.test_scoped_compilation import employee_query
+
+    index = employee_query(Quantifier.EXISTS, manager_minimum=True).request.index
+    context = {"input_property_scopes": {"minimum": "related"}}
+
+    def check(current):
+        parsed = ParsedSemanticQuestionContract(
+            "Staff whose managers exceed a supplied salary threshold.",
+            QuestionContract(tuple(current.input_by_ref.values()), (current.requested_fact,),
+                             tuple(current.input_denotation_by_ref.values())),
+            (current,),
+        )
+        return _input_property_scope_errors(parsed, context)
+
+    # The threshold is outside the correlated comparison in this fixture.
+    assert any("lacks a correlated quantifier" in error for error in check(index))
+    fact = index.requested_fact
+    quantified = next(node for node in fact.expressions if node.id == "quantified")
+    fact = replace(fact, qualification_ref="quantified", expressions=(
+        *(node for node in fact.expressions if node.id not in {"quantified", "all_conditions"}),
+        replace(quantified, condition_ref="minimum_manager_salary"),
+    ))
+    correlated = analyze_requested_fact(
+        fact, inputs=index.input_by_ref, input_denotations=index.input_denotation_by_ref
+    )
+    assert check(correlated) == []
+    candidate_fact = replace(fact, qualification_ref="minimum_manager_salary",
+        expressions=tuple(node for node in fact.expressions if node.id != "quantified"),
+        facts=tuple(
+        replace(term, owner_ref="employee") if term.id == "manager_salary" else term
+        for term in fact.facts
+    ))
+    candidate = analyze_requested_fact(
+        candidate_fact, inputs=index.input_by_ref, input_denotations=index.input_denotation_by_ref
+    )
+    assert any("belongs to candidate scope" in error for error in check(candidate))
+
+
+def test_source_realization_assertion_accepts_equivalent_carriers_but_rejects_borrowed_fields():
+    from scripts.experiments.source_realization.assertion import validate
+
+    context = {"expected_carrier_options": {"set": {
+        "rows_a": {"fact": ["source_field:rows_a:name"]},
+        "rows_b": {"fact": ["source_field:rows_b:name"]},
+    }}}
+    for source in ("rows_a", "rows_b"):
+        arguments = {
+            "set_bindings": {"set": [{"branch_id": "branch", "rows_ref": source}]},
+            "fact_bindings": {"fact": [{
+                "branch_id": "branch", "field_ref": f"source_field:{source}:name"
+            }]},
+            "association_bindings": {},
+        }
+        assert validate(arguments, context) == []
+        arguments["fact_bindings"]["fact"][0]["field_ref"] = "source_field:other:name"
+        assert any("selected carrier" in error for error in validate(arguments, context))

@@ -29,7 +29,7 @@ def _realization(mapped, mapping_field="field.flag"):
     # Predicates with no returned realization may still be supplied by the API.
     assert request.finite_choice_options_for_owner(owner, branch_id=branch)
     realization = compile_source_realization({
-        'set_bindings': {set_ref: [{ 'branch_id': branch, 'mapping_basis': 'Rows', 'rows_ref': source.id}]},
+        'set_bindings': {set_ref: [{ 'branch_id': branch, 'mapping_basis': 'Rows', 'rows_ref': source.id, "record_fields": []}]},
         'fact_bindings': {'fact_1:fact:flag': [{'branch_id': branch, 'mapping_basis': 'Returned flag', 'field_ref': f'source_field:{source.id}:flag'}]},
         'association_bindings': {},
     }, request=request)

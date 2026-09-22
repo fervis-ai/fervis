@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fervis.host_api.contracts.pagination import PaginationContract
+
 from dataclasses import dataclass
 from fervis.types.enums import StrEnum
 
@@ -41,6 +43,7 @@ class RelationSource:
     memory_relation_id: str = ""
     argument_relation_id: str = ""
     param_bindings: tuple[EndpointParamBinding, ...] = ()
+    pagination_binding: PaginationContract | None = None
     proof_refs: tuple[str, ...] = ()
 
 

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 class AssociationChoice:
     from_rows_ref: str
     to_rows_ref: str
-    realization_ref: str
+    realization_ref: str | None
     reference_from_set_ref: str | None = None
 
 
@@ -35,7 +35,7 @@ def endpoint_realizations(
     request: SemanticSourceBindingRequest,
     left: str,
     right: str,
-) -> tuple[tuple[str, bool | None], ...]:
+) -> tuple[tuple[str | None, bool | None], ...]:
     """Evidence and source-end orientation; None means orientation is unambiguous."""
     identities = {
         item.identity_ref: item for item in request.source_catalog.identity_evidence
@@ -43,10 +43,21 @@ def endpoint_realizations(
     left_id, right_id = identities.get(left), identities.get(right)
     left_source = left_id.source_ref if left_id else left
     right_source = right_id.source_ref if right_id else right
-    result: list[tuple[str, bool | None]] = []
+    result: list[tuple[str | None, bool | None]] = []
+    from .observed_associations import comparable_fields
+
+    if any(comparable_fields(a, b)
+           for a in request.source_catalog.source(left_source).fields
+           for b in request.source_catalog.source(right_source).fields):
+        result.append((None, None))
     if left_source == right_source and any(
         identity is not None and identity.kind is RowSourceIdentityKind.ENTITY_REFERENCE
         for identity in (left_id, right_id)
+    ):
+        result.append((left_source, None))
+    if left_source == right_source and any(
+        option.source_ref == left_source
+        for option in request.address_reference_options()
     ):
         result.append((left_source, None))
     for edge in request.source_catalog.relation_evidence:
@@ -65,7 +76,7 @@ def association_choices(
     request: SemanticSourceBindingRequest, ref: str
 ) -> tuple[AssociationChoice, ...]:
     left_set, right_set = association_endpoints(request, ref)
-    return tuple(
+    normal = tuple(
         AssociationChoice(
             left,
             right,
@@ -78,3 +89,9 @@ def association_choices(
         for right in request.row_references_for_set(right_set)
         for evidence, orientation in endpoint_realizations(request, left, right)
     )
+    address = tuple(
+        AssociationChoice(option.source_ref, option.source_ref, option.source_ref)
+        for option in request.address_scope_options_for_set(right_set)
+        if option.source_ref in request.row_references_for_set(left_set)
+    )
+    return tuple(dict.fromkeys((*normal, *address)))

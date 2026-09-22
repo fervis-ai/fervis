@@ -30,6 +30,7 @@ from fervis.lookup.question_contract import model as question_contract_model
 from fervis.lookup import semantic_types
 from fervis.lookup import qualification
 from fervis.lookup import canonical_data
+from fervis.host_api.contracts.pagination import PaginationContract, PaginationKind
 
 
 _Contract = TypeVar("_Contract")
@@ -603,6 +604,7 @@ _CONTRACT_TYPES = (
     capability_contracts.CapabilityApplication,
     capability_contracts.CapabilityKind,
     capability_contracts.NarrowPopulationCapability,
+    PaginationContract,
     model.AnswerProgram,
     model.FactFulfillment,
     model.RelationGuaranteeDeclaration,
@@ -619,6 +621,8 @@ _CONTRACT_TYPES = (
     operations.FilterSpec,
     operations.JoinKey,
     operations.JoinMode,
+    operations.JoinBasis,
+    PaginationKind,
     operations.JoinSpec,
     operations.Operation,
     operations.OperationKind,
@@ -628,6 +632,7 @@ _CONTRACT_TYPES = (
     operations.SqlNamedInput,
     operations.SqlOutputField,
     operations.SqlQuerySpec,
+    operations.ReferenceGuardSpec,
     operations.ProjectSpec,
     operations.ProjectToKeySpec,
     operations.KeepAll,

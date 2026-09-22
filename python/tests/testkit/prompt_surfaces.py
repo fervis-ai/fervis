@@ -48,6 +48,7 @@ PROMPT_SURFACE_CONTRACTS = {
     "semantic_question_contract": {
         "path": LOOKUP_ROOT / "question_contract" / "prompt.py",
         "instruction_headings": (
+            "Explicit identifier operands",
             "Outcome",
             "Grouping ownership",
             "Temporal operands",

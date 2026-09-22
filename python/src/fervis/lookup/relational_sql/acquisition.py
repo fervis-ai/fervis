@@ -26,13 +26,6 @@ class ApiView:
 
 
 @dataclass(frozen=True)
-class RelationView:
-    name: str
-    relation_id: str
-    columns: Mapping[str, str]
-
-
-@dataclass(frozen=True)
 class MaterializedViews:
     tables: Mapping[str, SqlTable]
     proof_refs: Mapping[str, tuple[str, ...]]
@@ -64,7 +57,7 @@ def compile_api_views(views: tuple[ApiView, ...], *, catalog,
             role = FieldBindingRole.OUTPUT if FieldBindingRole.OUTPUT in field.allowed_roles else field.allowed_roles[0]
             fields.append(RelationField(field.id, (role,)))
         relations.append(Relation(view.name, RelationSource(SourceKind.API_READ,
-            read_id=source.read_id, row_source_id=source.id, param_bindings=tuple(bindings),argument_relation_id=view.argument_relation_id), tuple(fields)))
+            read_id=source.read_id, row_source_id=source.id, pagination_binding=source.pagination_binding, param_bindings=tuple(bindings),argument_relation_id=view.argument_relation_id), tuple(fields)))
     program = expand_read_access(RelationProgram(relations=tuple(relations)), access)
     return program
 

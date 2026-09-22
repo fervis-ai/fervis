@@ -100,27 +100,6 @@ def _observed_expression(node, *, table, columns):
     raise QueryValidationError('Literal matching permits observed fields and null-preserving formatting, not invented values or fallback branches')
 
 
-def verify_reference_candidate_completeness(program):
-    """Recheck persisted reference ancestry before any source read."""
-    from fervis.lookup.answer_program.operations import SqlQuerySpec
-    from fervis.lookup.plan_execution.errors import VerificationError
-    producers = {operation.output_relation: operation for operation in program.operations if operation.output_relation}
-    pending = [operation for operation in program.operations
-               if isinstance(operation.spec, SqlQuerySpec) and operation.spec.reference_input_ref]
-    seen = set()
-    while pending:
-        operation = pending.pop()
-        if operation.id in seen:
-            continue
-        seen.add(operation.id)
-        if isinstance(operation.spec, SqlQuerySpec):
-            try:
-                reject_reference_truncation(operation.spec.query)
-            except QueryValidationError as exc:
-                raise VerificationError(str(exc)) from exc
-        pending.extend(producers[relation] for relation in operation.input_relation_ids if relation in producers)
-
-
 def _normalized_columns(expression):
     return expression.transform(lambda node: exp.column(node.name.casefold()) if isinstance(node, exp.Column) else node)
 

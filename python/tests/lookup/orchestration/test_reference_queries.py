@@ -25,7 +25,7 @@ from tests.lookup.relational_engine.test_dependent_reads import _read
 
 def _record_demand():
     from fervis.lookup.orchestration.reference_slots import ReferenceSlot
-    from fervis.lookup.relational_sql.acquisition import RelationView
+    from fervis.lookup.answer_program.relation_views import RelationView
     name = 'fact_1__reference_i1'
     return {'i1': ReferenceSlot(RelationView('i1', name+'.rows', {'id':'id'}),
         {'candidate_keys':[{'entity_kind':'records','key_id':'primary','components':{'id':'id'}}]}, ('i1',), name)}
@@ -74,7 +74,8 @@ def test_normal_reference_planner_compiles_live_reference_relations(case,text,ex
     authored=parse_reference_query(payload,prompt=prompt,menu=menu)
     inputs=(InputTerm('i1',origin,text,TextType()),)
     denotations=(InputDenotation('d1','i1','record reference','The input denotes a record.','records',InputDenotationKind.IDENTITY_REFERENCE,reference_descriptions=(text,) if case == 'role' else ()),)
-    from fervis.lookup.orchestration.reference_queries import plan_fact_references, reference_input_values
+    from fervis.lookup.orchestration.reference_queries import plan_fact_references
+    from fervis.lookup.grounding.reference_literals import reference_input_values
     from fervis.lookup.grounding.semantic import GroundingPartition
     partitions=(GroundingPartition('i1',('fact_1:sql_input:i1',),TextType(),None,'record reference',is_identity_reference=True),)
     values=reference_input_values(partitions,inputs={'i1':inputs[0]})
@@ -136,7 +137,8 @@ def test_normal_reference_planner_compiles_live_reference_relations(case,text,ex
 
 
 def test_interpreted_collection_member_keeps_the_original_collection_binding():
-    from fervis.lookup.orchestration.reference_queries import plan_fact_references,reference_input_values
+    from fervis.lookup.orchestration.reference_queries import plan_fact_references
+    from fervis.lookup.grounding.reference_literals import reference_input_values
     from fervis.lookup.grounding.semantic import GroundingPartition
     from fervis.lookup.semantic_types import CollectionType
     read=replace(_read('records'),fields=(*_read('records').fields,
@@ -196,7 +198,8 @@ def test_interpreted_collection_member_keeps_the_original_collection_binding():
 def test_reference_compilation_retains_prerequisites_outside_its_recalled_views():
     from fervis.lookup.relation_catalog import CatalogParam,ParamSource,EntityKeyComponentTarget
     from fervis.lookup.source_reads.access_model import ReadDependency,AccessArgument
-    from fervis.lookup.orchestration.reference_queries import reference_input_values,plan_fact_references
+    from fervis.lookup.orchestration.reference_queries import plan_fact_references
+    from fervis.lookup.grounding.reference_literals import reference_input_values
     from fervis.lookup.grounding.semantic import GroundingPartition
     parent=_read('organizations')
     child=replace(_read('records',params=(CatalogParam('organization_id','organization_id',ParamSource.PATH,'integer',
@@ -245,7 +248,8 @@ def test_reference_compilation_retains_prerequisites_outside_its_recalled_views(
 def test_configured_reference_can_use_a_keyless_settings_relation(monkeypatch):
     from fervis.lookup.relation_catalog import EntityReference,EntityReferenceComponent
     from fervis.lookup.relation_catalog.selection import select_resolver_reads
-    from fervis.lookup.orchestration.reference_queries import reference_input_values,plan_fact_references
+    from fervis.lookup.orchestration.reference_queries import plan_fact_references
+    from fervis.lookup.grounding.reference_literals import reference_input_values
     from fervis.lookup.grounding.semantic import GroundingPartition
     from fervis.lookup.relational_sql.execution import QueryValidationError
     settings=replace(_read('settings'),resource_names=('settings',),candidate_keys=(),
@@ -292,7 +296,8 @@ def test_configured_reference_can_use_a_keyless_settings_relation(monkeypatch):
 def test_composite_reference_collection_keeps_rest_arguments_paired_after_replay():
     from fervis.lookup.relation_catalog import CandidateKey, CandidateKeyComponent, CatalogParam, EntityKeyComponentTarget
     from fervis.lookup.orchestration.reference_slots import ReferenceContract, reference_slots
-    from fervis.lookup.orchestration.reference_queries import plan_fact_references, reference_input_values, reference_prerequisites
+    from fervis.lookup.orchestration.reference_queries import plan_fact_references, reference_prerequisites
+    from fervis.lookup.grounding.reference_literals import reference_input_values
     from fervis.lookup.grounding.semantic import GroundingPartition
     from fervis.lookup.semantic_types import CollectionType
     from fervis.lookup.relational_sql.parameters import with_reference_arguments

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fervis.host_api.contracts.pagination import PaginationContract
+
 from fervis.host_api.contracts.population import ParameterPopulation
 
 from dataclasses import dataclass
@@ -205,6 +207,8 @@ class EndpointRead:
     facts: tuple[CatalogFact, ...] = ()
     response_envelope: ResponseEnvelopeMetadata = ResponseEnvelopeMetadata()
     pagination: PaginationMetadata | None = PaginationMetadata()
+    complete_single_response: bool = False
+    pagination_binding: PaginationContract | None = None
     access: tuple[str, ...] = ()
     catalog_endpoint: CatalogEndpointMetadata | None = None
     source_metadata: dict[str, Any] | None = None

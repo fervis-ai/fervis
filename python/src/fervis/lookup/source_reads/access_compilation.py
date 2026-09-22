@@ -115,6 +115,7 @@ def expand_read_access(program: _Program, access: ReadAccessCatalog) -> _Program
                 SourceKind.API_READ,
                 read_id=parent.read_id,
                 row_source_id=parent.id,
+                pagination_binding=parent.pagination_binding,
                 proof_refs=dependency.evidence_refs,
             ),
             fields,

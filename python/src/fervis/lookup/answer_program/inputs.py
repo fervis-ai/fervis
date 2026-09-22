@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from typing_extensions import assert_never
 
@@ -45,6 +45,7 @@ from fervis.lookup.answer_program.operations import (
     JoinSpec,
     Operation,
     SqlQuerySpec,
+    ReferenceGuardSpec,
     ProjectSpec,
     ProjectToKeySpec,
     OrderSpec,
@@ -220,6 +221,7 @@ def _operation_value_expressions(
         spec,
         (
             ProjectToKeySpec,
+            ReferenceGuardSpec,
             JoinSpec,
             UnionSpec,
             RoleExpandSpec,
@@ -494,3 +496,28 @@ def _validate_binding(
             "disallowed_parameter_value",
             f"binding for {parameter.id} contains a disallowed value",
         )
+
+
+def merge_parameter_declarations(
+    items: tuple[ParameterDeclaration, ...],
+) -> tuple[ParameterDeclaration, ...]:
+    """Combine use sites while preserving each parameter's certified contract."""
+    declarations: dict[str, ParameterDeclaration] = {}
+    for item in items:
+        prior = declarations.get(item.id)
+        if prior is not None:
+            fixed_values = {
+                value for value in (prior.fixed_value_fingerprint, item.fixed_value_fingerprint)
+                if value
+            }
+            if len(fixed_values) > 1:
+                raise ValueError("Shared parameter fixed values conflict")
+            fixed_value = next(iter(fixed_values), "")
+            item = replace(item, fixed_value_fingerprint=fixed_value)
+            if replace(prior, input_use_refs=item.input_use_refs,
+                       fixed_value_fingerprint=fixed_value) != item:
+                raise ValueError("Shared parameter declarations conflict")
+            item = replace(item, input_use_refs=tuple(sorted(
+                set(prior.input_use_refs) | set(item.input_use_refs))))
+        declarations[item.id] = item
+    return tuple(declarations.values())

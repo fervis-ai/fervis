@@ -115,6 +115,25 @@ def invocation_target_value(request, *, source_ref: str, target: InvocationTarge
     """Use the same typed projection for proof checks and executable bindings."""
     source = request.source_catalog.source(source_ref)
     param = next(item for item in source.params if item.param_ref == target.target_ref)
+    addressed = tuple(
+        value
+        for use_ref, _, marker_source, marker_param in request.address_scope_values
+        if (marker_source, marker_param) == (source_ref, target.target_ref)
+        for value in request.canonical_values
+        if value.canonical_value_id == target.value_ref
+        and use_ref in value.use_refs
+    )
+    if addressed:
+        from fervis.lookup.relation_catalog.parameter_values import parse_catalog_parameter_text
+
+        if len(addressed) != 1 or target.projection is not ValueProjectionKind.WHOLE_VALUE:
+            raise ValueError("Address input requires one complete literal projection")
+        operand = request.index.input_by_ref[addressed[0].input_ref].operand
+        if not isinstance(operand, str):
+            raise ValueError("Address input must be one supplied scalar")
+        return parse_catalog_parameter_text(
+            operand, type_name=param.type.value, choices=param.choices
+        )
     return fact_value_parameter_projection(
         invocation_value(request, target.value_ref),
         projection=target.projection,
