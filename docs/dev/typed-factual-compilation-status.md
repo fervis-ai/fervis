@@ -25,12 +25,18 @@ set cannot be substituted under an existing input ID.
   population, and warehouse ranking passed through the ordinary CLI.
 - Independent FastAPI: paginated scan and unpaginated measurement counts,
   default-site role and reporting-site proxy counts passed.
+- After the staged-access change, the independent FastAPI pagination controls
+  passed again through the ordinary CLI: four scans across numbered pages and
+  three unpaginated measurements.
 - Independent Django/DRF and Flask: standard user and Todo counts passed.
 - Isolated Ozana `supplies_01`: ordinary goldset CLI answered 5, matching the
   independent oracle. The persisted run compiled and executed a typed plan in
   104 seconds with nine model calls, zero source-access turns and $0.079 of
   model spend. The host JWT was carried through the encrypted delegated-read
   contract and reauthenticated as the same Django principal.
+- The private Ozana suite's 281 oracles were computed offline against the
+  isolated fixture database with no exceptions or `oracle_failed` results.
+  This checks fixture/oracle readiness, not assistant answers.
 - Address-only FastAPI: integer, UUID and decimal path-addressed facility
   counts passed without a district-list endpoint.
 - Anonymous collection control: two named district alternatives counted all
@@ -62,10 +68,11 @@ source-access prompt previously carried every field of every parent candidate;
 it now carries only fields structurally capable of supplying a required
 argument, along with target identity fields. Access for unselected positive
 reads is deferred until the first typed realization fails; a dependent-source
-fallback is covered deterministically. Read Eligibility still reviews all
-positive batches in the passing live receipt. The next revision attempts typed
-realization after each batch and stops on a verified success, with later-batch
-fallback tests; its reduced live cost is not yet measured. The authorization
+fallback is covered deterministically. Read Eligibility reviewed four positive
+batches in the passing Ozana receipt. The current code attempts typed
+realization after each batch and stops on a verified success. Representation
+inspection and pagination interpretation are also deferred to each visited
+batch. Their reduced live cost is not yet measured. The authorization
 handoff is proved for this host and case; other APIs and question classes still
 need live coverage.
 
@@ -76,6 +83,6 @@ authority, and arbitrary REST completeness declarations need further proof.
 Direct SQL-operation support remains in the program runtime even though the
 model-SQL authoring route is retired; remove it after typed behavior parity.
 The conservative local reconciliation of the original provider-credit budget
-estimates about $0.108 remaining, so additional paid
+estimates about $0.046 remaining, so additional paid
 matrix runs require a fresh budget check. Keep the PR draft and the README's
 alpha designation until the complete Quality Bar and release gates pass.

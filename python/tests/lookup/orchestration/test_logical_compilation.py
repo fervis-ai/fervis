@@ -12,7 +12,7 @@ from fervis.lookup.orchestration import semantic_compilation as shared
 from fervis.lookup.orchestration.logical_compilation import compile_logical_question
 from fervis.lookup.question_contract import QuestionContractRequest
 from fervis.lookup.turn_prompts import HostPromptContext
-from fervis.lookup.relation_catalog import RelationCatalog
+from fervis.lookup.relation_catalog import CatalogParam, ParamSource, RelationCatalog
 from fervis.lookup.query_enrichment.semantic import (
     SemanticQueryEnrichmentResult,
     RecallBucketMatch,
@@ -186,21 +186,28 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
             return {
                 "responseStatus": 200,
                 "responseBody": [{"id": 1}, {"id": 2}, {"id": 3}],
+                "responseFormat": "json",
             }
 
-    catalog = RelationCatalog(
-        reads=tuple(
-            replace(
-                _read(name),
-                resource_names=("stores",),
-                **({} if annotated else {"candidate_keys": ()}),
-            )
-            for name in (
-                ("stores", "more_stores", "third_stores", "fourth_stores")
-                if batched else ("stores",)
-            )
-        )
+    names = (
+        ("stores", "more_stores", "third_stores", "fourth_stores")
+        if batched else ("stores",)
     )
+    catalog = RelationCatalog(reads=tuple(
+        replace(
+            _read(name), resource_names=("stores",),
+            **(
+                {
+                    "fields": (), "candidate_keys": (), "path": "/stores/",
+                    "params": (CatalogParam("page", "page", ParamSource.QUERY, "integer"),),
+                    "source_metadata": {"representation_authority": "unobserved"},
+                }
+                if batched and outcome in {"normal", "unavailable"} and name == "fourth_stores"
+                else {} if annotated else {"candidate_keys": ()}
+            ),
+        )
+        for name in names
+    ))
     if outcome == "empty":
         catalog = RelationCatalog()
     request = shared.SemanticCompilationRequest(
@@ -223,14 +230,20 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
         assert isinstance(result, shared.SemanticCompilationImpossible)
         assert result.question_contract is logical[0]
         assert result.blocked_fact_ids == ("fact_1",)
-        assert reads == []
+        assert reads == (
+            [("fourth_stores", {})]
+            if batched and outcome == "unavailable" else []
+        )
         assert seen == [
             "SemanticQuestionFrameTurnPrompt",
             "SemanticQuestionContractTurnPrompt",
             "SemanticQueryEnrichmentTurnPrompt",
         ] + (
-            ["SemanticSourceRealizationTurnPrompt"]
-            * (2 if batched else 1)
+            (
+                ["SemanticSourceRealizationTurnPrompt", "PaginationDiscoveryPrompt",
+                 "SemanticSourceRealizationTurnPrompt"]
+                if batched else ["SemanticSourceRealizationTurnPrompt"]
+            )
             if outcome == "unavailable" else []
         )
         return
@@ -245,6 +258,8 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
     )
     if batched:
         assert len(assessed) == 3
+        if outcome == "normal":
+            assert "fourth_stores" in result.catalog_selection.requested_fact_selections[0].unselected_positive_read_ids
     assert seen == [
         "SemanticQuestionFrameTurnPrompt",
         "SemanticQuestionContractTurnPrompt",

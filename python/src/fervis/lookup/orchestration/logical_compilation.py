@@ -172,9 +172,14 @@ def compile_logical_question(request, *, on_turn=None):
             )
         )
     )
+    identity_access_required = bool(references) or any(
+        denotation.denoted_instance_kind is not None
+        for denotation in contract.input_denotations
+    )
+    preflight_read_ids = access_ids if identity_access_required else resolver_ids
     observed = inspect_selected_representations(
         request.full_catalog,
-        read_ids=access_ids,
+        read_ids=preflight_read_ids,
         data_access_port=request.data_access_port,
         on_response=request.representation_observer,
         on_failure=request.discovery_failures.append,
@@ -186,7 +191,7 @@ def compile_logical_question(request, *, on_turn=None):
         parse_pagination_discovery,
     )
 
-    traversal_request = PaginationDiscoveryRequest(request.full_catalog, access_ids)
+    traversal_request = PaginationDiscoveryRequest(request.full_catalog, preflight_read_ids)
     if traversal_request.targets:
         observed = turn(
             ModelTurnPurpose.SOURCE_ACCESS,
@@ -214,13 +219,7 @@ def compile_logical_question(request, *, on_turn=None):
             resolver_row_sources=build_row_source_catalog(catalog),
             expected_identity=None,
         )
-    initial_access_ids = (
-        access_ids if references or any(
-            denotation.denoted_instance_kind is not None
-            for denotation in contract.input_denotations
-        )
-        else resolver_ids
-    )
+    initial_access_ids = preflight_read_ids
     access = shared._discover_read_access(
         initial_access_ids, request=request, context=context, on_turn=on_turn
     )
@@ -303,7 +302,7 @@ def compile_logical_question(request, *, on_turn=None):
     request, selection, eligibility, early_outcome = _assess_catalog_batches(
         request, selection=initial_selection, access=access, indexes=indexes,
         grounding=grounding, resolver_catalog=resolver_catalog,
-        context=context, on_turn=on_turn,
+        context=context, on_turn=on_turn, turn=turn,
         trial=trial if early_canonical is not None else None,
     )
     if isinstance(early_outcome, shared.SemanticCompilationSuccess):
@@ -361,7 +360,7 @@ def compile_logical_question(request, *, on_turn=None):
     request, selection, eligibility, deferred_outcome = _assess_catalog_batches(
         request, selection=initial_selection, access=access, indexes=indexes,
         grounding=grounding, resolver_catalog=resolver_catalog,
-        context=context, on_turn=on_turn, trial=trial,
+        context=context, on_turn=on_turn, turn=turn, trial=trial,
     )
     return deferred_outcome or _realize_eligible_sources(
         request, logical=logical, selection=selection, eligibility=eligibility,
@@ -458,7 +457,7 @@ def _realize_eligible_sources(
 
 def _assess_catalog_batches(
     request, *, selection, access, indexes, grounding, resolver_catalog,
-    context, on_turn, trial=None,
+    context, on_turn, turn, trial=None,
 ):
     assessments, batches = [], []
     attempted = None
@@ -471,6 +470,17 @@ def _assess_catalog_batches(
             on_response=request.representation_observer,
             on_failure=request.discovery_failures.append,
         )
+        from fervis.lookup.source_reads.pagination_discovery import (
+            PaginationDiscoveryRequest, PaginationDiscoveryPrompt,
+            parse_pagination_discovery,
+        )
+        traversal = PaginationDiscoveryRequest(observed, batch.selected_read_ids)
+        if traversal.targets:
+            observed = turn(
+                ModelTurnPurpose.SOURCE_ACCESS,
+                PaginationDiscoveryPrompt(traversal),
+                lambda payload: parse_pagination_discovery(payload, request=traversal),
+            )
         request = replace(request, full_catalog=observed)
         batch = replace(
             batch,
