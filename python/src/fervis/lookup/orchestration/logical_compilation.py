@@ -273,19 +273,41 @@ def compile_logical_question(request, *, on_turn=None):
         if tasks or temporal
         else SemanticGroundingResult((), ())
     )
-    initial_selection = selection
-    request, selection, eligibility = _assess_catalog_batches(
-        request, selection=initial_selection, access=access, indexes=indexes,
-        grounding=grounding, resolver_catalog=resolver_catalog,
-        context=context, on_turn=on_turn,
-    )
     from fervis.lookup.grounding.reference_literals import reference_input_values
     values = [
-        *reference_input_values(deferred,inputs=inputs),
+        *reference_input_values(deferred, inputs=inputs),
         *response_values,
         *deterministic_scalar_values(partitions, inputs=inputs),
         *grounding.canonical_values,
     ]
+    early_canonical = (
+        build_canonical_input_ledger(
+            tuple(values),
+            required_use_refs=tuple(
+                use.use_ref for index in indexes for use in index.input_use_sites
+            ),
+        )
+        if not grounding.identity_tasks else None
+    )
+
+    def trial(current_request, current_selection, current_eligibility):
+        assert early_canonical is not None
+        return _realize_eligible_sources(
+            current_request, logical=logical, selection=current_selection,
+            eligibility=current_eligibility, canonical=early_canonical,
+            indexes=indexes, access=current_request.read_access,
+            contract=contract, turn=turn,
+        )
+
+    initial_selection = selection
+    request, selection, eligibility, early_outcome = _assess_catalog_batches(
+        request, selection=initial_selection, access=access, indexes=indexes,
+        grounding=grounding, resolver_catalog=resolver_catalog,
+        context=context, on_turn=on_turn,
+        trial=trial if early_canonical is not None else None,
+    )
+    if isinstance(early_outcome, shared.SemanticCompilationSuccess):
+        return early_outcome
     task_by_ref = {task.task_ref: task for task in grounding.identity_tasks}
     for outcome in eligibility.identity_outcomes:
         if not isinstance(outcome, IdentityRouteSelection):
@@ -314,7 +336,7 @@ def compile_logical_question(request, *, on_turn=None):
             use.use_ref for index in indexes for use in index.input_use_sites
         ),
     )
-    outcome = _realize_eligible_sources(
+    outcome = early_outcome or _realize_eligible_sources(
         request, logical=logical, selection=selection, eligibility=eligibility,
         canonical=canonical, indexes=indexes, access=access, contract=contract,
         turn=turn,
@@ -336,12 +358,12 @@ def compile_logical_question(request, *, on_turn=None):
         context=context, on_turn=on_turn,
     )
     request = replace(request, read_access=access)
-    request, selection, eligibility = _assess_catalog_batches(
+    request, selection, eligibility, deferred_outcome = _assess_catalog_batches(
         request, selection=initial_selection, access=access, indexes=indexes,
         grounding=grounding, resolver_catalog=resolver_catalog,
-        context=context, on_turn=on_turn,
+        context=context, on_turn=on_turn, trial=trial,
     )
-    return _realize_eligible_sources(
+    return deferred_outcome or _realize_eligible_sources(
         request, logical=logical, selection=selection, eligibility=eligibility,
         canonical=canonical, indexes=indexes, access=access, contract=contract,
         turn=turn,
@@ -375,6 +397,14 @@ def _realize_eligible_sources(
         logical, sources_by_fact=per_fact, canonical_values=canonical,
         selected_reference_choices=_selected_reference_choices(request.clarification_responses),
     )
+    missing = next(
+        (item for item in binding_requests if not item.strategy.branches), None
+    )
+    if missing is not None:
+        return shared.SemanticCompilationImpossible(
+            contract, canonical, (missing.index.requested_fact_id,),
+            available.contract_snapshot, selection.selected_read_ids,
+        )
     verified = []
     for binding_request in binding_requests:
         from fervis.lookup.source_binding.catalog_responses import (
@@ -389,14 +419,6 @@ def _realize_eligible_sources(
                 responses=request.clarification_responses,
             ),
         )
-        if not binding_request.strategy.branches:
-            return shared.SemanticCompilationImpossible(
-                contract,
-                canonical,
-                (binding_request.index.requested_fact_id,),
-                available.contract_snapshot,
-                selection.selected_read_ids,
-            )
         binding_request = _interpret_populations(
             binding_request,
             turn=turn,
@@ -436,9 +458,10 @@ def _realize_eligible_sources(
 
 def _assess_catalog_batches(
     request, *, selection, access, indexes, grounding, resolver_catalog,
-    context, on_turn,
+    context, on_turn, trial=None,
 ):
     assessments, batches = [], []
+    attempted = None
     batch = selection
     while batch is not None:
         observed = inspect_selected_representations(
@@ -479,12 +502,20 @@ def _assess_catalog_batches(
         selection = combine_catalog_selection_batches(
             tuple(batches), full_catalog=request.full_catalog
         )
+        eligibility = combine_semantic_read_eligibility_results(tuple(assessments))
+        if trial is not None:
+            attempted = trial(request, selection, eligibility)
+            if isinstance(attempted, shared.SemanticCompilationSuccess):
+                return request, selection, eligibility, attempted
         batch = next_catalog_selection_batch(
             catalog_selection=selection,
             full_catalog=request.full_catalog,
             max_reads_per_fact=request.max_catalog_reads_per_fact,
         )
-    return request, selection, combine_semantic_read_eligibility_results(tuple(assessments))
+    return (
+        request, selection,
+        combine_semantic_read_eligibility_results(tuple(assessments)), attempted,
+    )
 
 
 def _interpret_populations(request, *, turn, catalog, on_failure):

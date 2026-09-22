@@ -63,8 +63,11 @@ it now carries only fields structurally capable of supplying a required
 argument, along with target identity fields. Access for unselected positive
 reads is deferred until the first typed realization fails; a dependent-source
 fallback is covered deterministically. Read Eligibility still reviews all
-positive batches. The authorization handoff is proved for this host and case;
-other APIs and question classes still need live coverage.
+positive batches in the passing live receipt. The next revision attempts typed
+realization after each batch and stops on a verified success, with later-batch
+fallback tests; its reduced live cost is not yet measured. The authorization
+handoff is proved for this host and case; other APIs and question classes still
+need live coverage.
 
 The 281-case live matrix and required repetitions have not passed on this
 revision. Anonymous-record ambiguity without a stable declared key,

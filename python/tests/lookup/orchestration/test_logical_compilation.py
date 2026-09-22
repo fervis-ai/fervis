@@ -229,7 +229,9 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
             "SemanticQuestionContractTurnPrompt",
             "SemanticQueryEnrichmentTurnPrompt",
         ] + (
-            ["SemanticSourceRealizationTurnPrompt"] if outcome == "unavailable" else []
+            ["SemanticSourceRealizationTurnPrompt"]
+            * (2 if batched else 1)
+            if outcome == "unavailable" else []
         )
         return
     assert isinstance(result, shared.SemanticCompilationSuccess)
@@ -237,7 +239,12 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
         assert len(access_attempts) == 1
         assert access_attempts[0] == ()
     assert result.question_contract is logical[0]
-    assert set(assessed) == {read.id for read in catalog.reads}
+    assert set(assessed) == (
+        set(result.catalog_selection.selected_read_ids)
+        if batched else {read.id for read in catalog.reads}
+    )
+    if batched:
+        assert len(assessed) == 3
     assert seen == [
         "SemanticQuestionFrameTurnPrompt",
         "SemanticQuestionContractTurnPrompt",
