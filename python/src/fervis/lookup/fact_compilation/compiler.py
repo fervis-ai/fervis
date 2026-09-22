@@ -169,7 +169,7 @@ class _ProgramBuilder:
     global_relational_values: dict[FactLocalRef, RelationalValue] = field(
         default_factory=dict
     )
-    reference_values: dict[tuple[str, str, str], tuple[NodeOutputRef, ...]] = field(default_factory=dict)
+    reference_values: dict[tuple[str, str, str, int | None], tuple[NodeOutputRef, ...]] = field(default_factory=dict)
 
 
 def compile_verified_source_strategy(
@@ -207,6 +207,12 @@ def compile_verified_source_strategy(
         for use in verified.request.index.input_use_sites
         if use.use_ref == use_ref
     }
+    from fervis.lookup.source_binding.reference_bindings import runtime_reference_uses
+    addressed_inputs.update(
+        use.input_ref
+        for use in runtime_reference_uses(verified.request)
+        if isinstance(verified.request.index.input_by_ref[use.input_ref].operand, tuple)
+    )
     input_bindings = {
         item.parameter_id: item for item in inputs.program_inputs.bindings.bindings
     }
@@ -3045,10 +3051,9 @@ def _compile_runtime_reference_comparison(builder, node, *, branch_id):
                if binding.branch_id == branch_id and binding.input_use_ref in uses]
     if not matches:
         return None
-    if len(matches) != 1:
+    if len({binding.input_use_ref for binding in matches}) != 1:
         raise ValueError('Reference comparison requires one input interpretation')
-    binding = matches[0]
-    use = uses[binding.input_use_ref]
+    use = uses[matches[0].input_use_ref]
     target = use.identity_set_ref
     occurrence = builder.occurrence_scopes[branch_id].for_set(target.token)
     realization = next(item for item in builder.verified.binding_plan.set_bindings[target.token]
@@ -3062,53 +3067,78 @@ def _compile_runtime_reference_comparison(builder, node, *, branch_id):
         keys = tuple(component.field_id for component in entity_key.components)
     else:
         keys = (_occurrence_row_key(occurrence.id),)
-    cache_key = (branch_id, use.input_ref, target.token)
-    values = builder.reference_values.get(cache_key)
-    if values is None:
-        carrier = builder.occurrence_relations[branch_id, occurrence.id]
-        fields = tuple(_execution_field_id(builder, occurrence.source_ref,
-            request.source_catalog.field_binding(ref).field.id, occurrence_ref=occurrence.id)
-            for ref in binding.field_refs)
-        if binding.match_kind is ReferenceMatchKind.SINGLETON_VALUE:
-            condition = None
-        elif binding.match_kind is ReferenceMatchKind.DECLARED_CHOICE:
-            from fervis.lookup.available_sources import source_value_literal
-            selected_field = request.source_catalog.field_binding(binding.field_refs[0])
-            choice = source_value_literal(
-                value_ref=f"{branch_id}.reference.{use.input_ref}.choice",
-                value=binding.choice_value,
-                declared_type=selected_field.field.type,
-                label=selected_field.field.path,
-                source_ref=selected_field.source_ref,
-                proof_refs=(request.source_catalog.contract_snapshot.ref,
-                            selected_field.field.field_ref),
+    operand_source = request.index.input_by_ref[use.input_ref].operand
+    operands = (operand_source,) if isinstance(operand_source, str) else operand_source
+    member_conditions = []
+    for binding in sorted(matches, key=lambda item: -1 if item.member_index is None else item.member_index):
+        operand = operands[binding.member_index or 0]
+        cache_key = (branch_id, use.input_ref, target.token, binding.member_index)
+        values = builder.reference_values.get(cache_key)
+        if values is None:
+            carrier = builder.occurrence_relations[branch_id, occurrence.id]
+            fields = tuple(_execution_field_id(builder, occurrence.source_ref,
+                request.source_catalog.field_binding(ref).field.id, occurrence_ref=occurrence.id)
+                for ref in binding.field_refs)
+            prefix = f'{branch_id}.reference.{use.input_ref}.{target.local_id}'
+            if binding.member_index is not None:
+                prefix += f'.member_{binding.member_index}'
+            if binding.match_kind is ReferenceMatchKind.SINGLETON_VALUE:
+                condition = None
+            elif binding.match_kind is ReferenceMatchKind.DECLARED_CHOICE:
+                from fervis.lookup.available_sources import source_value_literal
+                selected_field = request.source_catalog.field_binding(binding.field_refs[0])
+                choice = source_value_literal(
+                    value_ref=prefix + '.choice',
+                    value=binding.choice_value,
+                    declared_type=selected_field.field.type,
+                    label=selected_field.field.path,
+                    source_ref=selected_field.source_ref,
+                    proof_refs=(request.source_catalog.contract_snapshot.ref,
+                                selected_field.field.field_ref),
+                )
+                condition = BinaryExpression(
+                    ExpressionBinaryOperator.EQUALS,
+                    FieldRef(fields[0]),
+                    ConstantRef(choice.id, "reference_descriptor@1", choice),
+                )
+            else:
+                literal = builder.inputs.expression_for_question_input(use.input_ref)
+                if binding.member_index is not None:
+                    canonical = next(
+                        value for value in request.canonical_values
+                        if value.input_ref == use.input_ref
+                    )
+                    member_index = canonical.typed_value.payload.values.index(operand)
+                    literal = replace(literal, item_index=member_index)
+                condition = _combine_boolean_expressions(tuple(FunctionExpression(
+                    ExpressionFunction.REFERENCE_LITERAL_MATCH, (FieldRef(field), literal)) for field in fields),
+                    operator=ExpressionBinaryOperator.OR)
+            filtered = (
+                Operation(prefix+'.match', FilterSpec(carrier,condition),prefix+'.candidates')
+                if condition is not None else None
             )
-            condition = BinaryExpression(
-                ExpressionBinaryOperator.EQUALS,
-                FieldRef(fields[0]),
-                ConstantRef(choice.id, "reference_descriptor@1", choice),
+            guard_fields = keys if entity_key is not None else tuple(dict.fromkeys((*keys,*fields)))
+            guard = Operation(prefix+'.guard', ReferenceGuardSpec(
+                filtered.output_relation if filtered is not None else carrier,
+                guard_fields,use.input_ref,operand,
+                entity_key=entity_key, occurrence_fields=keys if entity_key is None else ()),prefix+'.selected')
+            builder.operations.extend((filtered,guard) if filtered is not None else (guard,))
+            values = tuple(NodeOutputRef(guard.id,key) for key in keys)
+            builder.reference_values[cache_key] = values
+        comparisons = tuple(
+            BinaryExpression(
+                node.operator if binding.member_index is None else ExpressionBinaryOperator.EQUALS,
+                FieldRef(key), value,
             )
-        else:
-            literal = builder.inputs.expression_for_question_input(use.input_ref)
-            condition = _combine_boolean_expressions(tuple(FunctionExpression(
-                ExpressionFunction.REFERENCE_LITERAL_MATCH, (FieldRef(field), literal)) for field in fields),
-                operator=ExpressionBinaryOperator.OR)
-        prefix = f'{branch_id}.reference.{use.input_ref}.{target.local_id}'
-        filtered = (
-            Operation(prefix+'.match', FilterSpec(carrier,condition),prefix+'.candidates')
-            if condition is not None else None
+            for key,value in zip(keys,values,strict=True)
         )
-        guard_fields = keys if entity_key is not None else tuple(dict.fromkeys((*keys,*fields)))
-        guard = Operation(prefix+'.guard', ReferenceGuardSpec(
-            filtered.output_relation if filtered is not None else carrier,
-            guard_fields,use.input_ref,
-            entity_key=entity_key, occurrence_fields=keys if entity_key is None else ()),prefix+'.selected')
-        builder.operations.extend((filtered,guard) if filtered is not None else (guard,))
-        values = tuple(NodeOutputRef(guard.id,key) for key in keys)
-        builder.reference_values[cache_key] = values
-    comparisons = tuple(BinaryExpression(node.operator,FieldRef(key),value) for key,value in zip(keys,values,strict=True))
-    return _combine_boolean_expressions(comparisons, operator=(ExpressionBinaryOperator.AND
-        if node.operator is ExpressionBinaryOperator.EQUALS else ExpressionBinaryOperator.OR))
+        member_conditions.append(_combine_boolean_expressions(
+            comparisons,
+            operator=(ExpressionBinaryOperator.AND
+                      if binding.member_index is not None or node.operator is ExpressionBinaryOperator.EQUALS
+                      else ExpressionBinaryOperator.OR),
+        ))
+    return _combine_boolean_expressions(tuple(member_conditions),operator=ExpressionBinaryOperator.OR)
 
 
 def _compile_comparison(

@@ -66,10 +66,11 @@ def _runtime_reference_errors(
             errors.append(f"{task_ref}: missing reference selection")
         elif outcome["kind"] == "literal":
             fields = selected.get("field_refs")
+            accepted = outcome.get("accepted_field_ref_sets") or [outcome["field_refs"]]
             if (
                 not isinstance(fields, list)
                 or len(fields) != len(set(fields))
-                or set(fields) != set(outcome["field_refs"])
+                or not any(set(fields) == set(option) for option in accepted)
             ):
                 errors.append(f"{task_ref}: incorrect literal matching properties")
         elif outcome["kind"] == "descriptor":

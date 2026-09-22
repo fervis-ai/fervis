@@ -36,6 +36,8 @@ def reference_tasks(realization):
     tasks = {}
     request = realization.request
     for use in literal_reference_uses(request):
+        supplied = request.index.input_by_ref[use.input_ref].operand
+        operands = (supplied,) if isinstance(supplied, str) else supplied
         for branch in request.strategy.branches:
             carrier = next(
                 value
@@ -44,15 +46,24 @@ def reference_tasks(realization):
             )
             if carrier.address_parameter_ref:
                 continue
-            ref = f"{branch.branch_id}:{use.use_ref}"
-            tasks[ref] = (
-                use,
-                branch.branch_id,
-                carrier,
-                reference_fields(
-                    request, use, carrier.source_ref, identity_ref=carrier.identity_ref
-                ),
-            )
+            for index, operand in enumerate(operands):
+                if operand in request.index.input_denotation_by_ref[use.input_ref].reference_descriptions:
+                    continue
+                member_index = index if isinstance(supplied, tuple) else None
+                ref = f"{branch.branch_id}:{use.use_ref}"
+                if member_index is not None:
+                    ref += f":member:{member_index}"
+                tasks[ref] = (
+                    use,
+                    branch.branch_id,
+                    carrier,
+                    reference_fields(
+                        request, use, carrier.source_ref,
+                        identity_ref=carrier.identity_ref, operand=operand,
+                    ),
+                    member_index,
+                    operand,
+                )
     return tasks
 
 
@@ -78,7 +89,7 @@ class LiteralReferenceTurnPrompt(TurnPromptBase):
 
     def schema(self):
         references = {}
-        for ref, (_, _, _, fields) in reference_tasks(self.realization).items():
+        for ref, (_, _, _, fields, _, _) in reference_tasks(self.realization).items():
             items = {"enum": list(fields)} if fields else {"type": "string"}
             references[ref] = LiteralMatchOutput.schema(
                 {
@@ -108,13 +119,13 @@ class LiteralReferenceTurnPrompt(TurnPromptBase):
 
     def data_sections(self, builder):
         items = {}
-        for ref, (use, branch, carrier, fields) in reference_tasks(
+        for ref, (use, branch, carrier, fields, _, operand) in reference_tasks(
             self.realization
         ).items():
             source = self.request.source_catalog.source(carrier.source_ref)
             items[ref] = {
                 "input_ref": use.input_ref,
-                "literal": self.request.index.input_by_ref[use.input_ref].operand,
+                "literal": operand,
                 "meaning": use.operand_meaning,
                 "source_ref": source.id,
                 "source_description": source.description,
@@ -160,7 +171,7 @@ def bind_literal_references(payload, *, realization):
         raise ValueError("Literal reference binding must cover the exact use scope")
     bindings = []
     for ref, value in parsed.references.items():
-        use, branch, carrier, fields = tasks[ref]
+        use, branch, carrier, fields, member_index, _ = tasks[ref]
         if not value.mapping_basis.strip():
             raise ValueError("Literal reference mapping requires its evidence basis")
         if not value.field_refs:
@@ -172,7 +183,7 @@ def bind_literal_references(payload, *, realization):
         bindings.append(
             ReferenceBinding(
                 branch, use.use_ref, value.field_refs, value.mapping_basis,
-                ReferenceMatchKind.LITERAL,
+                ReferenceMatchKind.LITERAL, member_index=member_index,
             )
         )
     validate_reference_bindings(
@@ -202,18 +213,27 @@ def descriptor_tasks(realization):
     tasks = {}
     request = realization.request
     for use in described_reference_uses(request):
+        supplied = request.index.input_by_ref[use.input_ref].operand
+        operands = (supplied,) if isinstance(supplied, str) else supplied
         for branch in request.strategy.branches:
             carrier = next(
                 value for value in realization.set_bindings[use.identity_set_ref.token]
                 if value.branch_id == branch.branch_id
             )
-            ref = f"{branch.branch_id}:{use.use_ref}"
-            tasks[ref] = (
-                use, branch.branch_id, carrier,
-                descriptor_options(
-                    request, carrier.source_ref, identity_ref=carrier.identity_ref
-                ),
-            )
+            for index, operand in enumerate(operands):
+                if operand not in request.index.input_denotation_by_ref[use.input_ref].reference_descriptions:
+                    continue
+                member_index = index if isinstance(supplied, tuple) else None
+                ref = f"{branch.branch_id}:{use.use_ref}"
+                if member_index is not None:
+                    ref += f":member:{member_index}"
+                tasks[ref] = (
+                    use, branch.branch_id, carrier,
+                    descriptor_options(
+                        request, carrier.source_ref, identity_ref=carrier.identity_ref
+                    ),
+                    member_index, operand,
+                )
     return tasks
 
 
@@ -228,7 +248,7 @@ class DescriptorReferenceTurnPrompt(TurnPromptBase):
 
     def schema(self):
         references = {}
-        for ref, (_, _, _, choices) in descriptor_tasks(self.realization).items():
+        for ref, (_, _, _, choices, _, _) in descriptor_tasks(self.realization).items():
             references[ref] = DescriptorMatchOutput.schema({
                 "mapping_basis": {"type": "string", "minLength": 1},
                 "field_ref": {"enum": [None, *choices]},
@@ -249,11 +269,11 @@ class DescriptorReferenceTurnPrompt(TurnPromptBase):
 
     def data_sections(self, builder):
         items = {}
-        for ref, (use, _, carrier, choices) in descriptor_tasks(self.realization).items():
+        for ref, (use, _, carrier, choices, _, operand) in descriptor_tasks(self.realization).items():
             source = self.request.source_catalog.source(carrier.source_ref)
             items[ref] = {
                 "input_ref": use.input_ref,
-                "description": self.request.index.input_by_ref[use.input_ref].operand,
+                "description": operand,
                 "meaning": use.operand_meaning,
                 "source_ref": source.id,
                 "source_description": source.description,
@@ -300,7 +320,7 @@ def bind_descriptor_references(payload, *, realization):
         raise ValueError("Descriptor reference binding must cover the exact use scope")
     bindings = []
     for ref, value in parsed.references.items():
-        use, branch, _, _ = tasks[ref]
+        use, branch, _, _, member_index, _ = tasks[ref]
         if not value.mapping_basis.strip():
             raise ValueError("Descriptor binding requires its evidence basis")
         if value.field_ref is None:
@@ -315,6 +335,7 @@ def bind_descriptor_references(payload, *, realization):
             branch, use.use_ref, (value.field_ref,), value.mapping_basis,
             (ReferenceMatchKind.SINGLETON_VALUE if value.choice_value is None
              else ReferenceMatchKind.DECLARED_CHOICE), value.choice_value,
+            member_index,
         ))
     combined = (*realization.request.reference_bindings, *bindings)
     validate_reference_bindings(

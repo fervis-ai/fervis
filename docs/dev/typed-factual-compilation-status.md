@@ -24,6 +24,9 @@ is unavailable for complete-population claims.
 - Independent Django/DRF and Flask: standard user and Todo counts passed.
 - Address-only FastAPI: integer, UUID and decimal path-addressed facility
   counts passed without a district-list endpoint.
+- Anonymous collection control: two named district alternatives counted all
+  five matching facilities; the two-reference Grounding boundary passed 10/10.
+  Typed replay also covers aliases for the same record and a missing member.
 - The repository verifier passed after the Frame and address changes: 2,699
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
   93 desktop tests and the desktop build.
@@ -31,7 +34,7 @@ is unavailable for complete-population claims.
 ## Release gates still open
 
 The 281-case live matrix and required repetitions have not passed on this
-revision. Collection references, broader descriptive subqueries, cross-API
+revision. Broader collection references, descriptive subqueries, cross-API
 authority, and arbitrary REST completeness declarations need further proof.
 Direct SQL-operation support remains in the program runtime even though the
 model-SQL authoring route is retired; remove it after typed behavior parity.

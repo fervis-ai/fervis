@@ -135,7 +135,7 @@ def test_reference_proxy_uses_one_current_scalar_without_claiming_entity_rows(wr
             from fervis.lookup.source_binding.reference_prompt import descriptor_tasks
             tasks = descriptor_tasks(prompt.realization)
             assert all(fields["settings"]["reporting_district_id"] in options
-                       for _, _, _, options in tasks.values())
+                       for _, _, _, options, _, _ in tasks.values())
             return parse({"references": {
                 ref: {
                     "mapping_basis": "The complete one-row setting projects the reporting district value.",

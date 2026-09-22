@@ -1,0 +1,217 @@
+"""Each named member of an anonymous collection resolves under its own guard."""
+
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+import yaml
+
+from fervis.lookup.answer_program.instantiation import ExecutionEnvironment
+from fervis.lookup.answer_program.invocation import RuntimePorts, invoke_answer_program
+from fervis.lookup.answer_program.operations import ReferenceGuardSpec, SqlQuerySpec
+from fervis.lookup.answer_program.values import BindingSet, FactValue
+from fervis.lookup.available_sources import SourceFieldBinding, snapshot_source_catalog
+from fervis.lookup.contract_codec import canonical_answer_program_json, decode_answer_program
+from fervis.lookup.expression_operators import ExpressionBinaryOperator
+from fervis.lookup.grounding import CanonicalInputValue
+from fervis.lookup.memory.projection import LookupMemory
+from fervis.lookup.orchestration.logical_planning import realize_and_compile_logical_plan
+from fervis.lookup.question_contract import (
+    QuestionContract, parse_semantic_question_contract, parse_semantic_question_frame,
+)
+from fervis.lookup.question_contract.analysis import analyze_requested_fact
+from fervis.lookup.question_contract.model import Comparison
+from fervis.lookup.relation_catalog import CatalogField, RelationCatalog
+from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
+from fervis.lookup.semantic_types import CollectionType, TextType
+from tests.lookup.relational_engine.test_dependent_reads import _read
+
+
+@pytest.mark.parametrize("data_case", ["distinct", "same_entity", "missing"])
+def test_anonymous_named_collection_rechecks_each_member_and_counts_once(data_case):
+    path = Path(__file__).resolve().parents[2] / (
+        "conformance/cases/algorithms/semantic_kernel/"
+        "identity_input_owns_target_set_and_direct_association.yaml"
+    )
+    fixture = yaml.safe_load(path.read_text())["input"]
+    texts = tuple(fixture["question_context_texts"])
+    meaning = parse_semantic_question_frame(fixture["frame_payload"], question_context_texts=texts)
+    parsed = parse_semantic_question_contract(
+        fixture["payload"], meaning=meaning, question_context_texts=texts
+    )
+    input_term = replace(
+        parsed.contract.inputs[0], operand=("River District", "Lake District"),
+        value_type=CollectionType(TextType()),
+    )
+    denotation = parsed.contract.input_denotations[0]
+    original = parsed.contract.requested_facts[0]
+    fact = replace(
+        original,
+        expressions=tuple(
+            replace(node, operator=ExpressionBinaryOperator.IN)
+            if isinstance(node, Comparison) and node.right_ref == "i1"
+            else node
+            for node in original.expressions
+        ),
+    )
+    contract = QuestionContract((input_term,), (fact,), (denotation,))
+    index = analyze_requested_fact(
+        fact,
+        inputs={input_term.id: input_term},
+        input_denotations={denotation.input_ref: denotation},
+    )
+    logical = replace(parsed, contract=contract, semantic_indexes=(index,))
+    value = FactValue.string_set(
+        id="reference_names:i1", known_input_id="i1", values=input_term.operand,
+        proof_refs=("question_input:i1",),
+    )
+    canonical = CanonicalInputValue(
+        value.id, "i1", tuple(use.use_ref for use in index.input_use_sites),
+        value, value.proof_refs,
+    )
+    facilities = replace(
+        _read("facilities", value_type="string"), candidate_keys=(),
+        fields=(*_read("facilities", value_type="string").fields,
+                CatalogField("district", "string", path="district", row_path_id="root")),
+    )
+    districts = replace(
+        _read("districts", value_type="string"), candidate_keys=(),
+        fields=(*_read("districts", value_type="string").fields,
+                CatalogField("name", "string", path="name", row_path_id="root"),
+                CatalogField("alias", "string", path="alias", row_path_id="root", nullable=True)),
+    )
+    catalog = RelationCatalog(reads=(facilities, districts))
+    sources = {source.read_id: source for source in build_api_row_source_catalog(catalog).sources}
+    fields = {
+        name: {field.path: SourceFieldBinding(source.id, field).ref for field in source.fields}
+        for name, source in sources.items()
+    }
+
+    def turn(purpose, prompt, parse):
+        name = type(prompt).__name__
+        branch = prompt.request.strategy.branches[0].branch_id
+        if name == "SemanticSourceRealizationTurnPrompt":
+            return parse({
+                "set_bindings": {
+                    f"fact_1:set:{set_id}": [{
+                        "branch_id": branch, "mapping_basis": "Complete source records.",
+                        "rows_ref": sources[source_name].id, "record_fields": [],
+                    }]
+                    for set_id, source_name in (("s1", "facilities"), ("s2", "districts"))
+                },
+                "fact_bindings": {},
+                "association_bindings": {"fact_1:association:a1": [{
+                    "branch_id": branch,
+                    "mapping_basis": "Observed district values connect facility and district records.",
+                    "realization_ref": None,
+                    "reference_from_set_ref": None,
+                    "field_pairs": [{
+                        "from_field_ref": fields["facilities"]["district"],
+                        "to_field_ref": fields["districts"]["id"],
+                    }],
+                }]},
+            })
+        if name == "SetPopulationTurnPrompt":
+            return parse({"populations": {
+                f"fact_1:set:{set_id}": [{
+                    "branch_id": branch,
+                    "logical_set_meaning": index.term_by_ref[next(
+                        ref for ref in index.term_by_ref if ref.token == f"fact_1:set:{set_id}"
+                    )].origin.meaning,
+                    "mapping_basis": "All returned records are in this source set.",
+                    "population": {"kind": "exact_population"},
+                }]
+                for set_id in ("s1", "s2")
+            }})
+        if name == "LiteralReferenceTurnPrompt":
+            from fervis.lookup.source_binding.reference_prompt import reference_tasks
+
+            tasks = reference_tasks(prompt.realization)
+            assert len(tasks) == 2
+            return parse({"references": {
+                ref: {
+                    "mapping_basis": "Name and alias are observed identifying properties.",
+                    "field_refs": [fields["districts"]["name"], fields["districts"]["alias"]],
+                }
+                for ref in tasks
+            }})
+        if name == "SemanticSourceBindingTurnPrompt":
+            request = prompt.request
+            return parse({
+                "resolved_input_applications": {branch: [
+                    {
+                        "kind": "no_request_application",
+                        "mapping_basis": "Resolve each name against current district records.",
+                        "owner_ref": owner,
+                        "value_ref": value_ref,
+                    }
+                    for owner in request.invocation_application_owner_refs
+                    for value_ref in request.unapplied_input_value_refs_for_owner(
+                        owner, branch_id=branch
+                    )
+                ]},
+                "finite_choice_applications": {branch: {}},
+                "choice_requirement_applications": {branch: {}},
+            })
+        raise AssertionError(name)
+
+    from fervis.lookup.fact_compilation.model import FactCompilationResult
+    compiled = realize_and_compile_logical_plan(
+        logical,
+        sources_by_fact={"fact_1": snapshot_source_catalog(tuple(sources.values()))},
+        canonical_values=(canonical,),
+        turn=turn,
+    )
+    assert isinstance(compiled, FactCompilationResult)
+    program = decode_answer_program(canonical_answer_program_json(compiled.answer_program))
+    assert not any(isinstance(op.spec, SqlQuerySpec) for op in program.operations)
+    assert sum(isinstance(op.spec, ReferenceGuardSpec) for op in program.operations) == 2
+    calls = []
+
+    class Port:
+        def read(self, *, endpoint_name, args):
+            calls.append(endpoint_name)
+            assert args == {}
+            if endpoint_name == "districts":
+                return {"responseStatus": 200, "responseBody": [
+                    {"id": "d1", "name": "River District",
+                     "alias": "Lake District" if data_case == "same_entity" else None},
+                    {"id": "d2", "name": "Other" if data_case != "distinct" else "Lake District",
+                     "alias": None},
+                ]}
+            return {"responseStatus": 200, "responseBody": [
+                {"id": str(i), "district": "d1" if i < 2 else "d2"}
+                for i in range(5)
+            ]}
+
+    result = invoke_answer_program(
+        program=program,
+        bindings=compiled.initial_bindings,
+        environment=ExecutionEnvironment(catalog=catalog),
+        ports=RuntimePorts(Port(), LookupMemory()),
+    )
+    if data_case == "missing":
+        assert result.issue.reference.operand == "Lake District"
+    else:
+        assert result.issue is None
+        expected = 5 if data_case == "distinct" else 2
+        assert next(iter(result.fact_result.outcome.projected_rows[0].values.values())) == expected
+    assert calls
+    replacement = FactValue.string_set(
+        id=value.id, known_input_id="i1",
+        values=("River District", "Other District"),
+        proof_refs=value.proof_refs,
+    )
+    changed = BindingSet.from_bindings(tuple(
+        replace(item, value=replacement)
+        if item.parameter_id == program.parameters[0].id else item
+        for item in compiled.initial_bindings.bindings
+    ))
+    before = len(calls)
+    with pytest.raises(ValueError, match="fixed|fingerprint|binding"):
+        invoke_answer_program(
+            program=program, bindings=changed,
+            environment=ExecutionEnvironment(catalog=catalog),
+            ports=RuntimePorts(Port(), LookupMemory()),
+        )
+    assert len(calls) == before

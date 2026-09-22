@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from fervis.lookup.answer_program.values import NamedValuePayload
+from fervis.lookup.answer_program.values import NamedValuePayload, StringSetValuePayload
 from fervis.lookup.available_sources import SourceFieldBinding
 from fervis.lookup.expression_operators import ExpressionBinaryOperator
 from fervis.lookup.question_contract.model import Comparison, InputDenotationKind
@@ -30,6 +30,7 @@ class ReferenceBinding:
     mapping_basis: str
     match_kind: ReferenceMatchKind
     choice_value: str | None = None
+    member_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -150,7 +151,7 @@ def runtime_reference_uses(request: "SemanticSourceBindingRequest"):
     supplied = {
         ref
         for value in request.canonical_values
-        if isinstance(value.typed_value.payload, NamedValuePayload)
+        if isinstance(value.typed_value.payload, (NamedValuePayload, StringSetValuePayload))
         for ref in value.use_refs
     }
     result = []
@@ -166,10 +167,13 @@ def runtime_reference_uses(request: "SemanticSourceBindingRequest"):
         node = request.index.expression_by_ref.get(use.expression_ref)
         if (
             denotation.kind is InputDenotationKind.IDENTITY_REFERENCE
-            and isinstance(request.index.input_by_ref[use.input_ref].operand, str)
+            and isinstance(request.index.input_by_ref[use.input_ref].operand, (str, tuple))
             and isinstance(node, Comparison)
-            and node.operator
-            in {ExpressionBinaryOperator.EQUALS, ExpressionBinaryOperator.NOT_EQUALS}
+            and (
+                node.operator in {ExpressionBinaryOperator.EQUALS, ExpressionBinaryOperator.NOT_EQUALS}
+                if isinstance(request.index.input_by_ref[use.input_ref].operand, str)
+                else node.operator is ExpressionBinaryOperator.IN
+            )
         ):
             result.append(use)
     return tuple(result)
@@ -178,19 +182,30 @@ def runtime_reference_uses(request: "SemanticSourceBindingRequest"):
 def literal_reference_uses(request: "SemanticSourceBindingRequest"):
     return tuple(
         use for use in runtime_reference_uses(request)
-        if not request.index.input_denotation_by_ref[use.input_ref].reference_descriptions
+        if any(
+            operand not in request.index.input_denotation_by_ref[use.input_ref].reference_descriptions
+            for operand in _reference_operands(request, use)
+        )
     )
 
 
 def described_reference_uses(request: "SemanticSourceBindingRequest"):
     return tuple(
         use for use in runtime_reference_uses(request)
-        if request.index.input_denotation_by_ref[use.input_ref].reference_descriptions
+        if any(
+            operand in request.index.input_denotation_by_ref[use.input_ref].reference_descriptions
+            for operand in _reference_operands(request, use)
+        )
     )
 
 
-def reference_fields(request, use, source_ref, *, identity_ref=None):
-    literal = request.index.input_by_ref[use.input_ref].operand
+def _reference_operands(request, use) -> tuple[str, ...]:
+    value = request.index.input_by_ref[use.input_ref].operand
+    return (value,) if isinstance(value, str) else value
+
+
+def reference_fields(request, use, source_ref, *, identity_ref=None, operand=None):
+    literals = (operand,) if operand is not None else _reference_operands(request, use)
     source = request.source_catalog.source(source_ref)
     from fervis.lookup.relation_catalog.row_sources.model import RowSourceIdentityKind
 
@@ -208,14 +223,23 @@ def reference_fields(request, use, source_ref, *, identity_ref=None):
             continue
         if field.declared_entity_kind:
             continue
-        try:
-            parse_catalog_parameter_text(
-                literal, type_name=field.type.value, choices=field.choices
-            )
-        except ValueError:
+        if any(
+            not _field_accepts_literal(literal, field)
+            for literal in literals
+        ):
             continue
         fields.append(SourceFieldBinding(source_ref, field).ref)
     return tuple(fields)
+
+
+def _field_accepts_literal(literal, field) -> bool:
+    try:
+        parse_catalog_parameter_text(
+            literal, type_name=field.type.value, choices=field.choices
+        )
+    except ValueError:
+        return False
+    return True
 
 
 def descriptor_choices(request, source_ref, *, identity_ref=None):
@@ -269,10 +293,17 @@ def validate_reference_bindings(request, set_bindings, bindings, *, complete=Tru
         if item.address_parameter_ref
     }
     required = {
-        (branch.branch_id, ref) for branch in request.strategy.branches for ref in uses
+        (branch.branch_id, ref, index)
+        for branch in request.strategy.branches
+        for ref, use in uses.items()
         if (branch.branch_id, ref) not in addressed
+        for index in (
+            range(len(_reference_operands(request, use)))
+            if isinstance(request.index.input_by_ref[use.input_ref].operand, tuple)
+            else (None,)
+        )
     }
-    actual = [(binding.branch_id, binding.input_use_ref) for binding in bindings]
+    actual = [(binding.branch_id, binding.input_use_ref, binding.member_index) for binding in bindings]
     if len(actual) != len(set(actual)) or (
         set(actual) != required if complete else not set(actual) <= required
     ):
@@ -282,6 +313,15 @@ def validate_reference_bindings(request, set_bindings, bindings, *, complete=Tru
     shared = {}
     for binding in bindings:
         use = uses[binding.input_use_ref]
+        operands = _reference_operands(request, use)
+        if binding.member_index is None:
+            if isinstance(request.index.input_by_ref[use.input_ref].operand, tuple):
+                raise ValueError("Collection reference requires one indexed member per binding")
+            operand = operands[0]
+        else:
+            if binding.member_index < 0 or binding.member_index >= len(operands):
+                raise ValueError("Reference member index is outside the original input")
+            operand = operands[binding.member_index]
         owners = [
             value
             for value in set_bindings[use.identity_set_ref.token]
@@ -296,7 +336,7 @@ def validate_reference_bindings(request, set_bindings, bindings, *, complete=Tru
             raise ValueError(
                 "Runtime reference requires one carrier and distinct literal match fields"
             )
-        described = bool(request.index.input_denotation_by_ref[use.input_ref].reference_descriptions)
+        described = operand in request.index.input_denotation_by_ref[use.input_ref].reference_descriptions
         if described:
             choices = descriptor_options(
                 request, owners[0].source_ref, identity_ref=owners[0].identity_ref
@@ -317,7 +357,8 @@ def validate_reference_bindings(request, set_bindings, bindings, *, complete=Tru
                 raise ValueError("Descriptive reference must select a declared carrier choice")
         else:
             allowed = reference_fields(
-                request, use, owners[0].source_ref, identity_ref=owners[0].identity_ref
+                request, use, owners[0].source_ref, identity_ref=owners[0].identity_ref,
+                operand=operand,
             )
             if (
                 binding.match_kind is not ReferenceMatchKind.LITERAL
@@ -327,7 +368,7 @@ def validate_reference_bindings(request, set_bindings, bindings, *, complete=Tru
                 raise ValueError(
                     "Runtime reference fields must belong to the selected carrier and accept the literal"
                 )
-        key = (binding.branch_id, use.input_ref, use.identity_set_ref)
+        key = (binding.branch_id, use.input_ref, use.identity_set_ref, binding.member_index)
         fields = (frozenset(binding.field_refs), binding.choice_value)
         if key in shared and shared[key] != fields:
             raise ValueError(
