@@ -235,7 +235,7 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
     assert isinstance(result, shared.SemanticCompilationSuccess)
     if batched:
         assert len(access_attempts) == 1
-        assert len(access_attempts[0]) == 3
+        assert access_attempts[0] == ()
     assert result.question_contract is logical[0]
     assert set(assessed) == {read.id for read in catalog.reads}
     assert seen == [
@@ -359,7 +359,7 @@ def test_typed_source_access_revisits_deferred_dependent_read_when_direct_source
     )
     result = compile_logical_question(request)
     assert isinstance(result, shared.SemanticCompilationSuccess)
-    assert "z_store_details" not in access_calls[0]
+    assert access_calls[0] == ()
     assert access_calls[-1] == ("z_store_details",)
 
 

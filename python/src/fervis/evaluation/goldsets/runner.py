@@ -214,6 +214,7 @@ def _run_case_once(
 ) -> _EvaluatedCaseRun:
     if suite.prepare_case is not None:
         _run_case_setup(suite, case)
+    case_principal = _prepared_case_principal(suite, case, principal)
     execution = _execute_case(
         case,
         questions=questions,
@@ -221,7 +222,7 @@ def _run_case_once(
         question_run_limits=question_run_limits,
         provider=provider,
         model_key=model_key,
-        principal=principal,
+        principal=case_principal,
         wait_seconds=wait_seconds,
         runtime_context=runtime_context,
     )
@@ -233,6 +234,7 @@ def _run_case_once(
     ):
         time.sleep(max(0.0, retry_sleep_seconds))
         attempt += 1
+        case_principal = _prepared_case_principal(suite, case, principal)
         execution = _execute_case(
             case,
             questions=questions,
@@ -240,7 +242,7 @@ def _run_case_once(
             question_run_limits=question_run_limits,
             provider=provider,
             model_key=model_key,
-            principal=principal,
+            principal=case_principal,
             wait_seconds=wait_seconds,
             runtime_context=runtime_context,
         )
@@ -633,6 +635,32 @@ def _run_case_setup(suite: GoldsetSuite, case: GoldsetCase) -> None:
         raise GoldsetPreflightError(
             f"goldset case setup failed for {case.case_id}: {exc}"
         ) from exc
+
+
+def _prepared_case_principal(
+    suite: GoldsetSuite, case: GoldsetCase, principal: QuestionPrincipal,
+) -> QuestionPrincipal:
+    if suite.prepare_principal is None:
+        return principal
+    try:
+        prepared = suite.prepare_principal(case, principal)
+    except Exception as exc:
+        raise GoldsetPreflightError(
+            f"goldset principal preparation failed for {case.case_id}: {exc}"
+        ) from exc
+    if not isinstance(prepared, QuestionPrincipal) or (
+        prepared.principal_id,
+        prepared.tenant_id,
+        prepared.read_context_ref,
+    ) != (
+        principal.principal_id,
+        principal.tenant_id,
+        principal.read_context_ref,
+    ):
+        raise GoldsetPreflightError(
+            "goldset principal preparation may only refresh delegated credentials"
+        )
+    return prepared
 
 
 def _ask_and_follow(

@@ -200,6 +200,47 @@ def load_suite():
     assert envelope["payload"]["passed_count"] == 1
 
 
+def test_goldset_suite_refreshes_host_credential_without_changing_principal(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    package = tmp_path / "host_goldsets"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "suite.py").write_text(
+        "from dataclasses import replace\n"
+        "from fervis.evaluation.goldsets import GoldsetCase, GoldsetMatch, GoldsetSuite\n"
+        "from fervis.host_api.contracts.credentials import DelegatedReadCredential\n"
+        "count = 0\n"
+        "def prepare_principal(case, principal):\n"
+        "    global count\n"
+        "    count += 1\n"
+        "    return replace(principal, delegated_credential=DelegatedReadCredential(\n"
+        "        'captured_headers', f'fixture-{count}', '2099-01-01T00:00:00Z'))\n"
+        "def load_suite():\n"
+        "    return GoldsetSuite('host', (GoldsetCase('count', 'How many?'),),\n"
+        "        match_answer=lambda case, result: GoldsetMatch(True),\n"
+        "        prepare_principal=prepare_principal)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    questions = _AnsweringQuestions(AskResult(
+        status="COMPLETED", conversation_id="conversation-1",
+        question_id="question-1", run_id="run-1", answer="42", result_data={},
+    ))
+    exit_code = run_fervis(
+        ("goldset", "run", "--suite", "host_goldsets.suite:load_suite",
+         "--tenant-id", "tenant-1", "--principal-id", "principal-1",
+         "--stable-runs", "2"),
+        ports=_ports(questions=questions, question_run_follower=_Follower()),
+        stdout=StringIO(), stderr=StringIO(),
+    )
+    assert exit_code == 0
+    assert [request.principal.delegated_credential.encrypted_payload
+            for request in questions.requests] == ["fixture-1", "fixture-2"]
+    assert all(request.principal.principal_id == "principal-1"
+               for request in questions.requests)
+
+
 def test_fervis_goldset_run_uses_env_suite_case_ids_and_tenant(
     tmp_path: Path,
     monkeypatch,

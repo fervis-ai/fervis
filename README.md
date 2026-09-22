@@ -123,6 +123,11 @@ fervis goldset run --ledger-file .goldset-runs/orders.jsonl
 Suites may define `preflight` on `GoldsetSuite` for setup checks that must pass
 before any model call runs, such as host API reachability or oracle database
 connectivity.
+When the host API needs a delegated credential as well as a principal ID, a
+suite may define `prepare_principal(case, principal)` to refresh that credential
+before each independent run. The callback must preserve the principal ID,
+tenant and read context; configure credential capture in the host auth contract
+so goldset reads use the same authorization path as deployed requests.
 
 ## Development
 

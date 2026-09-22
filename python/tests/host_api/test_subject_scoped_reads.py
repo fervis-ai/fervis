@@ -140,6 +140,51 @@ def test_django_adapter_executes_read_with_resolved_subject(monkeypatch) -> None
     ]
 
 
+def test_django_adapter_uses_host_auth_for_delegated_header(monkeypatch) -> None:
+    import fervis.host_api.adapters.django.adapter as django_adapter_module
+    from fervis.host_api.credentials import delegated_credential_from_auth_schema
+
+    monkeypatch.setenv("FERVIS_TEST_CREDENTIAL_KEY", "test-key")
+    auth_schema = {
+        "credentials": {
+            "source": "captured_request_headers",
+            "headers": ["Authorization"],
+            "encryption_key_env": "FERVIS_TEST_CREDENTIAL_KEY",
+        }
+    }
+    credential = delegated_credential_from_auth_schema(
+        schema=auth_schema,
+        request_headers={"Authorization": "Bearer fixture-token"},
+    )
+    calls = []
+    monkeypatch.setattr(
+        django_adapter_module, "resolve_django_read_context_ref",
+        lambda ref: SimpleNamespace(pk="principal-1"),
+    )
+    monkeypatch.setattr(
+        django_adapter_module, "execute_get_endpoint",
+        lambda **kwargs: _record_execution(calls, kwargs),
+    )
+    adapter = django_adapter_module.DjangoHostApiAdapter(
+        sources=(), auth_schema=auth_schema,
+    )
+    result = adapter.execute_read(
+        authority=ReadAuthority(
+            tenant_id="tenant-1",
+            read_context_ref=ReadContextRef(
+                scheme="django_principal", key="principal-1",
+            ),
+            delegated_credential=credential,
+        ),
+        invocation=ReadInvocation(endpoint_name="get_order"),
+    )
+    assert result.response_status == 200
+    assert calls[0]["use_delegated_auth"] is True
+    assert calls[0]["transport_overlay"].headers == {
+        "Authorization": "Bearer fixture-token"
+    }
+
+
 def test_django_adapter_http_mode_uses_shared_http_executor(monkeypatch) -> None:
     import fervis.host_api.adapters.django.adapter as django_adapter_module
 

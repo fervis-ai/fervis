@@ -26,6 +26,11 @@ set cannot be substituted under an existing input ID.
 - Independent FastAPI: paginated scan and unpaginated measurement counts,
   default-site role and reporting-site proxy counts passed.
 - Independent Django/DRF and Flask: standard user and Todo counts passed.
+- Isolated Ozana `supplies_01`: ordinary goldset CLI answered 5, matching the
+  independent oracle. The persisted run compiled and executed a typed plan in
+  104 seconds with nine model calls, zero source-access turns and $0.079 of
+  model spend. The host JWT was carried through the encrypted delegated-read
+  contract and reauthenticated as the same Django principal.
 - Address-only FastAPI: integer, UUID and decimal path-addressed facility
   counts passed without a district-list endpoint.
 - Anonymous collection control: two named district alternatives counted all
@@ -41,7 +46,8 @@ set cannot be substituted under an existing input ID.
 - Framework mount regressions now prove that Fervis routes remain reachable
   ahead of host catch-all routes in Django and FastAPI. Django `doctor` rejects
   an existing shadowed mount, and `init` repairs its position.
-- The repository verifier passed after staged source-access discovery: 2,711
+- The repository verifier passed after delegated Django reads and goldset
+  credential preparation: 2,715
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
   93 desktop tests and the desktop build.
 
@@ -49,17 +55,16 @@ set cannot be substituted under an existing input ID.
 
 The first isolated Ozana `supplies_01` run was interrupted after 24
 source-access turns and $0.372 of new provider spend, before answer
-compilation. Its final runtime failure records that interruption. A staged
-rerun spent $0.094, made zero source-access turns and reached execution, where
-Ozana returned HTTP 403: its scope-aware JWT permission does not accept the
-standard in-process DRF authentication supplied by Fervis. The
+compilation. A staged rerun reached execution with no source-access turns but
+received HTTP 403 from Ozana's scope-aware JWT permission. A later run with
+delegated authentication spent $0.079 and passed. The
 source-access prompt previously carried every field of every parent candidate;
 it now carries only fields structurally capable of supplying a required
 argument, along with target identity fields. Access for unselected positive
 reads is deferred until the first typed realization fails; a dependent-source
 fallback is covered deterministically. Read Eligibility still reviews all
-positive batches. The authorization failure requires a generic host credential
-handoff and another live run before case fidelity can be assessed.
+positive batches. The authorization handoff is proved for this host and case;
+other APIs and question classes still need live coverage.
 
 The 281-case live matrix and required repetitions have not passed on this
 revision. Anonymous-record ambiguity without a stable declared key,
@@ -67,6 +72,7 @@ descriptive subqueries, cross-API
 authority, and arbitrary REST completeness declarations need further proof.
 Direct SQL-operation support remains in the program runtime even though the
 model-SQL authoring route is retired; remove it after typed behavior parity.
-The original provider-credit budget is nearly exhausted, so additional paid
+The conservative local reconciliation of the original provider-credit budget
+estimates about $0.108 remaining, so additional paid
 matrix runs require a fresh budget check. Keep the PR draft and the README's
 alpha designation until the complete Quality Bar and release gates pass.

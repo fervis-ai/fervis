@@ -38,6 +38,7 @@ def execute_get_endpoint(
     page_policy: dict[str, Any] | None = None,
     transport_overlay: ReadTransportOverlay | None = None,
     origin: str | None = None,
+    use_delegated_auth: bool = False,
 ) -> EndpointExecutionResult:
     contract = get_endpoint_contract(
         endpoint_name,
@@ -64,6 +65,7 @@ def execute_get_endpoint(
             headers=prepared.headers or {},
             cookies=prepared.cookies or {},
             origin=origin,
+            use_delegated_auth=use_delegated_auth,
         ),
     )
 
@@ -76,8 +78,9 @@ def _get_page(
     headers: dict[str, str],
     cookies: dict[str, str],
     origin: str | None = None,
+    use_delegated_auth: bool = False,
 ) -> ResponsePage:
-    client = _client_for(user)
+    client = APIClient() if use_delegated_auth else _client_for(user)
     for name, value in cookies.items():
         client.cookies[name] = value
     origin = in_process_request_origin(origin)
@@ -90,6 +93,12 @@ def _get_page(
         SERVER_NAME=parsed.hostname,
         SERVER_PORT=str(parsed.port or (443 if parsed.scheme == "https" else 80)),
     )
+    if use_delegated_auth:
+        authenticated_user = getattr(getattr(response, "wsgi_request", None), "user", None)
+        if str(getattr(authenticated_user, "pk", "")) != str(getattr(user, "pk", "")):
+            raise EndpointExecutionError(
+                "Delegated Django credential authenticated a different principal."
+            )
     return response_page(response)
 
 

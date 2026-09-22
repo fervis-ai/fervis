@@ -86,7 +86,11 @@ class DjangoHostApiAdapter:
                 config=http_config,
             )
         user = resolve_django_read_context_ref(authority.read_context_ref)
-        return execute_get_endpoint(
+        overlay = credential_overlay_from_auth_schema(
+            schema=self.auth_schema,
+            credential=authority.delegated_credential,
+        )
+        kwargs = dict(
             endpoint_name=invocation.endpoint_name,
             user=user,
             origin=authority.read_context_ref.origin,
@@ -96,8 +100,8 @@ class DjangoHostApiAdapter:
             page_policy=(
                 None if invocation.page_policy is None else dict(invocation.page_policy)
             ),
-            transport_overlay=credential_overlay_from_auth_schema(
-                schema=self.auth_schema,
-                credential=authority.delegated_credential,
-            ),
+            transport_overlay=overlay,
         )
+        if authority.delegated_credential is not None:
+            kwargs["use_delegated_auth"] = True
+        return execute_get_endpoint(**kwargs)

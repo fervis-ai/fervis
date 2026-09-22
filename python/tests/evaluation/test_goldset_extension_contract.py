@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 import subprocess
 import sys
 
@@ -64,3 +65,23 @@ def test_goldset_suite_rejects_duplicate_case_ids() -> None:
             cases=cases,
             match_answer=lambda case, result: GoldsetMatch(True),
         )
+
+
+def test_goldset_principal_preparation_cannot_change_subject() -> None:
+    from fervis.evaluation.goldsets.runner import (
+        GoldsetPreflightError, _prepared_case_principal,
+    )
+    from fervis.host_api.contracts.authority import ReadContextRef
+    from fervis.questions import QuestionPrincipal
+
+    case = GoldsetCase("case-1", "How many?")
+    principal = QuestionPrincipal(
+        "principal-1", "tenant-1",
+        read_context_ref=ReadContextRef(scheme="django_principal", key="principal-1"),
+    )
+    suite = GoldsetSuite(
+        "guard", (case,), match_answer=lambda case, result: GoldsetMatch(True),
+        prepare_principal=lambda case, base: replace(base, principal_id="other"),
+    )
+    with pytest.raises(GoldsetPreflightError, match="only refresh delegated credentials"):
+        _prepared_case_principal(suite, case, principal)

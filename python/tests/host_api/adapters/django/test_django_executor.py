@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 from fervis.host_api.contracts.response_page import ResponsePage
 
 from fervis.host_api.adapters.get_execution import (
@@ -12,6 +13,41 @@ from fervis.host_api.contracts import (
     PaginationKind,
 )
 from fervis.host_api.contracts.ports import EndpointExecutionError
+
+
+def test_delegated_django_header_uses_host_auth_and_rechecks_subject(monkeypatch):
+    from fervis.host_api.adapters.django import executor
+
+    calls = []
+    authenticated = SimpleNamespace(pk="principal-1")
+
+    class Client:
+        cookies = {}
+
+        def force_authenticate(self, *, user):
+            calls.append(("forced", user.pk))
+
+        def get(self, url, params, **kwargs):
+            calls.append(("get", kwargs["headers"].get("Authorization")))
+            return SimpleNamespace(wsgi_request=SimpleNamespace(user=authenticated))
+
+    monkeypatch.setattr(executor, "APIClient", Client)
+    monkeypatch.setattr(executor, "response_page", lambda response: ResponsePage(200, {"ok": True}))
+    page = executor._get_page(
+        user=SimpleNamespace(pk="principal-1"), url="/v1/records/",
+        query_params={}, headers={"Authorization": "Bearer test"}, cookies={},
+        use_delegated_auth=True,
+    )
+    assert page.status == 200
+    assert calls == [("get", "Bearer test")]
+
+    authenticated.pk = "different-principal"
+    with pytest.raises(EndpointExecutionError, match="different principal"):
+        executor._get_page(
+            user=SimpleNamespace(pk="principal-1"), url="/v1/records/",
+            query_params={}, headers={"Authorization": "Bearer test"}, cookies={},
+            use_delegated_auth=True,
+        )
 
 
 class _Client:

@@ -219,7 +219,7 @@ def compile_logical_question(request, *, on_turn=None):
             denotation.denoted_instance_kind is not None
             for denotation in contract.input_denotations
         )
-        else tuple(dict.fromkeys((*selection.selected_read_ids, *resolver_ids)))
+        else resolver_ids
     )
     access = shared._discover_read_access(
         initial_access_ids, request=request, context=context, on_turn=on_turn
