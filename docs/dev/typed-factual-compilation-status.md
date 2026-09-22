@@ -31,7 +31,10 @@ set cannot be substituted under an existing input ID.
 - Anonymous collection control: two named district alternatives counted all
   five matching facilities; the two-reference Grounding boundary passed 10/10.
   Typed replay also covers aliases for the same record and a missing member.
-- The repository verifier passed after the Frame and address changes: 2,699
+- A typed REST-binding regression proves that ranking related records by their
+  average amount selects a different winner than ranking by sum, while returning
+  the associated count. It also exercises duplicated observed parent rows.
+- The repository verifier passed after these changes: 2,704
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
   93 desktop tests and the desktop build.
 

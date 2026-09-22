@@ -21,7 +21,13 @@ from fervis.lookup.question_contract.model import (
 )
 from fervis.lookup.question_contract.analysis import analyze_requested_fact
 from fervis.lookup.question_contract.parser import ParsedSemanticQuestionContract
-from fervis.lookup.semantic_types import SourceOrigin, SourceOriginKind, IdentifierType
+from fervis.lookup.semantic_types import (
+    SourceOrigin,
+    SourceOriginKind,
+    IdentifierType,
+    DecimalType,
+    UnitlessMeasure,
+)
 from fervis.lookup.relation_catalog import RelationCatalog, CatalogField
 from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
 from fervis.lookup.available_sources import snapshot_source_catalog, SourceFieldBinding
@@ -40,28 +46,66 @@ from tests.lookup.relational_engine.test_dependent_reads import _read
 
 
 @pytest.mark.parametrize("duplicate_parent", [False, True])
-def test_rank_groups_by_related_observed_record_occurrences(duplicate_parent):
-    origin = SourceOrigin(
-        SourceOriginKind.QUESTION_CONTEXT, "Parent with the most items"
+@pytest.mark.parametrize("rank_by_average", [False, True])
+def test_rank_groups_by_related_observed_record_occurrences(
+    duplicate_parent, rank_by_average
+):
+    question = (
+        "Parent with the highest average item amount and its item count"
+        if rank_by_average
+        else "Parent with the most items"
     )
+    origin = SourceOrigin(SourceOriginKind.QUESTION_CONTEXT, question)
     fact = RequestedFact(
         "fact_1",
         origin,
         (SetTerm("item", origin), SetTerm("parent", origin)),
         (AssociationTerm("ownership", "item", "parent", origin),),
-        (FactTerm("parent_ref", "ownership", IdentifierType("parent"), origin),),
-        (Aggregate("n", AggregateFunction.COUNT, "item", None, False, origin),),
+        (
+            FactTerm("parent_ref", "ownership", IdentifierType("parent"), origin),
+            *(
+                (FactTerm("amount", "item", DecimalType(UnitlessMeasure()), origin),)
+                if rank_by_average
+                else ()
+            ),
+        ),
+        (
+            Aggregate("n", AggregateFunction.COUNT, "item", None, False, origin),
+            *(
+                (
+                    Aggregate(
+                        "avg", AggregateFunction.AVERAGE, "amount", None, False, origin
+                    ),
+                )
+                if rank_by_average
+                else ()
+            ),
+        ),
         Subject("item", InstanceInterpretation.RESOURCE_POPULATION),
         None,
         ("parent_ref",),
-        (RequestedOutput("parent", "parent_ref", origin),),
-        (Ordering("n", OrderingDirection.DESCENDING, origin),),
+        (
+            RequestedOutput("parent", "parent_ref", origin),
+            *(
+                (
+                    RequestedOutput("average", "avg", origin),
+                    RequestedOutput("count", "n", origin),
+                )
+                if rank_by_average
+                else ()
+            ),
+        ),
+        (
+            Ordering(
+                "avg" if rank_by_average else "n", OrderingDirection.DESCENDING, origin
+            ),
+        ),
         FirstRankWithTies(),
         (),
     )
     index = analyze_requested_fact(fact, inputs={}, input_denotations={})
     logical = ParsedSemanticQuestionContract(
-        "Parent with most items.", QuestionContract((), (fact,)), (index,)
+        question, QuestionContract((), (fact,)), (index,)
     )
     items = replace(
         _read("items", value_type="string"),
@@ -70,6 +114,15 @@ def test_rank_groups_by_related_observed_record_occurrences(duplicate_parent):
             *_read("items", value_type="string").fields,
             CatalogField(
                 "items.parent_id", "string", path="parent_id", row_path_id="root"
+            ),
+            *(
+                (
+                    CatalogField(
+                        "items.amount", "number", path="amount", row_path_id="root"
+                    ),
+                )
+                if rank_by_average
+                else ()
             ),
         ),
     )
@@ -109,7 +162,19 @@ def test_rank_groups_by_related_observed_record_occurrences(duplicate_parent):
                         ]
                         for role, name in (("item", "items"), ("parent", "parents"))
                     },
-                    "fact_bindings": {},
+                    "fact_bindings": (
+                        {
+                            "fact_1:fact:amount": [
+                                {
+                                    "branch_id": branch,
+                                    "mapping_basis": "Observed item amount.",
+                                    "field_ref": fields["items"]["amount"],
+                                }
+                            ]
+                        }
+                        if rank_by_average
+                        else {}
+                    ),
                     "association_bindings": {
                         "fact_1:association:ownership": [
                             {
@@ -160,9 +225,18 @@ def test_rank_groups_by_related_observed_record_occurrences(duplicate_parent):
             rows = (
                 [{"id": "p"}, {"id": "q"}] + ([{"id": "p"}] if duplicate_parent else [])
                 if endpoint_name == "parents"
-                else [
-                    {"id": str(i), "parent_id": "p" if i < 3 else "q"} for i in range(5)
-                ]
+                else (
+                    [
+                        {"id": "1", "parent_id": "p", "amount": 100},
+                        {"id": "2", "parent_id": "p", "amount": 200},
+                        {"id": "3", "parent_id": "q", "amount": 180},
+                    ]
+                    if rank_by_average
+                    else [
+                        {"id": str(i), "parent_id": "p" if i < 3 else "q"}
+                        for i in range(5)
+                    ]
+                )
             )
             return {"responseStatus": 200, "responseBody": rows}
 
@@ -173,7 +247,17 @@ def test_rank_groups_by_related_observed_record_occurrences(duplicate_parent):
         ports=RuntimePorts(Port(), LookupMemory()),
     )
     assert executed.issue is None
-    assert [
-        next(iter(row.values.values()))
-        for row in executed.fact_result.outcome.projected_rows
-    ] == [{"id": "p"}] * (2 if duplicate_parent else 1)
+    projected = [row.values for row in executed.fact_result.outcome.projected_rows]
+    if rank_by_average:
+        assert projected == [
+            {
+                "fact_1.output_1": {"id": "q"},
+                "fact_1.output_2": 180,
+                "fact_1.output_3": 1,
+            }
+        ]
+    else:
+        assert [
+            next(iter(row.values.values()))
+            for row in executed.fact_result.outcome.projected_rows
+        ] == [{"id": "p"}] * (2 if duplicate_parent else 1)
