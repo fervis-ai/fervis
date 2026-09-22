@@ -3117,12 +3117,36 @@ def _compile_runtime_reference_comparison(builder, node, *, branch_id):
                 Operation(prefix+'.match', FilterSpec(carrier,condition),prefix+'.candidates')
                 if condition is not None else None
             )
+            selected = next(
+                (choice for choice in request.selected_reference_choices
+                 if choice.input_ref == use.input_ref and choice.operand == operand),
+                None,
+            )
+            candidates = filtered.output_relation if filtered is not None else carrier
+            choice_operation = None
+            if selected is not None:
+                if entity_key is None:
+                    raise ValueError('Observed reference cannot accept a nominal key choice')
+                from fervis.lookup.answer_program.reference_compilation import selected_reference_filter
+
+                source = request.source_catalog.source(occurrence.source_ref)
+                choice_operation = selected_reference_filter(
+                    relation_id=candidates, namespace=prefix,
+                    projection=entity_key, selected_key=selected.key,
+                    proof_ref=selected.proof_ref,
+                    field_types={
+                        _execution_field_id(builder, occurrence.source_ref, field.id,
+                            occurrence_ref=occurrence.id): field.type.value
+                        for field in source.fields
+                    },
+                )
+                candidates = choice_operation.output_relation
             guard_fields = keys if entity_key is not None else tuple(dict.fromkeys((*keys,*fields)))
             guard = Operation(prefix+'.guard', ReferenceGuardSpec(
-                filtered.output_relation if filtered is not None else carrier,
+                candidates,
                 guard_fields,use.input_ref,operand,
                 entity_key=entity_key, occurrence_fields=keys if entity_key is None else ()),prefix+'.selected')
-            builder.operations.extend((filtered,guard) if filtered is not None else (guard,))
+            builder.operations.extend(item for item in (filtered, choice_operation, guard) if item is not None)
             values = tuple(NodeOutputRef(guard.id,key) for key in keys)
             builder.reference_values[cache_key] = values
         comparisons = tuple(

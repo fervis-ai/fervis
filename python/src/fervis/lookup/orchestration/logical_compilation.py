@@ -2,6 +2,9 @@
 
 from dataclasses import replace
 
+from fervis.lookup.clarification.model import GroundingIdentityResponse
+from fervis.lookup.clarification.context import clarification_response_ref
+from fervis.lookup.source_binding.reference_bindings import SelectedReferenceChoice
 from fervis.model_io.turns import ModelTurnPurpose
 from fervis.lookup.available_sources import build_available_source_catalog
 from fervis.lookup.grounding import (
@@ -60,6 +63,21 @@ from .logical_planning import (
     compile_logical_bindings,
 )
 from . import semantic_compilation as shared
+
+
+def _selected_reference_choices(responses):
+    choices = []
+    for response in responses:
+        if not isinstance(response, GroundingIdentityResponse) or not response.reference_operand:
+            continue
+        if response.option.key is None:
+            raise ValueError("Reference member clarification requires an entity key")
+        choices.append(SelectedReferenceChoice(
+            response.requested_fact_id, response.known_input_id,
+            response.reference_operand, response.option.key,
+            clarification_response_ref(response.response_id),
+        ))
+    return tuple(choices)
 
 
 def compile_logical_question(request, *, on_turn=None):
@@ -353,7 +371,8 @@ def compile_logical_question(request, *, on_turn=None):
         for index in indexes
     }
     binding_requests = prepare_logical_realizations(
-        logical, sources_by_fact=per_fact, canonical_values=canonical
+        logical, sources_by_fact=per_fact, canonical_values=canonical,
+        selected_reference_choices=_selected_reference_choices(request.clarification_responses),
     )
     verified = []
     for binding_request in binding_requests:

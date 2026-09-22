@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from fervis.lookup.canonical_data import EntityKeyValue
 from fervis.lookup.answer_program.values import NamedValuePayload, StringSetValuePayload
 from fervis.lookup.available_sources import SourceFieldBinding
 from fervis.lookup.expression_operators import ExpressionBinaryOperator
@@ -31,6 +32,24 @@ class ReferenceBinding:
     match_kind: ReferenceMatchKind
     choice_value: str | None = None
     member_index: int | None = None
+
+
+@dataclass(frozen=True)
+class SelectedReferenceChoice:
+    """One user's choice of a named collection member's declared entity key."""
+
+    requested_fact_id: str
+    input_ref: str
+    operand: str
+    key: EntityKeyValue
+    proof_ref: str
+
+    def __post_init__(self) -> None:
+        if (
+            not all((self.requested_fact_id, self.input_ref, self.operand, self.proof_ref))
+            or not isinstance(self.key, EntityKeyValue)
+        ):
+            raise ValueError("Selected reference choice requires fact, member and proof")
 
 
 @dataclass(frozen=True)
@@ -375,3 +394,30 @@ def validate_reference_bindings(request, set_bindings, bindings, *, complete=Tru
                 "One input reference cannot change its matching fields between consumers"
             )
         shared[key] = fields
+    if complete:
+        for choice in request.selected_reference_choices:
+            for branch in request.strategy.branches:
+                matches = [
+                    binding for binding in bindings
+                    if binding.branch_id == branch.branch_id
+                    and uses[binding.input_use_ref].input_ref == choice.input_ref
+                    and binding.member_index is not None
+                    and _reference_operands(request, uses[binding.input_use_ref])[
+                        binding.member_index
+                    ] == choice.operand
+                ]
+                if not matches:
+                    raise ValueError("Selected reference member has no realized use")
+                for binding in matches:
+                    use = uses[binding.input_use_ref]
+                    owner = next(
+                        item for item in set_bindings[use.identity_set_ref.token]
+                        if item.branch_id == branch.branch_id
+                    )
+                    if owner.identity_ref is None:
+                        raise ValueError("Selected nominal key requires entity identity authority")
+                    identity = request.source_catalog.identity(owner.identity_ref)
+                    if (choice.key.entity_kind, choice.key.key_id) != (
+                        identity.entity_kind, identity.key_id
+                    ):
+                        raise ValueError("Selected reference key differs from carrier identity")

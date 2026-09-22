@@ -56,7 +56,7 @@ def _logical_indexes(logical):
     return indexes
 
 
-def prepare_logical_realizations(logical, *, sources_by_fact, canonical_values):
+def prepare_logical_realizations(logical, *, sources_by_fact, canonical_values, selected_reference_choices=()):
     """Carry independent fact indexes into physically feasible source scopes."""
     from dataclasses import replace
     from fervis.lookup.source_binding.candidates import candidate_source_strategy
@@ -67,6 +67,8 @@ def prepare_logical_realizations(logical, *, sources_by_fact, canonical_values):
     if (len(requested_ids) != len(set(requested_ids)) or set(sources_by_fact) != set(requested_ids)
             or len(indexes) != len(logical.semantic_indexes) or set(indexes) != set(requested_ids)):
         raise ValueError('Source realization must cover every requested fact exactly once')
+    if any(choice.requested_fact_id not in indexes for choice in selected_reference_choices):
+        raise ValueError('Reference choice targets an unknown requested fact')
     prepared = []
     for fact in logical.contract.requested_facts:
         index = indexes[fact.id]
@@ -77,7 +79,11 @@ def prepare_logical_realizations(logical, *, sources_by_fact, canonical_values):
                        for value in canonical_values if use_refs.intersection(value.use_refs))
         catalog = sources_by_fact[fact.id]
         prepared.append(SemanticSourceBindingRequest(index,
-            candidate_source_strategy(index, catalog, values), catalog, values))
+            candidate_source_strategy(index, catalog, values), catalog, values,
+            selected_reference_choices=tuple(
+                choice for choice in selected_reference_choices
+                if choice.requested_fact_id == fact.id
+            )))
     return tuple(prepared)
 
 
@@ -159,12 +165,14 @@ def realize_logical_fact(request, *, turn):
     return verify_source_strategy(plan, request=realization.request)
 
 
-def realize_and_compile_logical_plan(logical, *, sources_by_fact, canonical_values, turn):
+def realize_and_compile_logical_plan(logical, *, sources_by_fact, canonical_values, turn,
+                                     selected_reference_choices=()):
     """The typed realization pipeline, with no executable-query authoring step."""
     from fervis.lookup.source_binding import SourceRealizationUnavailable, VerifiedSourceStrategy
 
     requests = prepare_logical_realizations(logical, sources_by_fact=sources_by_fact,
-                                            canonical_values=canonical_values)
+                                            canonical_values=canonical_values,
+                                            selected_reference_choices=selected_reference_choices)
     for request in requests:
         if not request.strategy.branches:
             return SourceRealizationUnavailable(request.index.requested_fact_id,

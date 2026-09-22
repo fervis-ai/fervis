@@ -7,7 +7,6 @@ from fervis.lookup.answer_program.model import AnswerProgram, RelationProgram
 from fervis.lookup.answer_program.expressions import (
     FieldRef,
     BinaryExpression,
-    Expression,
     ExpressionBinaryOperator,
 )
 from fervis.lookup.answer_program.operations import (
@@ -22,6 +21,7 @@ from fervis.lookup.answer_program.values import (
 )
 from fervis.lookup.canonical_data import EntityKeyValue
 from fervis.lookup.answer_program.relations import Relation
+from fervis.lookup.answer_program.result_projection import EntityKeyProjection
 from .relation_views import RelationView
 
 
@@ -32,6 +32,46 @@ class CompiledReference:
     view: RelationView
     table: Mapping[str, Any]
     input_refs: tuple[str, ...]
+
+
+def selected_reference_filter(
+    *, relation_id: str, namespace: str, projection: EntityKeyProjection,
+    selected_key: EntityKeyValue, proof_ref: str, field_types: Mapping[str, str],
+) -> Operation:
+    """Recheck a selected nominal key against current candidate rows."""
+    from fervis.lookup.available_sources import source_value_literal
+    from fervis.lookup.relation_catalog.row_sources import RowSourceValueType
+
+    if (
+        not proof_ref
+        or (selected_key.entity_kind, selected_key.key_id)
+        != (projection.entity_kind, projection.key_id)
+        or {item.component_id for item in selected_key.components}
+        != {item.component_id for item in projection.components}
+    ):
+        raise ValueError("Reference choice must preserve complete identity authority and user proof")
+    conditions = []
+    for index, component in enumerate(projection.components):
+        value = source_value_literal(
+            value_ref=f"{namespace}.selected_{index}",
+            value=selected_key.component_value(component.component_id),
+            declared_type=RowSourceValueType(field_types[component.field_id]),
+            label=component.component_id,
+            source_ref=proof_ref,
+            proof_refs=(proof_ref,),
+        )
+        conditions.append(BinaryExpression(
+            ExpressionBinaryOperator.EQUALS, FieldRef(component.field_id),
+            ConstantRef(value.id, "reference_choice@1", value),
+        ))
+    condition = conditions[0]
+    for other in conditions[1:]:
+        condition = BinaryExpression(ExpressionBinaryOperator.AND, condition, other)
+    return Operation(
+        f"{namespace}.choice",
+        FilterSpec(relation_id, condition, proof_refs=(proof_ref,)),
+        output_relation=f"{namespace}.chosen_rows",
+    )
 
 
 def compile_reference_result(
@@ -70,49 +110,15 @@ def compile_reference_result(
     relation_name = reference_id or f"reference_{input_ref}"
     selected_relation = projection.relation_id
     selection_operations = []
-    conditions: list[Expression] = []
     if selected_key is not None:
         if key is None:
             raise ValueError(
                 "Observed references cannot accept a nominal identity choice"
             )
-        from fervis.lookup.available_sources import source_value_literal
-        from fervis.lookup.relation_catalog.row_sources import RowSourceValueType
-
-        if (
-            not selection_proof_ref
-            or (selected_key.entity_kind, selected_key.key_id)
-            != (key.entity_kind, key.key_id)
-            or {c.component_id for c in selected_key.components}
-            != {c.component_id for c in key.components}
-        ):
-            raise ValueError(
-                "Reference choice must preserve the complete identity authority and user proof"
-            )
-        for index, component in enumerate(key.components):
-            name = f"selected_{index}"
-            value = source_value_literal(
-                value_ref=relation_name + "." + name,
-                value=selected_key.component_value(component.component_id),
-                declared_type=RowSourceValueType(output_types[component.field_id]),
-                label=component.component_id,
-                source_ref=selection_proof_ref,
-                proof_refs=(selection_proof_ref,),
-            )
-            conditions.append(
-                BinaryExpression(
-                    ExpressionBinaryOperator.EQUALS,
-                    FieldRef(component.field_id),
-                    ConstantRef(value.id, "reference_choice@1", value),
-                )
-            )
-        condition = conditions[0]
-        for other in conditions[1:]:
-            condition = BinaryExpression(ExpressionBinaryOperator.AND, condition, other)
-        selection = Operation(
-            relation_name + ".choice",
-            FilterSpec(selected_relation, condition, proof_refs=(selection_proof_ref,)),
-            output_relation=relation_name + ".chosen_rows",
+        selection = selected_reference_filter(
+            relation_id=selected_relation, namespace=relation_name,
+            projection=key, selected_key=selected_key,
+            proof_ref=selection_proof_ref, field_types=output_types,
         )
         selection_operations.append(selection)
         selected_relation = selection.output_relation

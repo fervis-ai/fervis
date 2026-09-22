@@ -31,17 +31,22 @@ set cannot be substituted under an existing input ID.
 - Anonymous collection control: two named district alternatives counted all
   five matching facilities; the two-reference Grounding boundary passed 10/10.
   Typed replay also covers aliases for the same record and a missing member.
+- When a named collection member has multiple declared entity-key matches, a
+  clarification choice now narrows only that member's current candidates. The
+  typed guard rechecks the selected key and the original name on replay;
+  mismatched key authorities fail before execution.
 - A typed REST-binding regression proves that ranking related records by their
   average amount selects a different winner than ranking by sum, while returning
   the associated count. It also exercises duplicated observed parent rows.
-- The repository verifier passed after these changes: 2,704
+- The repository verifier passed after the collection-choice addition: 2,706
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
   93 desktop tests and the desktop build.
 
 ## Release gates still open
 
 The 281-case live matrix and required repetitions have not passed on this
-revision. Broader collection references, descriptive subqueries, cross-API
+revision. Anonymous-record ambiguity without a stable declared key,
+descriptive subqueries, cross-API
 authority, and arbitrary REST completeness declarations need further proof.
 Direct SQL-operation support remains in the program runtime even though the
 model-SQL authoring route is retired; remove it after typed behavior parity.

@@ -48,7 +48,7 @@ from fervis.lookup.relation_catalog.row_sources import RowSourceValueType
 from fervis.lookup.semantic_types import BooleanType, IdentifierType, TextType, CollectionType
 from fervis.lookup.source_binding.param_values import compatible_fact_value_projections
 from fervis.types.enums import StrEnum
-from .reference_bindings import ReferenceBinding
+from .reference_bindings import ReferenceBinding, SelectedReferenceChoice
 
 
 @dataclass(frozen=True)
@@ -313,6 +313,7 @@ class SemanticSourceBindingRequest:
     address_scope_values: tuple[tuple[str, str, str, str], ...] = ()
     population_interpretations: tuple[SourcePopulationInterpretation, ...] = ()
     reference_bindings: tuple[ReferenceBinding, ...] = ()
+    selected_reference_choices: tuple[SelectedReferenceChoice, ...] = ()
 
     def parameter_population(self, source_ref: str, parameter_ref: str) -> ParameterPopulation | None:
         param = next(p for p in self.source_catalog.source(source_ref).params if p.param_ref == parameter_ref)
@@ -575,6 +576,21 @@ class SemanticSourceBindingRequest:
         if len(value_ids) != len(set(value_ids)):
             raise ValueError("source binding value IDs must be unique")
         input_by_ref = self.index.input_by_ref
+        choice_members = tuple(
+            (choice.input_ref, choice.operand)
+            for choice in self.selected_reference_choices
+        )
+        if len(choice_members) != len(set(choice_members)):
+            raise ValueError("Reference member has conflicting clarification choices")
+        for choice in self.selected_reference_choices:
+            term = input_by_ref.get(choice.input_ref)
+            if (
+                choice.requested_fact_id != self.index.requested_fact_id
+                or term is None
+                or not isinstance(term.operand, tuple)
+                or choice.operand not in term.operand
+            ):
+                raise ValueError("Reference choice is not a member of its supplied input")
         uses_by_input = {
             input_ref: {use.use_ref for use in self.index.input_use_sites if use.input_ref == input_ref}
             for input_ref in input_by_ref
