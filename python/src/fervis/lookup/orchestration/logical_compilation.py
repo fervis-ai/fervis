@@ -214,8 +214,15 @@ def compile_logical_question(request, *, on_turn=None):
             resolver_row_sources=build_row_source_catalog(catalog),
             expected_identity=None,
         )
+    initial_access_ids = (
+        access_ids if references or any(
+            denotation.denoted_instance_kind is not None
+            for denotation in contract.input_denotations
+        )
+        else tuple(dict.fromkeys((*selection.selected_read_ids, *resolver_ids)))
+    )
     access = shared._discover_read_access(
-        access_ids, request=request, context=context, on_turn=on_turn
+        initial_access_ids, request=request, context=context, on_turn=on_turn
     )
     request = replace(request, read_access=access)
     partitions = grounding_partitions(
@@ -266,56 +273,12 @@ def compile_logical_question(request, *, on_turn=None):
         if tasks or temporal
         else SemanticGroundingResult((), ())
     )
-    assessments, batches = [], []
-    batch = selection
-    while batch is not None:
-        observed = inspect_selected_representations(
-            request.full_catalog,
-            read_ids=batch.selected_read_ids,
-            data_access_port=request.data_access_port,
-            on_response=request.representation_observer,
-            on_failure=request.discovery_failures.append,
-        )
-        request = replace(request, full_catalog=observed)
-        batch = replace(
-            batch,
-            relation_catalog=RelationCatalog(
-                reads=tuple(
-                    read
-                    for read in observed.reads
-                    if read.id in batch.selected_read_ids
-                )
-            ),
-        )
-        assessment_request = SemanticReadEligibilityRequest(
-            indexes,
-            (
-                build_row_source_catalog(
-                    batch.relation_catalog, memory_relations=request.memory_relations
-                )
-                if not assessments
-                else build_api_row_source_catalog(batch.relation_catalog)
-            ),
-            batch.relation_catalog,
-            grounding.identity_tasks if not assessments else (),
-            resolver_catalog,
-            access,
-        )
-        assessments.append(
-            shared._read_eligibility_turn(
-                assessment_request, context=context, request=request, on_turn=on_turn
-            )
-        )
-        batches.append(batch)
-        selection = combine_catalog_selection_batches(
-            tuple(batches), full_catalog=request.full_catalog
-        )
-        batch = next_catalog_selection_batch(
-            catalog_selection=selection,
-            full_catalog=request.full_catalog,
-            max_reads_per_fact=request.max_catalog_reads_per_fact,
-        )
-    eligibility = combine_semantic_read_eligibility_results(tuple(assessments))
+    initial_selection = selection
+    request, selection, eligibility = _assess_catalog_batches(
+        request, selection=initial_selection, access=access, indexes=indexes,
+        grounding=grounding, resolver_catalog=resolver_catalog,
+        context=context, on_turn=on_turn,
+    )
     from fervis.lookup.grounding.reference_literals import reference_input_values
     values = [
         *reference_input_values(deferred,inputs=inputs),
@@ -351,6 +314,44 @@ def compile_logical_question(request, *, on_turn=None):
             use.use_ref for index in indexes for use in index.input_use_sites
         ),
     )
+    outcome = _realize_eligible_sources(
+        request, logical=logical, selection=selection, eligibility=eligibility,
+        canonical=canonical, indexes=indexes, access=access, contract=contract,
+        turn=turn,
+    )
+    if isinstance(outcome, shared.SemanticCompilationSuccess) or grounding.identity_tasks:
+        return outcome
+    from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
+
+    deferred_access_ids = tuple(
+        read_id for read_id in access_ids
+        if read_id not in initial_access_ids
+        and any(requires_caller_supplied_input(param)
+                for param in request.full_catalog.read(read_id).params)
+    )
+    if not deferred_access_ids:
+        return outcome
+    access = shared._discover_read_access(
+        deferred_access_ids, request=replace(request, read_access=access),
+        context=context, on_turn=on_turn,
+    )
+    request = replace(request, read_access=access)
+    request, selection, eligibility = _assess_catalog_batches(
+        request, selection=initial_selection, access=access, indexes=indexes,
+        grounding=grounding, resolver_catalog=resolver_catalog,
+        context=context, on_turn=on_turn,
+    )
+    return _realize_eligible_sources(
+        request, logical=logical, selection=selection, eligibility=eligibility,
+        canonical=canonical, indexes=indexes, access=access, contract=contract,
+        turn=turn,
+    )
+
+
+def _realize_eligible_sources(
+    request, *, logical, selection, eligibility, canonical, indexes, access,
+    contract, turn,
+):
     sources = build_row_source_catalog(
         selection.relation_catalog, memory_relations=request.memory_relations
     )
@@ -431,6 +432,59 @@ def compile_logical_question(request, *, on_turn=None):
         available.contract_snapshot,
         shared.CompiledAnswer(compiled.answer_program, compiled.initial_bindings),
     )
+
+
+def _assess_catalog_batches(
+    request, *, selection, access, indexes, grounding, resolver_catalog,
+    context, on_turn,
+):
+    assessments, batches = [], []
+    batch = selection
+    while batch is not None:
+        observed = inspect_selected_representations(
+            request.full_catalog,
+            read_ids=batch.selected_read_ids,
+            data_access_port=request.data_access_port,
+            on_response=request.representation_observer,
+            on_failure=request.discovery_failures.append,
+        )
+        request = replace(request, full_catalog=observed)
+        batch = replace(
+            batch,
+            relation_catalog=RelationCatalog(
+                reads=tuple(
+                    read for read in observed.reads
+                    if read.id in batch.selected_read_ids
+                )
+            ),
+        )
+        assessment_request = SemanticReadEligibilityRequest(
+            indexes,
+            (
+                build_row_source_catalog(
+                    batch.relation_catalog, memory_relations=request.memory_relations
+                )
+                if not assessments
+                else build_api_row_source_catalog(batch.relation_catalog)
+            ),
+            batch.relation_catalog,
+            grounding.identity_tasks if not assessments else (),
+            resolver_catalog,
+            access,
+        )
+        assessments.append(shared._read_eligibility_turn(
+            assessment_request, context=context, request=request, on_turn=on_turn
+        ))
+        batches.append(batch)
+        selection = combine_catalog_selection_batches(
+            tuple(batches), full_catalog=request.full_catalog
+        )
+        batch = next_catalog_selection_batch(
+            catalog_selection=selection,
+            full_catalog=request.full_catalog,
+            max_reads_per_fact=request.max_catalog_reads_per_fact,
+        )
+    return request, selection, combine_semantic_read_eligibility_results(tuple(assessments))
 
 
 def _interpret_populations(request, *, turn, catalog, on_failure):

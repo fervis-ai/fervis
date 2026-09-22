@@ -41,8 +41,7 @@ set cannot be substituted under an existing input ID.
 - Framework mount regressions now prove that Fervis routes remain reachable
   ahead of host catch-all routes in Django and FastAPI. Django `doctor` rejects
   an existing shadowed mount, and `init` repairs its position.
-- The repository verifier passed after the framework mount and source-access
-  projection changes: 2,710
+- The repository verifier passed after staged source-access discovery: 2,711
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
   93 desktop tests and the desktop build.
 
@@ -50,12 +49,17 @@ set cannot be substituted under an existing input ID.
 
 The first isolated Ozana `supplies_01` run was interrupted after 24
 source-access turns and $0.372 of new provider spend, before answer
-compilation. Its final runtime failure records that interruption. The
+compilation. Its final runtime failure records that interruption. A staged
+rerun spent $0.094, made zero source-access turns and reached execution, where
+Ozana returned HTTP 403: its scope-aware JWT permission does not accept the
+standard in-process DRF authentication supplied by Fervis. The
 source-access prompt previously carried every field of every parent candidate;
 it now carries only fields structurally capable of supplying a required
-argument, along with target identity fields. Broad positive catalog reads are
-still all reviewed before realization, so this fan-out needs an architectural
-repair and a fresh live run.
+argument, along with target identity fields. Access for unselected positive
+reads is deferred until the first typed realization fails; a dependent-source
+fallback is covered deterministically. Read Eligibility still reviews all
+positive batches. The authorization failure requires a generic host credential
+handoff and another live run before case fidelity can be assessed.
 
 The 281-case live matrix and required repetitions have not passed on this
 revision. Anonymous-record ambiguity without a stable declared key,

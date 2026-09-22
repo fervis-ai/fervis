@@ -169,6 +169,15 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
 
     monkeypatch.setattr(shared, "_turn", turn)
     monkeypatch.setattr(shared, "_read_eligibility_turn", eligibility)
+    from fervis.lookup.source_reads.access_model import ReadAccessCatalog
+
+    access_attempts = []
+
+    def discover_access(read_ids, **kwargs):
+        access_attempts.append(tuple(read_ids))
+        return ReadAccessCatalog()
+
+    monkeypatch.setattr(shared, "_discover_read_access", discover_access)
     reads = []
 
     class Port:
@@ -186,7 +195,10 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
                 resource_names=("stores",),
                 **({} if annotated else {"candidate_keys": ()}),
             )
-            for name in (("stores", "more_stores") if batched else ("stores",))
+            for name in (
+                ("stores", "more_stores", "third_stores", "fourth_stores")
+                if batched else ("stores",)
+            )
         )
     )
     if outcome == "empty":
@@ -221,6 +233,9 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
         )
         return
     assert isinstance(result, shared.SemanticCompilationSuccess)
+    if batched:
+        assert len(access_attempts) == 1
+        assert len(access_attempts[0]) == 3
     assert result.question_contract is logical[0]
     assert set(assessed) == {read.id for read in catalog.reads}
     assert seen == [
@@ -249,6 +264,103 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
         next(iter(executed.fact_result.outcome.projected_rows[0].values.values())) == 3
     )
     assert len(reads) == 1
+
+
+def test_typed_source_access_revisits_deferred_dependent_read_when_direct_sources_fail(monkeypatch):
+    from fervis.lookup.source_reads.access_model import (
+        AccessArgument, ReadAccessCatalog, ReadDependency,
+    )
+    from fervis.lookup.relation_catalog import CatalogParam, ParamSource
+    from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
+
+    parent = replace(_read("a_stores"), resource_names=("stores",))
+    decoys = tuple(replace(_read(name), resource_names=("stores",))
+                   for name in ("b_stores", "c_stores"))
+    child = replace(
+        _read("z_store_details", params=(CatalogParam(
+            "store_id", "store_id", ParamSource.PATH, "integer", required=True,
+        ),)),
+        path="/stores/{store_id}/details/", resource_names=("stores",),
+    )
+    catalog = RelationCatalog(reads=(parent, *decoys, child))
+    sources = build_api_row_source_catalog(catalog)
+    by_read = {source.read_id: source for source in sources.sources}
+    access_calls = []
+
+    def discover_access(read_ids, **kwargs):
+        access_calls.append(tuple(read_ids))
+        if "z_store_details" not in read_ids:
+            return ReadAccessCatalog(sources.sources, ())
+        return ReadAccessCatalog(sources.sources, (ReadDependency(
+            by_read["z_store_details"].id,
+            by_read["a_stores"].id,
+            (AccessArgument("store_id", "a_stores.id"),),
+            "The parent list covers every addressed detail.",
+        ),))
+
+    def turn(purpose, *, prompt, parse, **kwargs):
+        name = type(prompt).__name__
+        if name == "SemanticQuestionFrameTurnPrompt":
+            result = parse(_frame_payload())
+        elif name == "SemanticQuestionContractTurnPrompt":
+            result = parse(count_payload())
+        elif name == "SemanticQueryEnrichmentTurnPrompt":
+            result = SemanticQueryEnrichmentResult(tuple(
+                RecallBucketMatch(bucket.bucket_ref, ("stores",), ("stores",))
+                for bucket in prompt.request.recall_buckets
+            ), ())
+        elif name == "SemanticSourceRealizationTurnPrompt":
+            branch = prompt.request.strategy.branches[0].branch_id
+            rows_ref = prompt.request.row_references_for_set("fact_1:set:s1")[0]
+            assert by_read["z_store_details"].id in rows_ref
+            result = parse({
+                "set_bindings": {"fact_1:set:s1": [{
+                    "branch_id": branch,
+                    "mapping_basis": "The addressed detail rows are the requested population.",
+                    "rows_ref": rows_ref,
+                    "record_fields": [],
+                }]},
+                "fact_bindings": {}, "association_bindings": {},
+            })
+        elif name == "SetPopulationTurnPrompt":
+            branch = prompt.request.strategy.branches[0].branch_id
+            result = parse({"populations": {"fact_1:set:s1": [{
+                "branch_id": branch,
+                "logical_set_meaning": "store",
+                "mapping_basis": "The complete parent traversal covers all detail rows.",
+                "population": {"kind": "exact_population"},
+            }]}})
+        else:
+            raise AssertionError(name)
+        return SimpleNamespace(result=result)
+
+    def eligibility(eligibility_request, **kwargs):
+        return SemanticReadEligibilityResult(tuple(
+            ReadRequirementAssessment(
+                "fact_1", source.read_id, (source.id,), source.read_id,
+                tuple(field.field_ref for field in source.fields),
+                "Only the addressed detail read matches the requested population.",
+                SemanticReadDecision.RETAIN
+                if source.read_id == "z_store_details"
+                and eligibility_request.read_access.can_enumerate(source)
+                else SemanticReadDecision.DROP,
+            )
+            for source in eligibility_request.source_catalog.sources if source.read_id
+        ), ())
+
+    monkeypatch.setattr(shared, "_turn", turn)
+    monkeypatch.setattr(shared, "_discover_read_access", discover_access)
+    monkeypatch.setattr(shared, "_read_eligibility_turn", eligibility)
+    request = shared.SemanticCompilationRequest(
+        "typed-dependent-fallback", "How many stores?",
+        QuestionContractRequest("How many stores?", {}), catalog, (),
+        SimpleNamespace(read=lambda **kwargs: None), None, "openai", 1, 1,
+        None, {}, HostPromptContext(),
+    )
+    result = compile_logical_question(request)
+    assert isinstance(result, shared.SemanticCompilationSuccess)
+    assert "z_store_details" not in access_calls[0]
+    assert access_calls[-1] == ("z_store_details",)
 
 
 def test_two_requested_facts_keep_distinct_outputs_through_one_rest_read(monkeypatch):
