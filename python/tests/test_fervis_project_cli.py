@@ -1112,6 +1112,32 @@ def test_fervis_fastapi_integration_mounts_router() -> None:
     assert "/fervis/" not in set(app.openapi()["paths"])
 
 
+def test_fervis_fastapi_mount_is_reachable_after_host_catch_all() -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from fervis import FervisConfig, HostConfig, ModelConfig, RuntimeRoutes
+    from fervis.integrations.fastapi import FastAPIIntegration
+
+    app = FastAPI()
+
+    @app.get("/{full_path:path}")
+    def host_catch_all(full_path: str):
+        return {"owner": "host", "path": full_path}
+
+    integration = FastAPIIntegration(
+        config=FervisConfig(
+            host=HostConfig(timezone="UTC"),
+            routes=RuntimeRoutes(prefix="/fervis/"),
+            model=ModelConfig(default_provider="openai", default_model_key="gpt-5.4-mini"),
+            sources=[],
+        )
+    )
+    integration.mount(app, question_interface=object())
+    client = TestClient(app)
+    assert client.get("/fervis/").json().get("owner") != "host"
+    assert client.get("/unrelated").json() == {"owner": "host", "path": "unrelated"}
+
+
 def test_configured_fervis_fastapi_mount_uses_configured_question_interface(
     tmp_path: Path,
     monkeypatch,
@@ -1136,6 +1162,7 @@ def test_configured_fervis_fastapi_mount_uses_configured_question_interface(
         "    return User('user-1')\n",
         encoding="utf-8",
     )
+    sys.modules.pop("app.api.deps", None)
     calls = []
 
     class FakeQuestionInterface:
@@ -2280,6 +2307,56 @@ def test_fervis_init_preserves_existing_multiline_django_urlpatterns(
     assert 'path("health/", health_view),' in text
 
 
+def test_fervis_init_places_django_mount_before_a_terminal_route(tmp_path: Path) -> None:
+    root = _django_project(tmp_path)
+    urls_path = root / "config" / "urls.py"
+    urls_path.write_text(
+        "from django.urls import path, re_path\n\n"
+        "urlpatterns = [\n"
+        '    path("health/", health_view),\n'
+        '    re_path(r"^.*$", not_found_view),\n'
+        "]\n",
+        encoding="utf-8",
+    )
+    assert run_init_command(
+        ("init", "--framework", "django", "--yes"),
+        project=discover_project(root), stdout=StringIO(),
+    ) == 0
+    text = urls_path.read_text(encoding="utf-8")
+    assert text.index("path(configured_fervis().routes.django_path") < text.index('re_path(r"^.*$"')
+
+
+def test_fervis_doctor_rejects_and_init_repairs_a_shadowed_django_mount(
+    tmp_path: Path,
+) -> None:
+    root = _django_project(tmp_path)
+    assert run_init_command(
+        ("init", "--framework", "django", "--yes"),
+        project=discover_project(root), stdout=StringIO(),
+    ) == 0
+    urls_path = root / "config" / "urls.py"
+    urls_path.write_text(
+        "from django.urls import path, include, re_path\n"
+        "from fervis import configured_fervis\n\n"
+        "urlpatterns = [\n"
+        '    re_path(r"^.*$", not_found_view),\n'
+        "    path(configured_fervis().routes.django_path, include(configured_fervis().urls)),\n"
+        "]\n",
+        encoding="utf-8",
+    )
+    stdout = StringIO()
+    run_doctor_command(("doctor",), project=discover_project(root), stdout=stdout)
+    checks = {item["id"]: item for item in json.loads(stdout.getvalue())["payload"]["checks"]}
+    assert checks["framework.django.urls"]["status"] == "failed"
+    assert run_init_command(
+        ("init", "--framework", "django", "--yes"),
+        project=discover_project(root), stdout=StringIO(),
+    ) == 0
+    text = urls_path.read_text(encoding="utf-8")
+    assert text.index("path(configured_fervis().routes.django_path") < text.index('re_path(r"^.*$"')
+    assert text.count("path(configured_fervis().routes.django_path") == 1
+
+
 def test_fervis_init_patches_django_urlpatterns_without_existing_trailing_comma(
     tmp_path: Path,
 ) -> None:
@@ -2861,7 +2938,10 @@ def test_fervis_init_patches_wrapped_django_urlpattern_list(
     assert "from django.urls import path" in urls_text
     assert "_patterns = [\n" in urls_text
     assert (
-        "    path(configured_fervis().routes.django_path, include(configured_fervis().urls)),\n]\n"
+        "_patterns = [\n"
+        "    path(configured_fervis().routes.django_path, include(configured_fervis().urls)),\n"
+        "    path('api/', include('api.urls')),\n"
+        "]\n"
         in urls_text
     )
     assert (

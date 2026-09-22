@@ -162,7 +162,7 @@ class ReadAccessTurnPrompt(TurnPromptBase):
         payload = []
         for source in self.request.target_sources:
 
-            def describe(item):
+            def describe(item, *, field_ids):
                 read = self.request.catalog.read(item.read_id)
                 return {
                     "source_ref": item.id,
@@ -192,15 +192,19 @@ class ReadAccessTurnPrompt(TurnPromptBase):
                             "request_parameter_ref": f.request_parameter_ref,
                         }
                         for f in (*item.fields, *item.request_argument_fields)
-                        if not f.declared_entity_kind
+                        if f.id in field_ids and not f.declared_entity_kind
                     ],
                 }
 
             payload.append(
                 {
-                    "target": describe(source),
+                    "target": describe(source, field_ids=_identity_field_ids(source)),
                     "parent_candidates": [
-                        describe(parent) for parent in self.request.candidates(source)
+                        describe(
+                            parent,
+                            field_ids=_compatible_parent_field_ids(source, parent),
+                        )
+                        for parent in self.request.candidates(source)
                     ],
                 }
             )
@@ -221,6 +225,36 @@ class ReadAccessTurnPrompt(TurnPromptBase):
         return ProviderResponseContract(
             provider_schema={"submit_read_access": access_schema(self.request)}
         )
+
+
+def _compatible_parent_field_ids(target: RowSource, parent: RowSource) -> set[str]:
+    required = tuple(
+        param for param in target.params if requires_caller_supplied_input(param)
+    )
+    return {
+        field.id
+        for field in (*parent.fields, *parent.request_argument_fields)
+        if not field.declared_entity_kind
+        and any(_compatible(field, param, parent) for param in required)
+    }
+
+
+def _identity_field_ids(source: RowSource) -> set[str]:
+    return {
+        field_id
+        for key in source.candidate_keys
+        for field_id in (
+            *(component.field_id for component in key.components),
+            *key.context_field_ids,
+        )
+    } | {
+        field_id
+        for reference in source.entity_references
+        for field_id in (
+            *(component.local_field_id for component in reference.components),
+            *reference.context_field_ids,
+        )
+    }
 
 
 def parse_read_access(payload, *, request: AccessDiscoveryRequest) -> ReadAccessCatalog:

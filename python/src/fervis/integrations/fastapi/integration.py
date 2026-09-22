@@ -55,6 +55,12 @@ class FastAPIIntegration:
         include_router = getattr(app, "include_router", None)
         if not callable(include_router):
             raise TypeError("FastAPIIntegration.mount() requires a FastAPI app.")
+        app_router = getattr(app, "router", None)
+        routes = getattr(app_router, "routes", None)
+        if not isinstance(routes, list):
+            raise TypeError("FastAPIIntegration.mount() requires ordered FastAPI routes.")
+        host_routes = tuple(routes)
+        host_route_ids = {id(route) for route in host_routes}
         interface = self._question_interface(question_interface)
         prefix = self.routes.prefix.rstrip("/")
         include_router(
@@ -62,6 +68,12 @@ class FastAPIIntegration:
             prefix=prefix,
             include_in_schema=False,
         )
+        mounted_routes = tuple(route for route in routes if id(route) not in host_route_ids)
+        if not mounted_routes:
+            raise RuntimeError("FastAPIIntegration.mount() did not register Fervis routes.")
+        # FastAPI matches in registration order. Keep source discovery after the
+        # host routes have been declared, then make the Fervis namespace reachable.
+        routes[:] = [*mounted_routes, *host_routes]
         _close_question_interface_with_fastapi_app(app, interface)
         return app
 

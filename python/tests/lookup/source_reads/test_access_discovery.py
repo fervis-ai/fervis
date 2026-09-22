@@ -2,6 +2,8 @@ from fervis.lookup.source_reads.access_model import ReadAccessCatalog
 import pytest
 from jsonschema import validate
 from tests.lookup.relational_engine.test_dependent_reads import _program
+from fervis.lookup.relation_catalog import CatalogField, RelationCatalog
+from dataclasses import replace
 from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
 from fervis.lookup.source_reads.access_discovery import (
     AccessDiscoveryRequest,
@@ -73,6 +75,28 @@ def test_candidate_failure_does_not_claim_a_complete_domain():
     }
     access = parse_read_access(payload, request=request)
     assert not access.can_enumerate(child)
+
+
+def test_access_prompt_shows_only_fields_that_can_supply_an_argument():
+    _, _, catalog = _program(paired=True)
+    parent_read = catalog.read("facilities")
+    parent_read = replace(parent_read, fields=(
+        *parent_read.fields,
+        CatalogField("unrelated_boolean", "boolean", path="unrelated_boolean",
+                     row_path_id="root", metadata={"description": "UNRELATED_FIELD_MARKER"}),
+    ))
+    catalog = RelationCatalog(reads=(parent_read, *(
+        read for read in catalog.reads if read.id != parent_read.id
+    )))
+    sources = build_api_row_source_catalog(catalog)
+    child = next(source for source in sources.sources if source.read_id == "instruments")
+    request = AccessDiscoveryRequest(catalog, sources, (child,))
+    prompt = ReadAccessTurnPrompt(request).to_model_payload(
+        TurnPromptContext(current_question="How many instruments?")
+    )
+    assert "facilities.id" in prompt.prompt_text
+    assert "facilities.zone" in prompt.prompt_text
+    assert "UNRELATED_FIELD_MARKER" not in prompt.prompt_text
 
 
 def test_selected_dependent_read_discovers_complete_parent_traversal(monkeypatch):
