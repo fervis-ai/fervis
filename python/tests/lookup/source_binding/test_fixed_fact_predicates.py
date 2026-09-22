@@ -122,6 +122,10 @@ def test_scalar_parameter_correspondence_preserves_the_exact_comparison(change):
         changed = replace(expression, left_ref='scaled_salary')
     fact = replace(fact, expressions=(*extra, *(changed if item.id == expression.id else item for item in fact.expressions)))
     index = analyze_requested_fact(fact, inputs=request.index.input_by_ref, input_denotations=request.index.input_denotation_by_ref)
+    if change == 'reversed':
+        with pytest.raises(ValueError, match='canonical value has no matching supplied input use'):
+            replace(request, index=index)
+        return
     request = replace(request, index=index)
     owner = next(item.requirement_ref for item in index.boolean_requirements if item.atom_ref.value_ref.endswith(':minimum_manager_salary'))
     assert not request.direct_value_options_for_owner(owner, branch_id='branch')

@@ -156,6 +156,19 @@ def test_anonymous_named_collection_rechecks_each_member_and_counts_once(data_ca
         raise AssertionError(name)
 
     from fervis.lookup.fact_compilation.model import FactCompilationResult
+    if data_case == "distinct":
+        altered = replace(canonical, typed_value=FactValue.string_set(
+            id=value.id, known_input_id="i1",
+            values=("River District", "Other District"),
+            proof_refs=value.proof_refs,
+        ))
+        with pytest.raises(ValueError, match="reference collection differs"):
+            realize_and_compile_logical_plan(
+                logical,
+                sources_by_fact={"fact_1": snapshot_source_catalog(tuple(sources.values()))},
+                canonical_values=(altered,),
+                turn=turn,
+            )
     compiled = realize_and_compile_logical_plan(
         logical,
         sources_by_fact={"fact_1": snapshot_source_catalog(tuple(sources.values()))},

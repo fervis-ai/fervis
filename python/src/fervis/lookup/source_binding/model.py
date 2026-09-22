@@ -26,6 +26,8 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     IdentitySetValuePayload,
     IdentityValuePayload,
+    NamedValuePayload,
+    StringSetValuePayload,
     LiteralType,
     LiteralValuePayload,
     ValueProjectionKind,
@@ -572,6 +574,26 @@ class SemanticSourceBindingRequest:
         ) + tuple(item.value_id for item in self.catalog_values)
         if len(value_ids) != len(set(value_ids)):
             raise ValueError("source binding value IDs must be unique")
+        input_by_ref = self.index.input_by_ref
+        uses_by_input = {
+            input_ref: {use.use_ref for use in self.index.input_use_sites if use.input_ref == input_ref}
+            for input_ref in input_by_ref
+        }
+        for value in self.canonical_values:
+            if (
+                value.input_ref not in input_by_ref
+                or value.typed_value.known_input_id != value.input_ref
+                or not set(value.use_refs) <= uses_by_input[value.input_ref]
+            ):
+                raise ValueError("canonical value has no matching supplied input use")
+            supplied = input_by_ref[value.input_ref].operand
+            payload = value.typed_value.payload
+            if isinstance(payload, NamedValuePayload) and payload.text != supplied:
+                raise ValueError("named reference differs from its supplied literal")
+            if isinstance(payload, StringSetValuePayload) and (
+                not isinstance(supplied, tuple) or set(payload.values) != set(supplied)
+            ):
+                raise ValueError("reference collection differs from supplied members")
         target_refs = {
             param.param_ref
             for source in self.source_catalog.sources

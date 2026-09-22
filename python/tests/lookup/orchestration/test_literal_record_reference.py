@@ -269,6 +269,19 @@ def test_literal_reference_is_guarded_before_related_count_and_recomputed_on_rep
             return plan
         raise AssertionError(name)
 
+    if not use_runtime and not duplicate_name and not descriptor:
+        altered = replace(canonical, typed_value=FactValue.named(
+            id=value.id, known_input_id="i1", text="Other District",
+            proof_refs=value.proof_refs,
+        ))
+        with pytest.raises(ValueError, match="named reference differs"):
+            realize_and_compile_logical_plan(
+                logical,
+                sources_by_fact={"fact_1": snapshot_source_catalog(tuple(sources.values()))},
+                canonical_values=(altered,),
+                turn=turn,
+            )
+
     if use_runtime:
         from types import SimpleNamespace
         from fervis.lookup.orchestration import semantic_compilation as shared

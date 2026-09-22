@@ -15,6 +15,10 @@ realize an addressed reference when the original supplied literal is bound to
 that exact read. API pagination must establish complete traversal, or the read
 is unavailable for complete-population claims.
 
+Before source realization, the canonical input ledger is checked against the
+original supplied input and its exact use sites. A raw reference name or member
+set cannot be substituted under an existing input ID.
+
 ## Evidence so far
 
 - Sentry WMS: named and categorical warehouse counts, duplicate-name
