@@ -192,6 +192,22 @@ def test_scalar_aggregate_materializes_its_complete_dependency_scope(shape, bran
             for r in index.boolean_requirements
         },
     )
+    if branches == 2 and shape == "filter":
+        from fervis.lookup.source_binding.verification import (
+            SourceStrategyVerificationFailure,
+        )
+        scoped_ref = index.boolean_requirements[0].requirement_ref
+        missing_branch = replace(plan, boolean_bindings={
+            **plan.boolean_bindings,
+            scoped_ref: plan.boolean_bindings[scoped_ref][:1],
+        })
+        assert isinstance(
+            verify_source_strategy(
+                missing_branch,
+                request=replace(original.request, index=index, strategy=strategy),
+            ),
+            SourceStrategyVerificationFailure,
+        )
     verified = verify_source_strategy(
         plan, request=replace(original.request, index=index, strategy=strategy)
     )

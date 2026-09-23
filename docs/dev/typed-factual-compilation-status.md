@@ -145,8 +145,10 @@ set cannot be substituted under an existing input ID.
   complete population AVG as 2 or 10, respectively. A plan omitting the scoped
   Boolean realization is rejected; singleton aggregate producers execute in
   dependency order, and independent one-row outputs combine without SQL.
-  Compiler compatibility advances to `@55` to reject older saved plans that
-  could have silently treated the filter as true. Full verification passed
+  Scoped Boolean requirements now need a realization on every contributing
+  branch; a two-branch mutation with one missing filter is rejected before
+  compilation. Compiler compatibility advances to `@56` to reject older saved
+  plans that could have silently treated the filter as true. Full verification passed
   with 2,764 Python tests, Mypy over 635 source files, Ruff, distribution
   checks, 93 desktop tests and build.
 - A typed local-day regression now covers the New York spring DST transition:

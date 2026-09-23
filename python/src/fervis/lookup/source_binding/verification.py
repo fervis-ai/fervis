@@ -499,7 +499,13 @@ def _qualification_guarantee(
     failed: list[str] = []
     for requirement in request.index.boolean_requirements:
         realizations = plan.boolean_bindings.get(requirement.requirement_ref, ())
-        if not realizations or any(not item.mechanics for item in realizations):
+        required_branches = _boolean_requirement_branches(requirement, request=request)
+        actual_branches = tuple(item.branch_id for item in realizations)
+        if (
+            set(actual_branches) != required_branches
+            or len(actual_branches) != len(required_branches)
+            or any(not item.mechanics for item in realizations)
+        ):
             failed.append(requirement.requirement_ref)
             continue
         if requirement.use_site is not BooleanRequirementUseSite.POPULATION:
@@ -528,6 +534,19 @@ def _qualification_guarantee(
             for atom, refs in sorted(proofs.items())
         ),
     )
+
+
+def _boolean_requirement_branches(requirement, *, request):
+    if requirement.use_site is not BooleanRequirementUseSite.POPULATION:
+        return {branch.branch_id for branch in request.strategy.branches}
+    clause_refs = {
+        clause.clause_ref for clause in request.index.qualification.clauses
+        if requirement.atom_ref in clause.atom_refs
+    }
+    return {
+        branch.branch_id for branch in request.strategy.branches
+        if clause_refs.intersection(branch.qualification_clause_refs)
+    }
 
 
 def _subject_guarantee(
