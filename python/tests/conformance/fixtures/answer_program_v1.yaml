@@ -642,31 +642,31 @@ programs:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '3'
+                  version: '4'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -722,17 +722,17 @@ programs:
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.classify, version: '3'}
+                fields: {function_key: answer.classify, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.materialize, version: '3'}
+                fields: {function_key: answer.materialize, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: fact.materialize, version: '3'}
+                fields: {function_key: fact.materialize, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: proof.construct, version: '3'}
+                fields: {function_key: proof.construct, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: source.instantiate_read, version: '3'}
+                fields: {function_key: source.instantiate_read, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: source.read_relation, version: '3'}
+                fields: {function_key: source.read_relation, version: '4'}
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -787,13 +787,13 @@ programs:
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.classify, version: '3'}
+                fields: {function_key: answer.classify, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.materialize, version: '3'}
+                fields: {function_key: answer.materialize, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: fact.materialize, version: '3'}
+                fields: {function_key: fact.materialize, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: proof.construct, version: '3'}
+                fields: {function_key: proof.construct, version: '4'}
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -992,35 +992,35 @@ programs:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.filter
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '3'
+                  version: '4'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1276,35 +1276,35 @@ programs:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.row_filter
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '3'
+                  version: '4'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1383,7 +1383,7 @@ programs:
               proof_refs:
                 $tuple:
                 - capability:sales.channel
-              function_semantics_version: '3'
+              function_semantics_version: '4'
               kind:
                 $enum: CapabilityKind
                 value: narrow_population
@@ -1501,39 +1501,39 @@ programs:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: program.capability.narrow_population
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: program.capability.narrow_population
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '3'
+                  version: '4'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1704,31 +1704,31 @@ programs:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.classify
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '3'
+                  version: '4'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -1903,27 +1903,27 @@ programs:
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: answer.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: fact.materialize
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: proof.construct
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: relation.project
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.instantiate_read
-                  version: '3'
+                  version: '4'
               - $type: FunctionSemanticVersion
                 fields:
                   function_key: source.read_relation
-                  version: '3'
+                  version: '4'
             source_contracts:
               $tuple:
               - $type: SourceContractPin
@@ -2036,15 +2036,15 @@ programs:
             function_semantics:
               $tuple:
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.classify, version: '3'}
+                fields: {function_key: answer.classify, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: answer.materialize, version: '3'}
+                fields: {function_key: answer.materialize, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: fact.materialize, version: '3'}
+                fields: {function_key: fact.materialize, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: proof.construct, version: '3'}
+                fields: {function_key: proof.construct, version: '4'}
               - $type: FunctionSemanticVersion
-                fields: {function_key: relation.compute, version: '3'}
+                fields: {function_key: relation.compute, version: '4'}
             source_contracts: {$tuple: []}
 binding_sets:
   invocation:

@@ -1,6 +1,8 @@
 """Typed factual arithmetic must not inherit a caller's Decimal precision."""
 
 from decimal import Decimal, localcontext
+from dataclasses import replace
+import pytest
 
 from fervis.lookup.answer_program.expressions import (
     BinaryExpression, ExpressionBinaryOperator, FieldRef,
@@ -60,3 +62,24 @@ def test_typed_product_and_nonterminating_division_ignore_ambient_precision():
             divisions.append(stable_divide(Decimal(1), Decimal(3)))
     assert divisions[0] == divisions[1] == divisions[2]
     assert len(divisions[0].as_tuple().digits) == 50
+
+
+def test_saved_program_with_previous_numeric_semantics_is_not_reused():
+    from tests.lookup.fact_compilation.test_compiler import _compile_memory_count
+    from fervis.lookup.answer_program.compatibility import verify_program_compatibility
+    from fervis.lookup.plan_execution.errors import VerificationError
+    from fervis.lookup.relation_catalog import RelationCatalog
+
+    _, _, memory_relation, compiled, _, _ = _compile_memory_count(({"event_id": "a"},))
+    program = compiled.answer_program
+    stale = replace(program, compatibility=replace(
+        program.compatibility,
+        function_semantics=tuple(
+            replace(item, version="3") if item.function_key == "relation.aggregate" else item
+            for item in program.compatibility.function_semantics
+        ),
+    ))
+    with pytest.raises(VerificationError, match="incompatible_function_semantics"):
+        verify_program_compatibility(
+            stale, catalog=RelationCatalog(), memory_relations=(memory_relation,)
+        )

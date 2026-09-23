@@ -108,6 +108,12 @@ set cannot be substituted under an existing input ID.
   now pass at caller precisions 6, 28 and 50. Unsupported extreme precision
   fails explicitly. Full verification passed with 2,738 Python tests, Mypy
   over 635 source files, Ruff, distribution checks, 93 desktop tests and build.
+- The corrected arithmetic advances the function-semantics compatibility
+  version from 3 to 4. Previously saved programs with version 3 reject reuse
+  before source reads and must be recompiled; their historical answer evidence
+  remains readable. Updated conformance fixtures and a stale-version regression
+  pass. Full verification passed with 2,739 Python tests, Mypy over 635 source
+  files, Ruff, distribution checks, 93 desktop tests and build.
 - The repository verifier passed after typed dependent-read replay coverage:
   2,721
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
