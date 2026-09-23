@@ -92,6 +92,15 @@ set cannot be substituted under an existing input ID.
   regression fails closed without SQL. The
   full repository verifier passed with 2,734 Python tests, Mypy over 634 source
   files, Ruff, installed distribution checks, 93 desktop tests and build.
+- `fervis init` now replaces a retired `from fervis.flask import
+  configured_fervis` in an existing Flask factory rather than adding a second,
+  conflicting import. In an isolated MarketplaceOS copy with current Fervis,
+  `init`, migration and `doctor` pass; doctor finds 18 readable GET endpoints.
+  The sample's own suite has 51 passes and one review-count failure, reproduced
+  unchanged in a baseline copy with Fervis removed. This is integration/setup
+  evidence, not a live factual-answer receipt. Full repository verification
+  after the import migration passed with 2,736 Python tests, Mypy over 634
+  source files, Ruff, distribution checks, 93 desktop tests and build.
 - The repository verifier passed after typed dependent-read replay coverage:
   2,721
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,

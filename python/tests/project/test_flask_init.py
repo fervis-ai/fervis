@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from io import StringIO
 from pathlib import Path
+import pytest
 
 from fervis.interfaces.cli.dispatch import run_init_command
 from fervis.project import discover_project
@@ -168,6 +169,36 @@ def test_fervis_init_patches_simple_flask_app_factory(tmp_path: Path) -> None:
     text = app_path.read_text(encoding="utf-8")
     assert "from fervis import configured_fervis" in text
     assert "    configured_fervis().init_app(app)\n    return app" in text
+
+
+@pytest.mark.parametrize("already_added_canonical", [False, True])
+def test_fervis_init_replaces_retired_flask_import_without_duplicate_binding(
+    tmp_path: Path, already_added_canonical: bool,
+) -> None:
+    root = _flask_project(tmp_path)
+    app_path = root / "app.py"
+    app_path.write_text(
+        '"""Existing Flask service."""\n'
+        + ("from fervis import configured_fervis\n" if already_added_canonical else "")
+        + "from fervis.flask import configured_fervis\n"
+        "from flask import Flask\n\n"
+        "def create_app():\n"
+        "    app = Flask(__name__)\n"
+        "    configured_fervis().init_app(app)\n"
+        "    return app\n",
+        encoding="utf-8",
+    )
+    args = (
+        "init", "--framework", "flask", "--app", "app:create_app",
+        "--source-prefix", "/api/", "--yes",
+    )
+
+    assert run_init_command(args, project=discover_project(root), stdout=StringIO()) == 0
+    text = app_path.read_text(encoding="utf-8")
+    assert "from fervis.flask import" not in text
+    assert text.count("from fervis import configured_fervis") == 1
+    assert run_init_command(args, project=discover_project(root), stdout=StringIO()) == 0
+    assert app_path.read_text(encoding="utf-8") == text
 
 
 def test_fervis_init_ignores_returns_owned_by_nested_route_handlers(

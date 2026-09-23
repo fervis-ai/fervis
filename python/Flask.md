@@ -1,8 +1,10 @@
 # Fervis Flask Host API Setup Checklist
 
 Start with installation, authentication, and runtime verification in Steps 8–10.
-Fervis can inspect selected JSON object or object-array GET responses without a
-declared response schema when the read requires no additional invocation inputs.
+Fervis can inspect selected JSON objects, object arrays, scalars and scalar
+arrays without a declared response schema. A read with required arguments can
+be inspected when the selected fact supplies original typed address inputs and
+the compiled read binds those same values.
 Inspection uses the current caller's read authority and records its own lineage.
 It cannot infer keys, relationships, or closed enums from observed values.
 
