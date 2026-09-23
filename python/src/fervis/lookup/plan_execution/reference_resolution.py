@@ -181,7 +181,10 @@ def verify_observed_reference_guards(program, *, row_sources):
                     program, row_sources=row_sources,
                     relation_id=spec.input_relation, field_id=property_value.field_id,
                 )
-                if origins != {(spec.observed_source_ref, property_value.source_field_ref)}:
+                if origins != {(
+                    spec.observed_source_ref, property_value.source_field_ref,
+                    property_value.type_name, property_value.label,
+                )}:
                     raise VerificationError('Observed reference property must retain its source field authority')
 
 
@@ -209,7 +212,8 @@ def _observed_property_origins(program, *, row_sources, relation_id, field_id):
                 if current_field not in {item.field_id for item in relation.fields}:
                     raise VerificationError('Observed reference property is absent from source relation')
                 source = row_sources.source(relation.source.row_source_id)
-                return {(source.id, source.field(current_field).field_ref)}
+                field = source.field(current_field)
+                return {(source.id, field.field_ref, field.type.value, field.label)}
             spec = producers.get(current_relation)
             if isinstance(spec, (FilterSpec, OrderSpec, ReferenceGuardSpec)):
                 return trace(spec.input_relation, current_field)

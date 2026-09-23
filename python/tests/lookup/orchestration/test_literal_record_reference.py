@@ -488,27 +488,31 @@ def test_literal_reference_is_guarded_before_related_count_and_recomputed_on_rep
         guard = next(op for op in selected_program.answer_program.operations
                      if isinstance(op.spec, ReferenceGuardSpec)
                      and op.spec.observed_properties)
-        forged = replace(guard, spec=replace(
-            guard.spec,
-            observed_properties=(replace(
-                guard.spec.observed_properties[0],
-                source_field_ref="forged.source.property",
-            ), *guard.spec.observed_properties[1:]),
-        ))
-        forged_program = replace(
-            selected_program.answer_program,
-            operations=tuple(forged if op.id == guard.id else op
-                             for op in selected_program.answer_program.operations),
-        )
-        read_count = len(reads)
-        with pytest.raises(VerificationError, match="source field authority"):
-            invoke_answer_program(
-                program=forged_program,
-                bindings=selected_program.initial_bindings,
-                environment=ExecutionEnvironment(catalog=catalog),
-                ports=RuntimePorts(Port("d1"), LookupMemory()),
+        for changed_property in (
+            {"source_field_ref": "forged.source.property"},
+            {"type_name": "boolean"},
+            {"label": "misleading property label"},
+        ):
+            forged = replace(guard, spec=replace(
+                guard.spec,
+                observed_properties=(replace(
+                    guard.spec.observed_properties[0], **changed_property,
+                ), *guard.spec.observed_properties[1:]),
+            ))
+            forged_program = replace(
+                selected_program.answer_program,
+                operations=tuple(forged if op.id == guard.id else op
+                                 for op in selected_program.answer_program.operations),
             )
-        assert len(reads) == read_count
+            read_count = len(reads)
+            with pytest.raises(VerificationError, match="source field authority"):
+                invoke_answer_program(
+                    program=forged_program,
+                    bindings=selected_program.initial_bindings,
+                    environment=ExecutionEnvironment(catalog=catalog),
+                    ports=RuntimePorts(Port("d1"), LookupMemory()),
+                )
+            assert len(reads) == read_count
         chosen = invoke_answer_program(
             program=selected_program.answer_program,
             bindings=selected_program.initial_bindings,

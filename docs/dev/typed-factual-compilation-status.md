@@ -134,8 +134,9 @@ set cannot be substituted under an existing input ID.
   query-local occurrence number to an entity key. The choice shows a minimal
   distinguishing property set but pins every present nonnullable scalar
   property. Typed replay rechecks those properties and the original literal;
-  changed names, other properties, missing rows, forged source-field lineage
-  and indistinguishable records fail closed. The answer-program schema advances
+  changed names, other properties, missing rows, forged source-field lineage,
+  field types or display labels, and indistinguishable records fail closed. The
+  answer-program schema advances
   to revision 27 / compiler `@54` so older saved programs recompile. Full
   verification passed with 2,761 Python tests, Mypy over 635 source files,
   Ruff, distribution checks, 93 desktop tests and build.
