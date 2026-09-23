@@ -119,6 +119,11 @@ set cannot be substituted under an existing input ID.
   correct local-day buckets. This preserves a SQL-era factual obligation in
   the typed runtime. Full verification passed with 2,740 Python tests, Mypy
   over 635 source files, Ruff, distribution checks, 93 desktop tests and build.
+- Typed schema-free count/replay also covers three complete empty-object rows.
+  The observed source has no scalar fields, yet the three row occurrences count
+  correctly; no synthetic public property is introduced. Full verification
+  passed with 2,741 Python tests, Mypy over 635 source files, Ruff,
+  distribution checks, 93 desktop tests and build.
 - The repository verifier passed after typed dependent-read replay coverage:
   2,721
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,

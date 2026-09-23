@@ -60,10 +60,17 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
 
 def test_typed_runtime_counts_schema_free_primitive_array(monkeypatch):
     _run_typed_native_count(monkeypatch, annotated=False, batched=False,
-                            outcome="normal", primitive=True)
+                            outcome="normal", unannotated_body=[1, 2, 3])
 
 
-def _run_typed_native_count(monkeypatch, *, annotated, batched, outcome, primitive=False):
+def test_typed_runtime_counts_schema_free_rows_without_scalar_properties(monkeypatch):
+    _run_typed_native_count(monkeypatch, annotated=False, batched=False,
+                            outcome="normal", unannotated_body=[{}, {}, {}])
+
+
+def _run_typed_native_count(monkeypatch, *, annotated, batched, outcome,
+                            unannotated_body=None):
+    schema_free = unannotated_body is not None
     seen = []
     logical = []
 
@@ -198,7 +205,8 @@ def _run_typed_native_count(monkeypatch, *, annotated, batched, outcome, primiti
             reads.append((endpoint_name, args))
             return {
                 "responseStatus": 200,
-                "responseBody": [1, 2, 3] if primitive else [{"id": 1}, {"id": 2}, {"id": 3}],
+                "responseBody": (unannotated_body if schema_free
+                                 else [{"id": 1}, {"id": 2}, {"id": 3}]),
                 "responseFormat": "json",
             }
 
@@ -215,7 +223,7 @@ def _run_typed_native_count(monkeypatch, *, annotated, batched, outcome, primiti
                     "params": (CatalogParam("page", "page", ParamSource.QUERY, "integer"),),
                     "source_metadata": {"representation_authority": "unobserved"},
                 }
-                if primitive or batched and outcome in {"normal", "unavailable"} and name == "fourth_stores"
+                if schema_free or batched and outcome in {"normal", "unavailable"} and name == "fourth_stores"
                 else {} if annotated else {"candidate_keys": ()}
             ),
         )
@@ -263,6 +271,8 @@ def _run_typed_native_count(monkeypatch, *, annotated, batched, outcome, primiti
         )
         return
     assert isinstance(result, shared.SemanticCompilationSuccess)
+    if schema_free and unannotated_body == [{}, {}, {}]:
+        assert result.catalog_selection.relation_catalog.read("stores").fields == ()
     if batched:
         assert len(access_attempts) == 1
         assert access_attempts[0] == ()
@@ -279,7 +289,7 @@ def _run_typed_native_count(monkeypatch, *, annotated, batched, outcome, primiti
         "SemanticQuestionFrameTurnPrompt",
         "SemanticQuestionContractTurnPrompt",
         "SemanticQueryEnrichmentTurnPrompt",
-        *(["PaginationDiscoveryPrompt"] if primitive else []),
+        *(["PaginationDiscoveryPrompt"] if schema_free else []),
         "SemanticSourceRealizationTurnPrompt",
         "SetPopulationTurnPrompt",
     ]
@@ -290,9 +300,9 @@ def _run_typed_native_count(monkeypatch, *, annotated, batched, outcome, primiti
     assert not any(
         isinstance(operation.spec, SqlQuerySpec) for operation in program.operations
     )
-    assert reads == ([('stores', {})] if primitive else [])
+    assert reads == ([('stores', {})] if schema_free else [])
     execution_catalog = catalog
-    if primitive:
+    if schema_free:
         from fervis.lookup.orchestration.execution_sources import prepare_execution_catalog
         execution_catalog = prepare_execution_catalog(
             run_id="typed-runtime-replay", catalog=catalog, program=program,
@@ -308,7 +318,7 @@ def _run_typed_native_count(monkeypatch, *, annotated, batched, outcome, primiti
     assert (
         next(iter(executed.fact_result.outcome.projected_rows[0].values.values())) == 3
     )
-    assert len(reads) == (3 if primitive else 1)
+    assert len(reads) == (3 if schema_free else 1)
 
 
 @pytest.mark.parametrize(
