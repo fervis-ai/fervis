@@ -224,6 +224,75 @@ def test_required_address_inspection_uses_only_supplied_certified_arguments():
     assert observed.read("readings").fields_by_path["value"].type == "integer"
 
 
+def test_saved_schema_free_read_reinspects_with_bound_optional_arguments():
+    from fervis.lookup.answer_program.model import AnswerProgram
+    from fervis.lookup.answer_program.relations import (
+        EndpointParamBinding, Relation, RelationSource, SourceKind,
+    )
+    from fervis.lookup.answer_program.values import BindingSet, ConstantRef, FactValue, LiteralType
+    from fervis.lookup.orchestration.execution_sources import _bound_inspection_arguments
+    from fervis.lookup.relation_catalog import CatalogParam, EndpointRead, ParamSource
+    from fervis.lookup.source_reads.representation import inspect_selected_representations
+
+    read = EndpointRead(
+        "readings", "readings", resource_names=("readings",),
+        params=(CatalogParam("representation", "representation", ParamSource.QUERY,
+                             "string"),),
+    )
+    choice = FactValue.literal(id="compact", literal_type=LiteralType.STRING,
+                               value="compact")
+    program = AnswerProgram(relations=(Relation(
+        "rows", RelationSource(SourceKind.API_READ, read_id=read.id,
+            param_bindings=(EndpointParamBinding(
+                "representation", ConstantRef("compact", "choice@1", choice)
+            ),)),
+    ),))
+    catalog = RelationCatalog(reads=(read,))
+    args_by_read = _bound_inspection_arguments(
+        catalog=catalog, program=program, bindings=BindingSet()
+    )
+    assert args_by_read == {read.id: {"representation": "compact"}}
+
+    class Port:
+        def read(self, *, endpoint_name, args):
+            assert endpoint_name == "readings"
+            assert args == {"representation": "compact"}
+            return {"responseStatus": 200, "responseFormat": "json",
+                    "responseBody": [{"total": 2}]}
+
+    observed = inspect_selected_representations(
+        catalog, read_ids=(read.id,), data_access_port=Port(),
+        inspection_args_by_read=args_by_read,
+    ).read(read.id)
+    from fervis.lookup.source_reads.representation import inspection_request_fingerprint
+    assert observed.source_metadata["observed_request_fingerprint"] == (
+        inspection_request_fingerprint({"representation": "compact"})
+    )
+    assert "observed_request_args" not in observed.source_metadata
+    from types import SimpleNamespace
+    from fervis.lookup.orchestration.logical_compilation import (
+        _verify_compiled_inspection_addresses,
+    )
+
+    compiled = SimpleNamespace(answer_program=program, initial_bindings=BindingSet())
+    _verify_compiled_inspection_addresses(
+        SimpleNamespace(full_catalog=RelationCatalog(reads=(observed,))), compiled
+    )
+    class DefaultPort:
+        def read(self, *, endpoint_name, args):
+            assert endpoint_name == "readings" and args == {}
+            return {"responseStatus": 200, "responseFormat": "json",
+                    "responseBody": [{"total": 2}]}
+
+    default_observation = inspect_selected_representations(
+        catalog, read_ids=(read.id,), data_access_port=DefaultPort()
+    ).read(read.id)
+    with pytest.raises(ValueError, match="differs from inspected"):
+        _verify_compiled_inspection_addresses(SimpleNamespace(
+            full_catalog=RelationCatalog(reads=(default_observation,))
+        ), compiled)
+
+
 def test_json_root_property_cannot_collide_with_root_row_identifier():
     from fervis.lookup.relation_catalog import EndpointRead, parse_relation_catalog
     from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog

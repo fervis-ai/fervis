@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from hashlib import sha256
 from typing import Any
 
 from fervis.lookup.relation_catalog import (
@@ -15,6 +16,7 @@ from fervis.lookup.source_reads.response import (
     endpoint_response_body,
     response_body_hash,
 )
+from fervis.lookup.canonical_data import canonical_runtime_json
 
 
 @dataclass(frozen=True)
@@ -23,8 +25,12 @@ class ReadRepresentationObservation:
     response_hash: str
 
 
+def inspection_request_fingerprint(args: dict[str, Any]) -> str:
+    return "sha256:" + sha256(canonical_runtime_json(args).encode("utf-8")).hexdigest()
+
+
 def observe_read_representation(
-    read: EndpointRead, result: dict[str, Any]
+    read: EndpointRead, result: dict[str, Any], *, request_args: dict[str, Any] | None = None
 ) -> ReadRepresentationObservation:
     """Describe only the values observed in one authorized response.
 
@@ -159,6 +165,7 @@ def observe_read_representation(
         source_metadata={
             **(read.source_metadata or {}),
             "representation_authority": "observed_response",
+            "observed_request_fingerprint": inspection_request_fingerprint(request_args or {}),
         },
     )
     return ReadRepresentationObservation(observed, response_body_hash(result))
@@ -207,7 +214,8 @@ def can_inspect_representation(
         and metadata.get("representation_status") not in {"unavailable", "read_failed"}
         and {
             param.ref for param in read.params if requires_caller_supplied_input(param)
-        } == set(inspection_args or {})
+        } <= set(inspection_args or {})
+        and set(inspection_args or {}) <= {param.ref for param in read.params}
     )
 
 
@@ -272,7 +280,9 @@ def inspect_selected_representations(
             }))
             continue
         try:
-            observation = observe_read_representation(read, result)
+            observation = observe_read_representation(
+                read, result, request_args=checked_args
+            )
         except ValueError as exc:
             reads.append(
                 replace(

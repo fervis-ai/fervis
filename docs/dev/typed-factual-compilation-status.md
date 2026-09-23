@@ -124,6 +124,15 @@ set cannot be substituted under an existing input ID.
   correctly; no synthetic public property is introduced. Full verification
   passed with 2,741 Python tests, Mypy over 635 source files, Ruff,
   distribution checks, 93 desktop tests and build.
+- Schema-free representation evidence is now tied to a fingerprint of the
+  complete inspected argument map, without storing raw argument values in the
+  catalog. Compilation rejects any required or optional argument mismatch;
+  saved-program replay re-inspects with the full validated binding set. A
+  no-required-argument read with a bound optional representation choice passes
+  the replay test, while a plan inspected under the default representation and
+  executed under that choice fails closed. Full verification passed with 2,742
+  Python tests, Mypy over 635 source files, Ruff, distribution checks, 93
+  desktop tests and build.
 - The repository verifier passed after typed dependent-read replay coverage:
   2,721
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
@@ -162,6 +171,10 @@ parent row still lack structural inspection before source realization.
 The new question-dependent inspection-input grounding turn has deterministic
 parser and execution coverage but has not met the harness's 9/10 model-boundary
 and affected-live-case promotion gates.
+Schema-free reads whose optional argument changes response shape may now stop
+at the inspection-address guard unless that argument was grounded before
+inspection; they need a typed pre-inspection binding route, not a default-shape
+assumption.
 Direct SQL-operation support remains in the program runtime even though the
 model-SQL authoring route is retired; remove it after typed behavior parity.
 The conservative local reconciliation of the original provider-credit budget

@@ -207,10 +207,44 @@ def test_schema_free_address_compiles_typed_count_from_original_input(
     from fervis.lookup.orchestration.logical_compilation import (
         _verify_compiled_inspection_addresses,
     )
+    from fervis.lookup.source_reads.representation import inspection_request_fingerprint
+    observed = result.catalog_selection.relation_catalog.read("facilities")
+    wrong_observation = replace(observed, source_metadata={
+        **(observed.source_metadata or {}),
+        "observed_request_fingerprint": inspection_request_fingerprint({
+            "district_id": "00000000-0000-0000-0000-000000000002"
+        }),
+    })
     with pytest.raises(ValueError, match="differs from inspected"):
         _verify_compiled_inspection_addresses(SimpleNamespace(
-            full_catalog=result.catalog_selection.relation_catalog,
-            inspection_addresses={"facilities": {
-                "district_id": "00000000-0000-0000-0000-000000000002"
-            }},
+            full_catalog=RelationCatalog(reads=(wrong_observation,)),
         ), result.compilation)
+
+    from fervis.lookup.answer_program.relations import EndpointParamBinding
+    from fervis.lookup.answer_program.values import ConstantRef, FactValue, LiteralType
+
+    optional = CatalogParam("representation", "representation", ParamSource.QUERY,
+                            "string", required=False)
+    observed = replace(observed, params=(*observed.params, optional))
+    representation = FactValue.literal(
+        id="compact", literal_type=LiteralType.STRING, value="compact"
+    )
+    relation = next(item for item in program.relations
+                    if item.source.read_id == "facilities")
+    changed_relation = replace(relation, source=replace(
+        relation.source, param_bindings=(*relation.source.param_bindings,
+            EndpointParamBinding("representation", ConstantRef(
+                "compact", "optional-representation@1", representation
+            ))),
+    ))
+    changed_program = replace(program, relations=tuple(
+        changed_relation if item.id == relation.id else item
+        for item in program.relations
+    ))
+    with pytest.raises(ValueError, match="differs from inspected"):
+        _verify_compiled_inspection_addresses(SimpleNamespace(
+            full_catalog=RelationCatalog(reads=(observed,)),
+        ), SimpleNamespace(
+            answer_program=changed_program,
+            initial_bindings=result.compilation.initial_bindings,
+        ))

@@ -47,7 +47,7 @@ def prepare_execution_catalog(
 def _bound_inspection_arguments(
     *, catalog, program, bindings, include_observed_read_ids=frozenset(),
 ):
-    """Recover only direct, original question addresses from validated bindings."""
+    """Recover each direct read's full bound arguments from validated bindings."""
     if bindings is None:
         return {}
     from fervis.lookup.answer_program.inputs import (
@@ -72,23 +72,26 @@ def _bound_inspection_arguments(
             "unavailable", "read_failed"
         }:
             continue
+        params = {param.ref: param for param in read.params}
         required = {
-            param.ref: param for param in read.params
+            ref for ref, param in params.items()
             if requires_caller_supplied_input(param)
         }
-        if not required:
-            continue
         bound = {binding.param_id: binding for binding in source.param_bindings}
-        if not set(required) <= set(bound):
+        if not required <= set(bound):
             continue
+        if set(bound) - set(params):
+            raise ValueError("inspected read binds an unknown API parameter")
         args = {}
-        for ref, param in required.items():
+        for ref, binding in bound.items():
+            param = params[ref]
             resolved = resolve_value_expression(
-                bound[ref].value_expr, bindings=compiled.bindings
+                binding.value_expr, bindings=compiled.bindings
             )
-            input_ref = resolved.fact_value.known_input_id
-            if not input_ref or f"question_input:{input_ref}" not in resolved.proof_refs:
-                break
+            if ref in required:
+                input_ref = resolved.fact_value.known_input_id
+                if not input_ref or f"question_input:{input_ref}" not in resolved.proof_refs:
+                    break
             args[ref] = (
                 parse_catalog_parameter_text(
                     resolved.value, type_name=param.type, choices=param.choices
@@ -98,7 +101,7 @@ def _bound_inspection_arguments(
                     resolved.value, type_name=param.type, choices=param.choices
                 )
             )
-        if set(args) != set(required):
+        if not required <= set(args):
             continue
         previous = by_read.get(read.id)
         if previous is not None and canonical_runtime_json(previous) != canonical_runtime_json(args):

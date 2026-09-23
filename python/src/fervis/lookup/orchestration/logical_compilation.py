@@ -460,21 +460,28 @@ def _realize_eligible_sources(
 
 
 def _verify_compiled_inspection_addresses(request, compiled):
-    if not request.inspection_addresses:
-        return
     from fervis.lookup.orchestration.execution_sources import _bound_inspection_arguments
-    from fervis.lookup.canonical_data import canonical_runtime_json
+    from fervis.lookup.source_reads.representation import inspection_request_fingerprint
 
+    inspected = {
+        read.id: (read.source_metadata or {}).get("observed_request_fingerprint")
+        for read in request.full_catalog.reads
+        if (read.source_metadata or {}).get("representation_authority") == "observed_response"
+    }
+    if not inspected:
+        return
     used = {relation.source.read_id for relation in compiled.answer_program.relations}
     compiled_addresses = _bound_inspection_arguments(
         catalog=request.full_catalog, program=compiled.answer_program,
         bindings=compiled.initial_bindings,
-        include_observed_read_ids=frozenset(request.inspection_addresses),
+        include_observed_read_ids=frozenset(inspected),
     )
-    for read_id, inspected_args in request.inspection_addresses.items():
-        if read_id in used and canonical_runtime_json(
-            compiled_addresses.get(read_id)
-        ) != canonical_runtime_json(inspected_args):
+    for read_id, inspected_fingerprint in inspected.items():
+        if read_id in used and (
+            compiled_addresses.get(read_id) is None
+            or inspection_request_fingerprint(compiled_addresses[read_id])
+            != inspected_fingerprint
+        ):
             raise ValueError("compiled read address differs from inspected response")
 
 
@@ -524,10 +531,7 @@ def _assess_catalog_batches(
                 PaginationDiscoveryPrompt(traversal),
                 lambda payload: parse_pagination_discovery(payload, request=traversal),
             )
-        request = replace(
-            request, full_catalog=observed,
-            inspection_addresses={**request.inspection_addresses, **inspection_args},
-        )
+        request = replace(request, full_catalog=observed)
         selection = _retain_available_selection(selection, observed)
         batch = _retain_available_selection(batch, observed)
         batches = [
