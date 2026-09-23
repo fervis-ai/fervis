@@ -110,3 +110,55 @@ def test_optional_schema_free_argument_can_bind_or_be_explicitly_omitted():
     payload["reads"]["reports"]["parameter_inputs"]["shape"] = "omit"
     validate(payload, inspection_input_schema(request))
     assert parse_inspection_inputs(payload, request=request) == {"reports": {}}
+
+
+def test_schema_free_inspection_can_select_a_declared_finite_shape_choice():
+    read = EndpointRead(
+        "reports", "reports", path="/reports", resource_names=("reports",),
+        params=(CatalogParam("shape", "shape", ParamSource.QUERY, "choice",
+                             choices=("summary", "detail")),),
+    )
+    request = inspection_input_request(
+        catalog=RelationCatalog(reads=(read,)), read_ids=(read.id,),
+        contract=SimpleNamespace(inputs=(), input_denotations=()),
+        indexes=(SimpleNamespace(requested_fact_id="fact", input_use_sites=()),),
+        fact_selections=(SimpleNamespace(requested_fact_id="fact",
+                                         selected_read_ids=(read.id,)),),
+        certified_values=(),
+    )
+    assert len(request.targets) == 1
+    payload = {"reads": {"reports": {
+        "kind": "supplied_input", "mapping_basis": "The summary shape carries the requested total.",
+        "parameter_inputs": {"shape": "choice:summary"},
+    }}}
+    validate(payload, inspection_input_schema(request))
+    assert parse_inspection_inputs(payload, request=request) == {
+        "reports": {"shape": "summary"}
+    }
+    payload["reads"]["reports"]["parameter_inputs"]["shape"] = "choice:invented"
+    with pytest.raises(ValueError, match="declared inspection choice"):
+        parse_inspection_inputs(payload, request=request)
+
+
+def test_boolean_catalog_choice_is_typed_before_schema_free_inspection():
+    read = EndpointRead(
+        "flags", "flags", path="/flags", resource_names=("flags",),
+        params=(CatalogParam("active", "active", ParamSource.QUERY,
+                             "boolean", required=True),),
+    )
+    request = inspection_input_request(
+        catalog=RelationCatalog(reads=(read,)), read_ids=(read.id,),
+        contract=SimpleNamespace(inputs=(), input_denotations=()),
+        indexes=(SimpleNamespace(requested_fact_id="fact", input_use_sites=()),),
+        fact_selections=(SimpleNamespace(requested_fact_id="fact",
+                                         selected_read_ids=(read.id,)),),
+        certified_values=(),
+    )
+    payload = {"reads": {"flags": {
+        "kind": "supplied_input", "mapping_basis": "The requested flags are active.",
+        "parameter_inputs": {"active": "choice:true"},
+    }}}
+    validate(payload, inspection_input_schema(request))
+    assert parse_inspection_inputs(payload, request=request) == {
+        "flags": {"active": True}
+    }

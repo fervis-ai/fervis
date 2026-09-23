@@ -135,10 +135,12 @@ set cannot be substituted under an existing input ID.
   desktop tests and build.
 - The inspection-input grounding schema can also bind a fact-owned original
   input to an optional query argument, or explicitly omit that argument.
+  It also offers declared finite response-shape or Boolean choices, rejecting
+  any value outside the API's typed choice contract.
   Selected schema-free reads with optional parameters now wait until that
   grounding opportunity before default-shape inspection; resolver-only reads
   retain their preflight path. Focused parser and preflight tests pass, and
-  full verification passed with 2,744 Python tests, Mypy over 635 source files,
+  full verification passed with 2,746 Python tests, Mypy over 635 source files,
   Ruff, distribution checks, 93 desktop tests and build. The model-boundary
   stability and affected live-case gates remain outstanding.
 - The repository verifier passed after typed dependent-read replay coverage:

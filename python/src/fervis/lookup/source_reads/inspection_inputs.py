@@ -17,6 +17,7 @@ from fervis.model_io.structured_output.specs import required_tool_spec
 class InspectionInputTarget:
     read: EndpointRead
     options: dict[str, tuple[InputTerm, ...]]
+    choice_values: dict[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ def inspection_input_request(
         ):
             continue
         options = {}
+        choice_values = {}
         missing_required = False
         for param in read.params:
             candidates = []
@@ -73,12 +75,16 @@ def inspection_input_request(
                 except ValueError:
                     continue
                 candidates.append(term)
-            if requires_caller_supplied_input(param) and not candidates:
+            choices = param.choices or (
+                ("false", "true") if param.type == "boolean" else ()
+            )
+            if requires_caller_supplied_input(param) and not (candidates or choices):
                 missing_required = True
-            if candidates:
+            if candidates or choices:
                 options[param.ref] = tuple(sorted(candidates, key=lambda item: item.id))
+                choice_values[param.ref] = choices
         if options and not missing_required:
-            targets.append(InspectionInputTarget(read, options))
+            targets.append(InspectionInputTarget(read, options, choice_values))
     return InspectionInputRequest(tuple(targets), {
         denotation.input_ref: denotation.operand_meaning
         for denotation in contract.input_denotations
@@ -90,19 +96,21 @@ def inspection_input_schema(request: InspectionInputRequest):
         return {"type": "object", "properties": properties,
                 "required": list(properties), "additionalProperties": False}
 
+    def parameter_inputs(target):
+        params = {param.ref: param for param in target.read.params}
+        return obj({ref: {"enum": [
+            *(item.id for item in options),
+            *(f"choice:{choice}" for choice in target.choice_values[ref]),
+            *([] if requires_caller_supplied_input(params[ref]) else ["omit"]),
+        ]} for ref, options in target.options.items()})
+
     return obj({"reads": obj({target.read.id: {
         "oneOf": [
             obj({"kind": {"enum": ["unsupported"]},
                  "reason": {"type": "string", "minLength": 1}}),
             obj({"kind": {"enum": ["supplied_input"]},
                  "mapping_basis": {"type": "string", "minLength": 1},
-                 "parameter_inputs": obj({ref: {"enum": [
-                     *[item.id for item in options],
-                     *([] if requires_caller_supplied_input(next(
-                         param for param in target.read.params if param.ref == ref
-                     )) else ["omit"]),
-                 ]}
-                                          for ref, options in target.options.items()})}),
+                 "parameter_inputs": parameter_inputs(target)}),
         ]
     } for target in request.targets})})
 
@@ -115,10 +123,11 @@ class InspectionInputTurnPrompt(TurnPromptBase):
 
     def instruction_sections(self, builder):
         return (builder.instruction_block("Response inspection address", (
-            "Choose only an original supplied input whose meaning matches the API parameter.",
+            "Choose only an original supplied input or a declared finite API choice whose meaning matches the API parameter.",
+            "A declared choice is executable only because the API contract lists it; do not infer choices from sampled response values.",
             "For an optional parameter, choose omit unless the question actually supplies that qualifier or representation.",
             "Matching syntax or scalar type alone does not establish that an input names the addressed resource.",
-            "Return unsupported when the question does not supply every required address or meanings differ.",
+            "Return unsupported when a required parameter has no question-owned input or question-justified declared choice, or meanings differ.",
             "This choice only inspects current response structure; later source realization must bind the actual read arguments independently.",
         )),)
 
@@ -136,6 +145,11 @@ class InspectionInputTurnPrompt(TurnPromptBase):
                          {"input_ref": item.id, "operand": item.operand,
                           "meaning": self.request.meanings.get(item.id, "")}
                          for item in target.options[param.ref]
+                     ],
+                     "declared_choice_options": [
+                         {"value": choice,
+                          "label": (param.choice_labels or {}).get(choice, choice)}
+                         for choice in target.choice_values[param.ref]
                      ]}
                     for param in target.read.params if param.ref in target.options
                 ],
@@ -179,6 +193,17 @@ def parse_inspection_inputs(payload, *, request: InspectionInputRequest):
             if input_ref == "omit":
                 if requires_caller_supplied_input(params[ref]):
                     raise ValueError("required inspection address cannot be omitted")
+                continue
+            if input_ref.startswith("choice:"):
+                choice = input_ref.removeprefix("choice:")
+                if choice not in target.choice_values[ref]:
+                    raise ValueError("inspection choice is not a declared inspection choice")
+                from fervis.lookup.relation_catalog.parameter_values import (
+                    parse_catalog_parameter_value,
+                )
+                args[ref] = parse_catalog_parameter_value(
+                    choice, type_name=params[ref].type, choices=params[ref].choices
+                )
                 continue
             term = next((item for item in target.options[ref] if item.id == input_ref), None)
             if term is None or not isinstance(term.operand, str):
