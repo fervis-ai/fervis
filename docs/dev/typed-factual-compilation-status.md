@@ -171,6 +171,13 @@ set cannot be substituted under an existing input ID.
   full verification passed with 2,748 Python tests, Mypy over 635 source files,
   Ruff, distribution checks, 93 desktop tests and build. The model-boundary
   stability and affected live-case gates remain outstanding.
+- A captured-turn semantic assertion is prepared at
+  `scripts/experiments/source_access/inspection_input_assertion.py`. Local
+  controls reject a wrong original-input or declared-choice mapping without
+  reconstructing the production prompt. Captured production invocations and
+  paid 9/10 replay remain outstanding. Full verification after this assertion
+  passed with 2,762 Python tests, Mypy over 635 source files, Ruff,
+  distribution checks, 93 desktop tests and build.
 - The repository verifier passed after typed dependent-read replay coverage:
   2,721
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,

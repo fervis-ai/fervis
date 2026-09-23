@@ -24,6 +24,9 @@ from fervis.model_io.structured_output.schema import (  # noqa: E402
 from scripts.experiments.source_binding.assertion import (  # noqa: E402
     validate as validate_source_binding,
 )
+from scripts.experiments.source_access.inspection_input_assertion import (  # noqa: E402
+    validate as validate_inspection_input,
+)
 
 
 class RecordingQuestionFramePrompt(SemanticQuestionFrameTurnPrompt):
@@ -145,6 +148,37 @@ def test_source_binding_assertion_checks_declared_binding_outcomes():
     }
 
     assert validate_source_binding(arguments, context) == []
+
+
+def test_inspection_input_assertion_checks_bound_and_unsupported_controls():
+    context = {"reads": {
+        "readings": {"kind": "bound_arguments", "parameter_inputs": {"site_id": "i1"}},
+        "reports": {"kind": "bound_arguments", "parameter_inputs": {"shape": "choice:summary"}},
+        "private": {"kind": "unsupported"},
+    }}
+    correct = {"reads": {
+        "readings": {"kind": "bound_arguments", "parameter_inputs": {"site_id": "i1"},
+                     "mapping_basis": "Question-owned site ID."},
+        "reports": {"kind": "bound_arguments", "parameter_inputs": {"shape": "choice:summary"},
+                    "mapping_basis": "The declared summary shape supplies the requested total."},
+        "private": {"kind": "unsupported", "reason": "No caller-owned address."},
+    }}
+    assert validate_inspection_input(correct, context) == []
+    wrong = {"reads": {**correct["reads"], "reports": {
+        "kind": "bound_arguments", "parameter_inputs": {"shape": "choice:detail"},
+    }}}
+    assert validate_inspection_input(wrong, context) == [
+        "reports: incorrect typed parameter-to-input mapping"
+    ]
+    wrong_input = {"reads": {**correct["reads"], "readings": {
+        "kind": "bound_arguments", "parameter_inputs": {"site_id": "i2"},
+    }}}
+    assert validate_inspection_input(wrong_input, context) == [
+        "readings: incorrect typed parameter-to-input mapping"
+    ]
+    assert validate_inspection_input(correct, {}) == [
+        "inspection input assertion requires expected read decisions"
+    ]
 
 
 def test_population_assertion_checks_polarity_and_unknown_rows():
