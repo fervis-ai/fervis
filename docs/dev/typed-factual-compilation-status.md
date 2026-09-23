@@ -114,6 +114,11 @@ set cannot be substituted under an existing input ID.
   remains readable. Updated conformance fixtures and a stale-version regression
   pass. Full verification passed with 2,739 Python tests, Mypy over 635 source
   files, Ruff, distribution checks, 93 desktop tests and build.
+- A typed local-day regression now covers the New York spring DST transition:
+  two instants within March 8 and the first instant of March 9 fall into their
+  correct local-day buckets. This preserves a SQL-era factual obligation in
+  the typed runtime. Full verification passed with 2,740 Python tests, Mypy
+  over 635 source files, Ruff, distribution checks, 93 desktop tests and build.
 - The repository verifier passed after typed dependent-read replay coverage:
   2,721
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,

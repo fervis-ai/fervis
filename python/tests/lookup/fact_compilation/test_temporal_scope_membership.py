@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 from fervis.lookup.answer_program.operations import FilterSpec, AggregateSpec
@@ -15,8 +15,10 @@ from fervis.lookup.answer_program.inputs import (
 from fervis.lookup.answer_program.values import (
     ANCHOR_TIMEZONE_REF,
     ConstantRef,
+    EnvironmentRef,
     ParameterRef,
     FactValue,
+    LiteralType,
 )
 from fervis.lookup.plan_execution.operation_engine import execute_operations
 from fervis.lookup.plan_execution.operation_runtime import (
@@ -126,3 +128,31 @@ def test_temporal_scope_membership_preserves_calendar_and_instant_bounds(
     assert execution.relation(operation.output_relation).rows == (
         {"aggregate_1": 3 if precision == "day" else 2},
     )
+
+
+def test_typed_local_day_spans_dst_without_a_fixed_twenty_four_hour_window():
+    from fervis.lookup.answer_program.expressions import (
+        ExpressionFunction, FieldRef, FunctionExpression,
+    )
+    from fervis.lookup.plan_execution.operation_engine.expression_evaluator import (
+        ExpressionEnvironment, evaluate_expression,
+    )
+
+    grain = FactValue.literal(id="grain", literal_type=LiteralType.STRING, value="day")
+    grain_ref = ConstantRef("grain", "calendar-day@1", grain)
+    expression = FunctionExpression(ExpressionFunction.TEMPORAL_BUCKET, (
+        FieldRef("at"), grain_ref, EnvironmentRef(ANCHOR_TIMEZONE_REF),
+    ))
+    instants = tuple(datetime.fromisoformat(value) for value in (
+        "2026-03-08T05:00:00+00:00",
+        "2026-03-09T03:30:00+00:00",
+        "2026-03-09T04:00:00+00:00",
+    ))
+    buckets = tuple(evaluate_expression(expression, environment=ExpressionEnvironment(
+        row={"at": instant}, field_types={"at": "datetime"},
+        scalars={expression_input_id(grain_ref): "day"},
+        scalar_types={expression_input_id(grain_ref): "string"},
+        environment_values={ANCHOR_TIMEZONE_REF: "America/New_York"},
+        environment_types={ANCHOR_TIMEZONE_REF: "string"},
+    )).value for instant in instants)
+    assert buckets == (date(2026, 3, 8), date(2026, 3, 8), date(2026, 3, 9))
