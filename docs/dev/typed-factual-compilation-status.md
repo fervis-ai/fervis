@@ -133,6 +133,14 @@ set cannot be substituted under an existing input ID.
   executed under that choice fails closed. Full verification passed with 2,742
   Python tests, Mypy over 635 source files, Ruff, distribution checks, 93
   desktop tests and build.
+- The inspection-input grounding schema can also bind a fact-owned original
+  input to an optional query argument, or explicitly omit that argument.
+  Selected schema-free reads with optional parameters now wait until that
+  grounding opportunity before default-shape inspection; resolver-only reads
+  retain their preflight path. Focused parser and preflight tests pass, and
+  full verification passed with 2,744 Python tests, Mypy over 635 source files,
+  Ruff, distribution checks, 93 desktop tests and build. The model-boundary
+  stability and affected live-case gates remain outstanding.
 - The repository verifier passed after typed dependent-read replay coverage:
   2,721
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
@@ -171,10 +179,10 @@ parent row still lack structural inspection before source realization.
 The new question-dependent inspection-input grounding turn has deterministic
 parser and execution coverage but has not met the harness's 9/10 model-boundary
 and affected-live-case promotion gates.
-Schema-free reads whose optional argument changes response shape may now stop
-at the inspection-address guard unless that argument was grounded before
-inspection; they need a typed pre-inspection binding route, not a default-shape
-assumption.
+Schema-free reads whose optional argument changes response shape stop at the
+inspection-address guard if an early resolver inspection or later source
+binding uses different arguments. The optional pre-inspection binding path
+needs captured model-boundary and end-to-end evidence before release.
 Direct SQL-operation support remains in the program runtime even though the
 model-SQL authoring route is retired; remove it after typed behavior parity.
 The conservative local reconciliation of the original provider-credit budget

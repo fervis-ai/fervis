@@ -177,6 +177,9 @@ def compile_logical_question(request, *, on_turn=None):
         for denotation in contract.input_denotations
     )
     preflight_read_ids = access_ids if identity_access_required else resolver_ids
+    preflight_read_ids = _preflight_representation_read_ids(
+        preflight_read_ids, resolver_ids=resolver_ids, catalog=request.full_catalog
+    )
     observed = inspect_selected_representations(
         request.full_catalog,
         read_ids=preflight_read_ids,
@@ -610,6 +613,22 @@ def _retain_available_selection(selection, catalog):
         relation_catalog=relation_catalog_for_read_ids(catalog, read_ids=selected),
         requested_fact_selections=facts,
         selected_read_ids=selected,
+    )
+
+
+def _preflight_representation_read_ids(read_ids, *, resolver_ids, catalog):
+    """Leave selected optional-input probes until question inputs are grounded."""
+    from fervis.lookup.source_reads.representation import can_inspect_representation
+    from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
+
+    resolvers = set(resolver_ids)
+    return tuple(
+        read_id for read_id in read_ids
+        if read_id in resolvers or not (
+            can_inspect_representation(catalog.read(read_id))
+            and any(not requires_caller_supplied_input(param)
+                    for param in catalog.read(read_id).params)
+        )
     )
 
 

@@ -75,3 +75,38 @@ def test_inspection_input_contract_allows_explicit_unsupported_decision():
     }}}
     validate(payload, inspection_input_schema(request))
     assert parse_inspection_inputs(payload, request=request) == {}
+
+
+def test_optional_schema_free_argument_can_bind_or_be_explicitly_omitted():
+    read = EndpointRead(
+        "reports", "reports", path="/reports", resource_names=("reports",),
+        params=(CatalogParam("shape", "shape", ParamSource.QUERY, "string"),),
+    )
+    supplied = SimpleNamespace(id="shape", operand="compact")
+    request = inspection_input_request(
+        catalog=RelationCatalog(reads=(read,)), read_ids=(read.id,),
+        contract=SimpleNamespace(
+            inputs=(supplied,), input_denotations=(SimpleNamespace(
+                input_ref="shape", operand_meaning="compact response shape"
+            ),),
+        ),
+        indexes=(SimpleNamespace(requested_fact_id="fact", input_use_sites=(
+            SimpleNamespace(input_ref="shape"),
+        )),),
+        fact_selections=(SimpleNamespace(requested_fact_id="fact",
+                                         selected_read_ids=(read.id,)),),
+        certified_values=(SimpleNamespace(input_ref="shape",
+            certification_refs=("question_input:shape",)),),
+    )
+    assert len(request.targets) == 1
+    payload = {"reads": {"reports": {
+        "kind": "supplied_input", "mapping_basis": "Compact is the requested representation.",
+        "parameter_inputs": {"shape": "shape"},
+    }}}
+    validate(payload, inspection_input_schema(request))
+    assert parse_inspection_inputs(payload, request=request) == {
+        "reports": {"shape": "compact"}
+    }
+    payload["reads"]["reports"]["parameter_inputs"]["shape"] = "omit"
+    validate(payload, inspection_input_schema(request))
+    assert parse_inspection_inputs(payload, request=request) == {"reports": {}}

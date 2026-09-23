@@ -34,6 +34,25 @@ from tests.lookup.question_contract.test_question_frame import _frame_payload
 from tests.lookup.relational_engine.test_dependent_reads import _read
 
 
+def test_schema_free_optional_reads_wait_for_question_input_grounding():
+    from fervis.lookup.orchestration.logical_compilation import (
+        _preflight_representation_read_ids,
+    )
+
+    optional = replace(
+        _read("optional"), fields=(), row_paths=(),
+        params=(CatalogParam("shape", "shape", ParamSource.QUERY, "string"),),
+    )
+    declared = _read("declared")
+    resolver = replace(optional, id="resolver", endpoint_name="resolver")
+    catalog = RelationCatalog(reads=(optional, declared, resolver))
+
+    assert _preflight_representation_read_ids(
+        ("optional", "declared", "resolver"),
+        resolver_ids=("resolver",), catalog=catalog,
+    ) == ("declared", "resolver")
+
+
 def count_payload():
     path = (
         Path(__file__).resolve().parents[2]
