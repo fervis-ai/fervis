@@ -44,6 +44,11 @@ set cannot be substituted under an existing input ID.
 - The merged host checkout passed 3,683 distinct Ozana/accounts/brands Docker
   tests with no failures, and Fervis catalog inspection found 202 endpoints,
   payment-request offset pagination and sales-summary response-shape controls.
+  All 262 goldset cases that name an expected GET endpoint have one in this
+  catalog; the other 19 do not fix a source. Missing declared supply-balance
+  fields can be inspected under current caller authority, while nested
+  merch-balance fields are present in the catalog. This is structural source
+  coverage, not a model-source-selection result.
   A separate local evaluation worktree passes `fervis doctor` and an
   authenticated Fervis read; it has no paid model receipt yet.
 - Address-only FastAPI: integer, UUID and decimal path-addressed facility
