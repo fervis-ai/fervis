@@ -87,9 +87,10 @@ set cannot be substituted under an existing input ID.
   used by the selected fact. A model turn maps meanings to parameters; the
   parser rejects invented or unrelated inputs. The compiled typed program must
   bind those same addresses, and saved-program replay re-inspects through the
-  validated binding set. A UUID-addressed facility count passes the typed
-  compile, execution, replay and address-mismatch regression without SQL. The
-  full repository verifier passed with 2,731 Python tests, Mypy over 634 source
+  validated binding set. UUID, integer, number and decimal addressed facility
+  counts pass typed compilation, execution and replay; an address-mismatch
+  regression fails closed without SQL. The
+  full repository verifier passed with 2,734 Python tests, Mypy over 634 source
   files, Ruff, installed distribution checks, 93 desktop tests and build.
 - The repository verifier passed after typed dependent-read replay coverage:
   2,721

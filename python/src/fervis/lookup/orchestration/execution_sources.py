@@ -56,7 +56,9 @@ def _bound_inspection_arguments(
     from fervis.lookup.answer_program.relations import SourceKind
     from fervis.lookup.canonical_data import canonical_runtime_json
     from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
-    from fervis.lookup.relation_catalog.parameter_values import parse_catalog_parameter_value
+    from fervis.lookup.relation_catalog.parameter_values import (
+        parse_catalog_parameter_text, parse_catalog_parameter_value,
+    )
 
     compiled = compile_relation_program_inputs(program, bindings=bindings)
     by_read = {}
@@ -87,8 +89,14 @@ def _bound_inspection_arguments(
             input_ref = resolved.fact_value.known_input_id
             if not input_ref or f"question_input:{input_ref}" not in resolved.proof_refs:
                 break
-            args[ref] = parse_catalog_parameter_value(
-                resolved.value, type_name=param.type, choices=param.choices
+            args[ref] = (
+                parse_catalog_parameter_text(
+                    resolved.value, type_name=param.type, choices=param.choices
+                )
+                if isinstance(resolved.value, str)
+                else parse_catalog_parameter_value(
+                    resolved.value, type_name=param.type, choices=param.choices
+                )
             )
         if set(args) != set(required):
             continue

@@ -21,8 +21,15 @@ from fervis.lookup.turn_prompts import HostPromptContext
 from tests.lookup.relational_engine.test_dependent_reads import _read
 
 
-def test_schema_free_address_compiles_typed_count_from_original_uuid(monkeypatch):
-    identifier = "00000000-0000-0000-0000-000000000001"
+@pytest.mark.parametrize("identifier,address_type,parsed", [
+    ("00000000-0000-0000-0000-000000000001", "uuid", "00000000-0000-0000-0000-000000000001"),
+    ("42", "integer", 42),
+    ("12.5", "number", 12.5),
+    ("12.5", "decimal", "12.5"),
+])
+def test_schema_free_address_compiles_typed_count_from_original_input(
+    monkeypatch, identifier, address_type, parsed,
+):
     question = f"How many facilities are in {identifier}?"
     fixture_path = Path(__file__).resolve().parents[2] / (
         "conformance/cases/algorithms/semantic_kernel/"
@@ -139,7 +146,7 @@ def test_schema_free_address_compiles_typed_count_from_original_uuid(monkeypatch
         _read("facilities"), path="/districts/{district_id}/facilities",
         resource_names=("facilities",), fields=(), row_paths=(), candidate_keys=(),
         params=(CatalogParam("district_id", "district_id", ParamSource.PATH,
-                             "uuid", required=True),),
+                             address_type, required=True),),
         source_metadata={"representation_authority": "unobserved"},
     )
     reads = []
@@ -147,7 +154,7 @@ def test_schema_free_address_compiles_typed_count_from_original_uuid(monkeypatch
     class Port:
         def read(self, *, endpoint_name, args):
             reads.append((endpoint_name, args))
-            assert args == {"district_id": identifier}
+            assert args == {"district_id": parsed}
             return {"responseStatus": 200, "responseFormat": "json",
                     "responseBody": [{"id": 1}, {"id": 2}]}
 
@@ -159,7 +166,7 @@ def test_schema_free_address_compiles_typed_count_from_original_uuid(monkeypatch
     result = compile_logical_question(request)
     assert isinstance(result, shared.SemanticCompilationSuccess)
     assert "InspectionInputTurnPrompt" in seen
-    assert reads == [("facilities", {"district_id": identifier})]
+    assert reads == [("facilities", {"district_id": parsed})]
     from fervis.lookup.answer_program.operations import SqlQuerySpec
     assert not any(isinstance(operation.spec, SqlQuerySpec)
                    for operation in result.compilation.answer_program.operations)
@@ -179,8 +186,8 @@ def test_schema_free_address_compiles_typed_count_from_original_uuid(monkeypatch
     assert executed.issue is None
     assert next(iter(executed.fact_result.outcome.projected_rows[0].values.values())) == 2
     assert reads == [
-        ("facilities", {"district_id": identifier}),
-        ("facilities", {"district_id": identifier}),
+        ("facilities", {"district_id": parsed}),
+        ("facilities", {"district_id": parsed}),
     ]
     from fervis.lookup.orchestration.execution_sources import prepare_execution_catalog
 
