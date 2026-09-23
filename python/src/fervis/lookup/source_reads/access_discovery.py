@@ -31,6 +31,50 @@ def _compatible(field, param, parent):
         asdict(param), row_source_argument_description(parent, field.field_ref, param.entity_target))
 
 
+def _singular_name(name: str) -> str:
+    if name.endswith("ies") and len(name) > 3:
+        return name[:-3] + "y"
+    if name.endswith("s") and not name.endswith("ss") and len(name) > 1:
+        return name[:-1]
+    return name
+
+
+def _name_parts(name: str) -> tuple[str, ...]:
+    separated = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+    return tuple(_singular_name(part) for part in re.findall(r"[a-z0-9]+", separated.casefold()))
+
+
+def _argument_name_affinity(parent: RowSource, required) -> int:
+    """Order compatible candidates; names never certify a traversal or key."""
+    resources = {
+        part for name in parent.resource_names for part in _name_parts(name)
+    }
+    fields = (*parent.fields, *parent.request_argument_fields)
+    score = 0
+    for param in required:
+        param_parts = _name_parts(param.name or param.param_ref)
+        if not param_parts:
+            continue
+        identity_parts = tuple(part for part in param_parts if part not in {"id", "uuid", "pk"})
+        best = 0
+        for field in fields:
+            if field.declared_entity_kind or not _compatible(field, param, parent):
+                continue
+            field_parts = _name_parts(field.id)
+            if field_parts == param_parts:
+                best = max(best, 6)
+            elif identity_parts and field_parts == identity_parts:
+                best = max(best, 5)
+            elif field_parts in {("id",), ("uuid",), ("pk",)} and identity_parts and all(
+                part in resources for part in identity_parts
+            ):
+                best = max(best, 4)
+            elif identity_parts and any(part in field_parts for part in identity_parts):
+                best = max(best, 2)
+        score += best
+    return score
+
+
 def access_candidates(
     source: RowSource, *, sources: RowSourceCatalog, catalog: RelationCatalog
 ):
@@ -64,12 +108,13 @@ def access_candidates(
                 (
                     not is_prefix,
                     -len(parent_path) if is_prefix else 0,
+                    -_argument_name_affinity(parent, required),
                     parent.id,
                     parent,
                 )
             )
-    candidates.sort(key=lambda item: item[:3])
-    return tuple(item[3] for item in candidates)
+    candidates.sort(key=lambda item: item[:4])
+    return tuple(item[4] for item in candidates)
 
 
 @dataclass(frozen=True)

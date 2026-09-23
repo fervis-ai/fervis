@@ -77,6 +77,11 @@ set cannot be substituted under an existing input ID.
 - Framework mount regressions now prove that Fervis routes remain reachable
   ahead of host catch-all routes in Django, FastAPI and Flask. Django `doctor` rejects
   an existing shadowed mount, and `init` repairs its position.
+- When an unannotated required path key admits many same-type parent fields,
+  source-access discovery reviews parents with matching declared path, field
+  and resource names first. Every compatible parent remains available and the
+  model still must certify complete traversal; name similarity grants no key
+  authority. The full verifier passed with 2,727 Python tests after this change.
 - The repository verifier passed after typed dependent-read replay coverage:
   2,721
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,

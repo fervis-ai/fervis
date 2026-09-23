@@ -8,10 +8,39 @@ from fervis.lookup.relation_catalog.row_sources import build_api_row_source_cata
 from fervis.lookup.source_reads.access_discovery import (
     AccessDiscoveryRequest,
     ReadAccessTurnPrompt,
+    access_candidates,
     access_schema,
     parse_read_access,
 )
 from fervis.lookup.turn_prompts import TurnPromptContext
+
+
+def test_unannotated_path_key_reviews_semantically_related_parent_before_type_only_candidate():
+    from fervis.lookup.relation_catalog import CatalogParam, EndpointRead, RowPath, RowCardinality
+
+    unrelated = EndpointRead(
+        "a_orders", "orders", path="/orders", resource_names=("orders",),
+        row_paths=(RowPath("root", "", RowCardinality.MANY),),
+        fields=(CatalogField("orders.order_id", "uuid", path="order_id", row_path_id="root"),),
+    )
+    related = EndpointRead(
+        "z_facilities", "facilities", path="/facilities", resource_names=("facilities",),
+        row_paths=(RowPath("root", "", RowCardinality.MANY),),
+        fields=(CatalogField("facilities.id", "uuid", path="id", row_path_id="root"),),
+    )
+    target = EndpointRead(
+        "readings", "readings", path="/readings/{facility_id}",
+        row_paths=(RowPath("root", "", RowCardinality.MANY),),
+        fields=(CatalogField("readings.value", "number", path="value", row_path_id="root"),),
+        params=(CatalogParam("facility_id", "facility_id", "path", "uuid", required=True),),
+    )
+    catalog = RelationCatalog(reads=(unrelated, related, target))
+    sources = build_api_row_source_catalog(catalog)
+    child = next(source for source in sources.sources if source.read_id == "readings")
+
+    assert [parent.read_id for parent in access_candidates(
+        child, sources=sources, catalog=catalog
+    )] == ["z_facilities", "a_orders"]
 
 
 def test_access_contract_is_question_blind_and_requires_a_correlated_mapping():
