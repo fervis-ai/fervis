@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from decimal import Decimal
+from decimal import Context, Decimal, localcontext
 import json
 import os
 import queue
@@ -444,11 +444,16 @@ def _pricing_for_model(config: ChatProviderConfig, model_name: str) -> ModelPric
 
 
 def _token_cost(tokens: int, rate_per_million_tokens: float) -> Decimal:
-    return (
-        Decimal(int(tokens))
-        * Decimal(str(rate_per_million_tokens))
-        / Decimal(1_000_000)
-    ).quantize(Decimal("0.000001"))
+    with localcontext(Context(prec=_cost_precision(tokens))):
+        return (
+            Decimal(int(tokens))
+            * Decimal(str(rate_per_million_tokens))
+            / Decimal(1_000_000)
+        ).quantize(Decimal("0.000001"))
+
+
+def _cost_precision(tokens: int) -> int:
+    return max(100, len(str(abs(int(tokens)))) + 50)
 
 
 def _input_token_cost(input_tokens: int, cached_tokens: int, pricing: ModelPricing) -> Decimal:
@@ -456,8 +461,9 @@ def _input_token_cost(input_tokens: int, cached_tokens: int, pricing: ModelPrici
         raise ProviderExecutionError(error_class='APIResponseValidationError', reason='provider response included invalid cached input token usage')
     cached_rate = (pricing.cached_input_cost_per_million_tokens if pricing.cached_input_cost_per_million_tokens is not None
                    else pricing.input_cost_per_million_tokens)
-    return ((Decimal(input_tokens - cached_tokens) * Decimal(str(pricing.input_cost_per_million_tokens))
-             + Decimal(cached_tokens) * Decimal(str(cached_rate))) / Decimal(1_000_000)).quantize(Decimal('0.000001'))
+    with localcontext(Context(prec=_cost_precision(input_tokens))):
+        return ((Decimal(input_tokens - cached_tokens) * Decimal(str(pricing.input_cost_per_million_tokens))
+                 + Decimal(cached_tokens) * Decimal(str(cached_rate))) / Decimal(1_000_000)).quantize(Decimal('0.000001'))
 
 
 def _priced_model_subcalls(

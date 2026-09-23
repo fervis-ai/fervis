@@ -121,6 +121,12 @@ set cannot be substituted under an existing input ID.
   equivalent-form normalization, and rejects an excessive decimal span.
   Full verification passed with 2,754 Python tests, Mypy over 635 source
   files, Ruff, distribution checks, 93 desktop tests and build.
+- Provider token-cost and cached-input cost accounting now use an isolated
+  decimal context. At caller precision 6, the old calculation raised
+  `decimal.InvalidOperation` while quantizing a valid usage receipt; the new
+  result equals a high-precision reference at precisions 6, 28 and 50. Full
+  verification passed with 2,755 Python tests, Mypy over 635 source files,
+  Ruff, distribution checks, 93 desktop tests and build.
 - A typed local-day regression now covers the New York spring DST transition:
   two instants within March 8 and the first instant of March 9 fall into their
   correct local-day buckets. This preserves a SQL-era factual obligation in
