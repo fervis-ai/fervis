@@ -104,6 +104,14 @@ set cannot be substituted under an existing input ID.
   categories from `api.list_categories`. Full repository verification
   after the import migration passed with 2,736 Python tests, Mypy over 634
   source files, Ruff, distribution checks, 93 desktop tests and build.
+- A fresh `python:3.12-slim` container installed the current Fervis wheel built
+  from its source distribution alongside the isolated MarketplaceOS host.
+  With runtime networking disabled and a placeholder model key, `fervis
+  migrate`, `fervis doctor --probe-read-context-key eval-principal`, and a
+  framework-native authorized GET all passed; doctor found 18 readable routes
+  and the GET returned six categories. This proves container package/install,
+  migration and no-model host-read wiring. It does not prove the host production
+  image pins Fervis or that any model-authored answer works in the container.
 - Typed SUM, AVG and arithmetic no longer inherit the caller's Decimal context.
   A cancelling 38-digit amount previously produced a large wrong total under
   precision 6; exact cancellation, wide multiplication and stable division
