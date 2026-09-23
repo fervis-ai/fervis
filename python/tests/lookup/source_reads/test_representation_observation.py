@@ -10,6 +10,78 @@ from fervis.lookup.relation_catalog.from_host_api import (
 from fervis.lookup.source_reads.representation import observe_read_representation
 
 
+@pytest.mark.parametrize("body, expected", [([2, 4], (2, 4)), (12, (12,))])
+def test_observed_primitive_responses_are_executable_value_rows(body, expected):
+    from fervis.host_api.contracts import EndpointContract
+    from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
+    from fervis.lookup.source_reads.response import extract_source_read_rows
+
+    contract = EndpointContract(
+        endpoint_name="measurements", url_name="measurements", method="GET",
+        path_template="/measurements/", docstring="Measurements",
+        view_class="measurements", resource_names=("measurements",),
+    )
+    (read,) = relation_catalog_from_endpoint_contracts((contract,)).reads
+    result = {"responseStatus": 200, "responseFormat": "json", "responseBody": body}
+    observed = observe_read_representation(read, result).read
+    (source,) = build_api_row_source_catalog(RelationCatalog(reads=(observed,))).sources
+
+    assert source.primitive_values is True
+    assert source.candidate_keys == ()
+    assert [field.id for field in source.fields] == ["value"]
+    assert tuple(row["value"] for row in extract_source_read_rows(
+        result, endpoint_name="measurements", row_source=source
+    )) == expected
+    from fervis.lookup.source_reads.response import EndpointResponseError
+    changed = {**result, "responseBody": [{"value": 2}] if isinstance(body, list) else {"value": 12}}
+    with pytest.raises(EndpointResponseError, match="changed from"):
+        extract_source_read_rows(changed, endpoint_name="measurements", row_source=source)
+
+
+def test_observed_primitive_array_rejects_mixed_object_rows():
+    contract = EndpointContract(
+        endpoint_name="measurements", url_name="measurements", method="GET",
+        path_template="/measurements/", docstring="Measurements",
+        view_class="measurements", resource_names=("measurements",),
+    )
+    (read,) = relation_catalog_from_endpoint_contracts((contract,)).reads
+    with pytest.raises(ValueError):
+        observe_read_representation(read, {
+            "responseStatus": 200, "responseFormat": "json",
+            "responseBody": [2, {"value": 4}],
+        })
+
+
+def test_nested_primitive_values_retain_their_parent_context():
+    from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
+    from fervis.lookup.source_reads.response import extract_source_read_rows
+
+    contract = EndpointContract(
+        endpoint_name="stations", url_name="stations", method="GET",
+        path_template="/stations/", docstring="Station readings",
+        view_class="stations", resource_names=("stations",),
+    )
+    (read,) = relation_catalog_from_endpoint_contracts((contract,)).reads
+    result = {"responseStatus": 200, "responseFormat": "json", "responseBody": [
+        {"station": "north", "value": "north-label", "temperatures": [21, 22]},
+        {"station": "south", "value": "south-label", "temperatures": [19]},
+    ]}
+    observed = observe_read_representation(read, result).read
+    sources = build_api_row_source_catalog(RelationCatalog(reads=(observed,))).sources
+    primitive = next(source for source in sources if source.row_path == "temperatures")
+
+    assert primitive.primitive_values is True
+    assert {field.id for field in primitive.fields} >= {"station", "value", "value_2"}
+    assert primitive.primitive_value_field == "value_2"
+    assert extract_source_read_rows(
+        result, endpoint_name="stations", row_source=primitive
+    ) == (
+        {"station": "north", "value": "north-label", "value_2": 21},
+        {"station": "north", "value": "north-label", "value_2": 22},
+        {"station": "south", "value": "south-label", "value_2": 19},
+    )
+
+
 def test_route_without_response_schema_remains_in_catalog():
     contract = EndpointContract(
         endpoint_name="items",

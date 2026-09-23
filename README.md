@@ -49,11 +49,14 @@ Rerunning a saved program in an unsupported format returns
 under the current contracts.
 
 Declared response schemas are used when available. For selected GET routes
-without response fields, Fervis can inspect JSON objects and arrays of objects
+without response fields, Fervis can inspect JSON objects, arrays of objects,
+JSON scalar values and arrays of scalar values
 under the current caller's read authority when no additional invocation inputs
 are needed. Inspection has its own lineage step. It does not infer candidate
 keys, relationships, or closed enums from sampled values. Saved programs inspect
 current structure again before execution; observed rows are not cached answers.
+An observed scalar becomes a `value` row field (or a distinct `value_N` field
+when nested parent fields use that name). Mixed object/scalar arrays are rejected.
 
 ## Models
 

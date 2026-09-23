@@ -280,6 +280,17 @@ class RowSource:
     pagination_binding: PaginationContract | None = None
 
     @property
+    def primitive_values(self) -> bool:
+        return self.primitive_value_field is not None
+
+    @property
+    def primitive_value_field(self) -> str | None:
+        return next((
+            field.response_path for field in self.fields if
+            field.field_ref == f"observed_primitive:{self.row_path_id}"
+        ), None)
+
+    @property
     def stable_grain_field_refs(self) -> tuple[str, ...]:
         keys = tuple(key for key in self.candidate_keys if key.stable)
         key = next((key for key in keys if key.primary), keys[0] if keys else None)

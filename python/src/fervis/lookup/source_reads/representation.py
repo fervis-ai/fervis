@@ -39,15 +39,28 @@ def observe_read_representation(
     fields: list[CatalogField] = []
     paths: list[RowPath] = list(read.row_paths)
 
-    def describe_rows(value, path: str, parent: str, row_id: str):
+    def primitive(value: Any) -> bool:
+        return value is None or isinstance(value, (str, int, float, bool))
+
+    def describe_rows(value, path: str, parent: str, row_id: str, *, primitive_name: str = "value"):
         if isinstance(value, list):
-            if any(not isinstance(item, dict) for item in value):
+            if value and all(primitive(item) for item in value):
+                rows = [{primitive_name: item} for item in value]
+                primitive_rows = True
+            elif all(isinstance(item, dict) for item in value):
+                rows = value
+                primitive_rows = False
+            else:
                 raise ValueError(
-                    "This response needs a primitive-value row representation."
+                    "A response row array cannot mix objects and primitive values."
                 )
-            rows, cardinality = value, RowCardinality.MANY
+            cardinality = RowCardinality.MANY
         elif isinstance(value, dict):
             rows, cardinality = [value], RowCardinality.ONE
+            primitive_rows = False
+        elif primitive(value):
+            rows, cardinality = [{primitive_name: value}], RowCardinality.ONE
+            primitive_rows = True
         else:
             raise ValueError(
                 "This response needs a primitive-value row representation."
@@ -65,6 +78,16 @@ def observe_read_representation(
                     id=row_id, path=path, cardinality=cardinality, parent_path=parent
                 )
             )
+        if primitive_rows:
+            fields.append(CatalogField(
+                ref=f"observed_primitive:{row_id}",
+                path=f"{path}.{primitive_name}" if path else primitive_name,
+                row_path_id=row_id,
+                type=_joined_type({_value_type(row[primitive_name]) for row in rows if row[primitive_name] is not None}),
+                nullable=any(row[primitive_name] is None for row in rows),
+                metadata={"name": primitive_name, "representation_authority": "observed_response"},
+            ))
+            return
         describe_objects(rows, path, row_id)
 
     def describe_objects(rows: list[dict], prefix: str, row_id: str):
@@ -102,12 +125,19 @@ def observe_read_representation(
                     if isinstance(value, list)
                     for item in value
                 ]
-                if all(isinstance(item, dict) for item in elements):
+                if all(isinstance(item, dict) or primitive(item) for item in elements):
+                    reserved = {key for row in rows for key in row}
+                    primitive_name = "value"
+                    suffix = 2
+                    while primitive_name in reserved:
+                        primitive_name = f"value_{suffix}"
+                        suffix += 1
                     describe_rows(
                         elements,
                         path,
                         next(p.path for p in paths if p.id == row_id),
                         f"row:{path}",
+                        primitive_name=primitive_name,
                     )
 
     if read.response_envelope.results_path:
