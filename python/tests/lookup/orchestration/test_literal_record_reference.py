@@ -521,6 +521,8 @@ def test_literal_reference_is_guarded_before_related_count_and_recomputed_on_rep
         )
         assert chosen.issue is None
         assert next(iter(chosen.fact_result.outcome.projected_rows[0].values.values())) == 2
+        assert any("clarification_response:choose_d1" in ref
+                   for ref in chosen.proof_refs)
         changed_other_property = invoke_answer_program(
             program=selected_program.answer_program,
             bindings=selected_program.initial_bindings,
