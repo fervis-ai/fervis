@@ -192,6 +192,38 @@ def test_inspection_only_reads_selected_directly_invokable_routes():
     assert result.read("unrelated").row_paths == ()
 
 
+def test_required_address_inspection_uses_only_supplied_certified_arguments():
+    from fervis.lookup.relation_catalog import CatalogParam, ParamSource, EndpointRead
+    from fervis.lookup.source_reads.representation import inspect_selected_representations
+
+    read = EndpointRead(
+        "readings", "readings", path="/facilities/{facility_id}/readings",
+        resource_names=("readings",),
+        params=(CatalogParam("facility_id", "facility_id", ParamSource.PATH,
+                             "uuid", required=True),),
+    )
+    calls = []
+
+    class Port:
+        def read(self, *, endpoint_name, args):
+            calls.append((endpoint_name, args))
+            return {"responseStatus": 200, "responseFormat": "json",
+                    "responseBody": [{"value": 21}]}
+
+    catalog = RelationCatalog(reads=(read,))
+    assert inspect_selected_representations(
+        catalog, read_ids=("readings",), data_access_port=Port()
+    ).read("readings").fields == ()
+    assert calls == []
+    supplied = {"facility_id": "00000000-0000-0000-0000-000000000001"}
+    observed = inspect_selected_representations(
+        catalog, read_ids=("readings",), data_access_port=Port(),
+        inspection_args_by_read={"readings": supplied},
+    )
+    assert calls == [("readings", supplied)]
+    assert observed.read("readings").fields_by_path["value"].type == "integer"
+
+
 def test_json_root_property_cannot_collide_with_root_row_identifier():
     from fervis.lookup.relation_catalog import EndpointRead, parse_relation_catalog
     from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog

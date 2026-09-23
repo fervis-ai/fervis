@@ -1,0 +1,77 @@
+"""A schema-free addressed read can only be probed with a supplied fact input."""
+
+from types import SimpleNamespace
+
+import pytest
+from jsonschema import validate
+
+from fervis.lookup.relation_catalog import CatalogParam, EndpointRead, ParamSource, RelationCatalog
+from fervis.lookup.source_reads.inspection_inputs import (
+    InspectionInputTurnPrompt, inspection_input_request, inspection_input_schema,
+    parse_inspection_inputs,
+)
+from fervis.lookup.turn_prompts import TurnPromptContext
+
+
+def _request():
+    read = EndpointRead(
+        "readings", "readings", path="/facilities/{facility_id}/readings",
+        resource_names=("readings",),
+        params=(CatalogParam("facility_id", "facility_id", ParamSource.PATH,
+                             "uuid", required=True),),
+    )
+    supplied = SimpleNamespace(
+        id="facility", operand="00000000-0000-0000-0000-000000000001"
+    )
+    unrelated = SimpleNamespace(
+        id="order", operand="00000000-0000-0000-0000-000000000002"
+    )
+    return inspection_input_request(
+        catalog=RelationCatalog(reads=(read,)), read_ids=(read.id,),
+        contract=SimpleNamespace(
+            inputs=(supplied, unrelated),
+            input_denotations=(SimpleNamespace(
+                input_ref="facility", operand_meaning="the supplied facility"
+            ),),
+        ),
+        indexes=(SimpleNamespace(
+            requested_fact_id="fact", input_use_sites=(SimpleNamespace(input_ref="facility"),),
+        ),),
+        fact_selections=(SimpleNamespace(
+            requested_fact_id="fact", selected_read_ids=(read.id,),
+        ),),
+        certified_values=(
+            SimpleNamespace(input_ref="facility", certification_refs=("question_input:facility",)),
+            SimpleNamespace(input_ref="order", certification_refs=("question_input:order",)),
+        ),
+    )
+
+
+def test_inspection_input_contract_excludes_unrelated_supplied_values():
+    request = _request()
+    assert [item.id for item in request.targets[0].options["facility_id"]] == ["facility"]
+    prompt = InspectionInputTurnPrompt(request).to_model_payload(
+        TurnPromptContext(current_question="How many readings at the supplied facility?")
+    )
+    assert "the supplied facility" in prompt.prompt_text
+    assert "00000000-0000-0000-0000-000000000002" not in prompt.prompt_text
+    payload = {"reads": {"readings": {
+        "kind": "supplied_input", "mapping_basis": "The path names the supplied facility.",
+        "parameter_inputs": {"facility_id": "facility"},
+    }}}
+    validate(payload, inspection_input_schema(request))
+    assert parse_inspection_inputs(payload, request=request) == {
+        "readings": {"facility_id": "00000000-0000-0000-0000-000000000001"}
+    }
+    payload["reads"]["readings"]["parameter_inputs"]["facility_id"] = "order"
+    with pytest.raises(ValueError, match="eligible original input"):
+        parse_inspection_inputs(payload, request=request)
+
+
+def test_inspection_input_contract_allows_explicit_unsupported_decision():
+    request = _request()
+    payload = {"reads": {"readings": {
+        "kind": "unsupported", "reason": "The question supplies no location address.",
+    }}}
+    validate(payload, inspection_input_schema(request))
+    assert parse_inspection_inputs(payload, request=request) == {}

@@ -14,13 +14,13 @@ class RepresentationInspectionAudit(SourceInspectionAudit):
     def __init__(self, *, run_id, sink, phase=SourceInspectionPhase.SEMANTIC):
         super().__init__(run_id=run_id, sink=sink, phase=SourceInspectionPhase(phase))
 
-    def observe(self, read, result):
+    def observe(self, read, result, *, args=None):
         record_source_read_observation(
             self.buffered.scope,
             source_read_key=read.id,
             endpoint_name=read.endpoint_name,
             catalog_endpoint=read.catalog_endpoint,
-            args={},
+            args=args or {},
             observation=observe_source_read_response(
                 result, endpoint_name=read.endpoint_name
             ),

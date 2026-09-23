@@ -130,6 +130,7 @@ def run_answer_program_execution(
             allowed_read_ids=environment.authorized_sources.allowed_read_ids
             if environment.authorized_sources is not None
             else None,
+            bindings=bindings,
         )
         environment = replace(
             environment,

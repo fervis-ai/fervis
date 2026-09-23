@@ -190,7 +190,9 @@ def _joined_type(types: set[str]) -> str:
     return "any"
 
 
-def can_inspect_representation(read: EndpointRead) -> bool:
+def can_inspect_representation(
+    read: EndpointRead, *, inspection_args: dict[str, Any] | None = None
+) -> bool:
     """Missing fields do not erase declared structure or read capability."""
     from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
 
@@ -203,22 +205,47 @@ def can_inspect_representation(read: EndpointRead) -> bool:
         )
         and metadata.get("representation_authority") != "observed_response"
         and metadata.get("representation_status") not in {"unavailable", "read_failed"}
-        and not any(requires_caller_supplied_input(param) for param in read.params)
+        and {
+            param.ref for param in read.params if requires_caller_supplied_input(param)
+        } == set(inspection_args or {})
     )
 
 
 def inspect_selected_representations(
-    catalog, *, read_ids, data_access_port, on_response=None, on_failure=None
+    catalog, *, read_ids, data_access_port, on_response=None, on_failure=None,
+    inspection_args_by_read=None,
 ):
-    """Inspect selected, directly invokable routes under the caller's read port."""
+    """Inspect selected routes with exact, type-checked caller arguments."""
     selected = set(read_ids)
+    supplied = inspection_args_by_read or {}
+    if set(supplied) - selected:
+        raise ValueError("inspection arguments target an unselected read")
     reads = []
     for read in catalog.reads:
-        if read.id not in selected or not can_inspect_representation(read):
+        args = supplied.get(read.id)
+        if read.id not in selected:
             reads.append(read)
             continue
+        if not can_inspect_representation(read, inspection_args=args):
+            if args is not None:
+                raise ValueError("inspection arguments do not match an inspectable read")
+            reads.append(read)
+            continue
+        from fervis.lookup.relation_catalog.parameter_values import (
+            parse_catalog_parameter_value,
+        )
+
+        params = {param.ref: param for param in read.params}
+        checked_args = {
+            ref: parse_catalog_parameter_value(
+                value, type_name=params[ref].type, choices=params[ref].choices
+            )
+            for ref, value in (args or {}).items()
+        }
         try:
-            result = data_access_port.read(endpoint_name=read.endpoint_name, args={})
+            result = data_access_port.read(
+                endpoint_name=read.endpoint_name, args=checked_args
+            )
         except Exception as exc:
             result = {
                 "responseStatus": None,
@@ -226,7 +253,10 @@ def inspect_selected_representations(
                 "inspectionError": type(exc).__name__,
             }
         if on_response is not None:
-            on_response(read, result)
+            if checked_args:
+                on_response(read, result, args=checked_args)
+            else:
+                on_response(read, result)
         # Discovery may defer a failed candidate while inspecting other routes.
         # Execution requires its selected read and keeps the default strict path.
         from fervis.lookup.source_reads.response import EndpointResponseError

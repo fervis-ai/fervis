@@ -102,6 +102,7 @@ class SemanticCompilationRequest:
     discovery_failures: list[ValueError] = field(default_factory=list)
     read_access: ReadAccessCatalog = ReadAccessCatalog()
     validation_failure_observer: Callable[[ModelTurnPurpose, SemanticTurnGenerationError], None] | None = None
+    inspection_addresses: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

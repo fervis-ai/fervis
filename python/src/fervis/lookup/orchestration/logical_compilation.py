@@ -302,6 +302,7 @@ def compile_logical_question(request, *, on_turn=None):
     request, selection, eligibility, early_outcome = _assess_catalog_batches(
         request, selection=initial_selection, access=access, indexes=indexes,
         grounding=grounding, resolver_catalog=resolver_catalog,
+        contract=contract, inspection_values=tuple(values),
         context=context, on_turn=on_turn, turn=turn,
         trial=trial if early_canonical is not None else None,
     )
@@ -361,6 +362,7 @@ def compile_logical_question(request, *, on_turn=None):
     request, selection, eligibility, deferred_outcome = _assess_catalog_batches(
         request, selection=initial_selection, access=access, indexes=indexes,
         grounding=grounding, resolver_catalog=resolver_catalog,
+        contract=contract, inspection_values=tuple(values),
         context=context, on_turn=on_turn, turn=turn, trial=trial,
     )
     return deferred_outcome or _realize_eligible_sources(
@@ -447,6 +449,7 @@ def _realize_eligible_sources(
             item.request.index.requested_fact_id: item.binding_plan for item in verified
         },
     )
+    _verify_compiled_inspection_addresses(request, compiled)
     return shared.SemanticCompilationSuccess(
         contract,
         canonical,
@@ -456,21 +459,59 @@ def _realize_eligible_sources(
     )
 
 
+def _verify_compiled_inspection_addresses(request, compiled):
+    if not request.inspection_addresses:
+        return
+    from fervis.lookup.orchestration.execution_sources import _bound_inspection_arguments
+    from fervis.lookup.canonical_data import canonical_runtime_json
+
+    used = {relation.source.read_id for relation in compiled.answer_program.relations}
+    compiled_addresses = _bound_inspection_arguments(
+        catalog=request.full_catalog, program=compiled.answer_program,
+        bindings=compiled.initial_bindings,
+        include_observed_read_ids=frozenset(request.inspection_addresses),
+    )
+    for read_id, inspected_args in request.inspection_addresses.items():
+        if read_id in used and canonical_runtime_json(
+            compiled_addresses.get(read_id)
+        ) != canonical_runtime_json(inspected_args):
+            raise ValueError("compiled read address differs from inspected response")
+
+
 def _assess_catalog_batches(
     request, *, selection, access, indexes, grounding, resolver_catalog,
-    context, on_turn, turn, trial=None,
+    contract, inspection_values, context, on_turn, turn, trial=None,
 ):
     selection = _retain_available_selection(selection, request.full_catalog)
     assessments, batches = [], []
     attempted = None
     batch = selection
     while batch is not None:
+        from fervis.lookup.source_reads.inspection_inputs import (
+            InspectionInputTurnPrompt, inspection_input_request,
+            parse_inspection_inputs,
+        )
+
+        input_request = inspection_input_request(
+            catalog=request.full_catalog, read_ids=batch.selected_read_ids,
+            contract=contract, indexes=indexes,
+            fact_selections=batch.requested_fact_selections,
+            certified_values=inspection_values,
+        )
+        inspection_args = (
+            turn(
+                ModelTurnPurpose.GROUNDING,
+                InspectionInputTurnPrompt(input_request),
+                lambda payload: parse_inspection_inputs(payload, request=input_request),
+            ) if input_request.targets else {}
+        )
         observed = inspect_selected_representations(
             request.full_catalog,
             read_ids=batch.selected_read_ids,
             data_access_port=request.data_access_port,
             on_response=request.representation_observer,
             on_failure=request.discovery_failures.append,
+            inspection_args_by_read=inspection_args,
         )
         from fervis.lookup.source_reads.pagination_discovery import (
             PaginationDiscoveryRequest, PaginationDiscoveryPrompt,
@@ -483,7 +524,10 @@ def _assess_catalog_batches(
                 PaginationDiscoveryPrompt(traversal),
                 lambda payload: parse_pagination_discovery(payload, request=traversal),
             )
-        request = replace(request, full_catalog=observed)
+        request = replace(
+            request, full_catalog=observed,
+            inspection_addresses={**request.inspection_addresses, **inspection_args},
+        )
         selection = _retain_available_selection(selection, observed)
         batch = _retain_available_selection(batch, observed)
         batches = [

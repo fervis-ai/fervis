@@ -818,6 +818,7 @@ def _run_continue_prior_request_program(
             data_access_port=state.ports.data_access_port,
             lineage_step_sink=state.ports.lineage_step_sink,
             inspection_phase=SourceInspectionPhase.CONTINUATION,
+            bindings=bindings,
         )
     except ValueError as exc:
         return _runtime_error_terminal(

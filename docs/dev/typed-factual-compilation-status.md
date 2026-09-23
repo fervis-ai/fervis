@@ -82,6 +82,15 @@ set cannot be substituted under an existing input ID.
   and resource names first. Every compatible parent remains available and the
   model still must certify complete traversal; name similarity grants no key
   authority. The full verifier passed with 2,727 Python tests after this change.
+- A selected schema-free GET with required parameters can now inspect the
+  authorized current response using original, type-compatible question inputs
+  used by the selected fact. A model turn maps meanings to parameters; the
+  parser rejects invented or unrelated inputs. The compiled typed program must
+  bind those same addresses, and saved-program replay re-inspects through the
+  validated binding set. A UUID-addressed facility count passes the typed
+  compile, execution, replay and address-mismatch regression without SQL. The
+  full repository verifier passed with 2,731 Python tests, Mypy over 634 source
+  files, Ruff, installed distribution checks, 93 desktop tests and build.
 - The repository verifier passed after typed dependent-read replay coverage:
   2,721
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
@@ -115,6 +124,8 @@ The 281-case live matrix and required repetitions have not passed on this
 revision. Anonymous-record ambiguity without a stable declared key,
 descriptive subqueries, cross-API
 authority, and arbitrary REST completeness declarations need further proof.
+Schema-free dependent reads whose required address comes only from an observed
+parent row still lack structural inspection before source realization.
 Direct SQL-operation support remains in the program runtime even though the
 model-SQL authoring route is retired; remove it after typed behavior parity.
 The conservative local reconciliation of the original provider-credit budget
