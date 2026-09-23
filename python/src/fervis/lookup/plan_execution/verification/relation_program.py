@@ -78,7 +78,7 @@ def prepare_relation_program(
     _verify_operation_references(answer)
     from fervis.lookup.plan_execution.reference_resolution import verify_reference_candidate_completeness, verify_observed_reference_guards
     verify_reference_candidate_completeness(answer)
-    verify_observed_reference_guards(answer)
+    verify_observed_reference_guards(answer, row_sources=row_sources)
     _verify_program_expression_targets(
         answer,
         bindings=bindings,

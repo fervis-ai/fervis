@@ -3,17 +3,23 @@
 from fervis.lookup.identity_types import (
     IdentityExecutionFailureReason,
     ReferenceResolutionFailure,
+    ObservedReferenceCandidate,
+    ObservedReferenceValue,
 )
 from fervis.lookup.outcomes.errors import UnresolvedReferenceError
 
 
-def require_unique_reference(rows, *, input_ref, operand, entity_key, relation_id, proof_refs):
+def require_unique_reference(rows, *, input_ref, operand, entity_key, relation_id, proof_refs,
+                             observed_source_ref="", observed_properties=()):
     if entity_key is None:
         if len(rows) == 1:
             return rows
         raise UnresolvedReferenceError(ReferenceResolutionFailure(input_ref,
             IdentityExecutionFailureReason.NOT_FOUND if not rows else IdentityExecutionFailureReason.AMBIGUOUS_RESULT,
-            operand=operand), relation_id=relation_id, proof_refs=proof_refs)
+            operand=operand,
+            observed_candidates=_observed_candidates(
+                rows, source_ref=observed_source_ref, properties=observed_properties,
+            ) if rows else ()), relation_id=relation_id, proof_refs=proof_refs)
     projection = entity_key
     keys = {}
     try:
@@ -45,6 +51,49 @@ def require_unique_reference(rows, *, input_ref, operand, entity_key, relation_i
     return (next(iter(keys.values())),)
 
 
+def _observed_candidates(rows, *, source_ref, properties):
+    """Offer only a current complete record set with distinguishing properties."""
+    if not source_ref or not properties:
+        return ()
+    from fervis.lookup.canonical_data import canonical_runtime_json, parse_runtime_value
+
+    def signatures(selected):
+        return tuple(canonical_runtime_json(tuple(row[item.field_id] for item in selected))
+                     for row in rows)
+
+    try:
+        options = tuple(sorted(
+            (item for item in properties
+             if all(row[item.field_id] is not None for row in rows)),
+            key=lambda item: item.source_field_ref,
+        ))
+        if not options:
+            return ()
+        if len(set(signatures(options))) != len(rows):
+            return ()
+        selected = []
+        remaining = list(options)
+        while len(set(signatures(selected))) != len(rows):
+            best = max(remaining, key=lambda item: len(set(signatures((*selected, item)))))
+            if len(set(signatures((*selected, best)))) <= len(set(signatures(selected))):
+                return ()
+            selected.append(best)
+            remaining.remove(best)
+        return tuple(
+            ObservedReferenceCandidate(source_ref, tuple(
+                ObservedReferenceValue(item.source_field_ref, item.type_name,
+                    item.label, parse_runtime_value(row[item.field_id]))
+                for item in options
+            ), tuple(
+                ObservedReferenceValue(item.source_field_ref, item.type_name,
+                    item.label, parse_runtime_value(row[item.field_id]))
+                for item in selected
+            )) for row in rows
+        )
+    except (KeyError, TypeError, ValueError):
+        return ()
+
+
 def execute_reference_guard(operation, relations, *, operation_refs=()):
     from fervis.lookup.plan_execution.relations import CompletenessStatus
     from fervis.lookup.outcomes.errors import IncompleteEvidenceError
@@ -56,7 +105,9 @@ def execute_reference_guard(operation, relations, *, operation_refs=()):
     rows = tuple({field:row[field] for field in spec.fields} for row in source.rows)
     rows = require_unique_reference(rows, input_ref=spec.reference_input_ref, operand=spec.reference_operand,
         entity_key=spec.entity_key, relation_id=operation.output_relation,
-        proof_refs=tuple(dict.fromkeys((*operation_refs,*source.evidence.proof_refs))))
+        proof_refs=tuple(dict.fromkeys((*operation_refs,*source.evidence.proof_refs))),
+        observed_source_ref=spec.observed_source_ref,
+        observed_properties=spec.observed_properties)
     return _operation_relation(operation,rows,grain_keys=spec.fields if spec.entity_key is not None else (),inputs=(source,),
         field_types={field:source.field_types[field] for field in spec.fields},scalar_refs=operation_refs)
 
@@ -111,7 +162,7 @@ def verify_reference_candidate_completeness(program):
         pending.extend(producers[relation] for relation in operation.input_relation_ids if relation in producers)
 
 
-def verify_observed_reference_guards(program):
+def verify_observed_reference_guards(program, *, row_sources):
     from types import SimpleNamespace
     from fervis.lookup.answer_program.operations import ReferenceGuardSpec
     from fervis.lookup.plan_execution.verification.record_lineage import verify_record_projection, occurrence_number_origin
@@ -125,3 +176,59 @@ def verify_observed_reference_guards(program):
             verify_record_projection(program, SimpleNamespace(relation_id=operation.output_relation,
                 record_fields={field:field for field in spec.fields if field not in spec.occurrence_fields}),
                 preserve_occurrences=True, preserve_property_names=not bool(spec.occurrence_fields))
+            for property_value in spec.observed_properties:
+                origins = _observed_property_origins(
+                    program, row_sources=row_sources,
+                    relation_id=spec.input_relation, field_id=property_value.field_id,
+                )
+                if origins != {(spec.observed_source_ref, property_value.source_field_ref)}:
+                    raise VerificationError('Observed reference property must retain its source field authority')
+
+
+def _observed_property_origins(program, *, row_sources, relation_id, field_id):
+    from fervis.lookup.answer_program.operations import (
+        FilterSpec, OrderSpec, ProjectSpec, ProjectToKeySpec, ReferenceGuardSpec,
+        UnionSpec,
+    )
+    from fervis.lookup.answer_program.expressions import FieldRef
+    from fervis.lookup.plan_execution.errors import VerificationError
+
+    relations = {relation.id: relation for relation in program.relations}
+    producers = {operation.output_relation: operation.spec for operation in program.operations
+                 if operation.output_relation}
+    seen = set()
+
+    def trace(current_relation, current_field):
+        marker = (current_relation, current_field)
+        if marker in seen:
+            raise VerificationError('Observed reference property lineage is cyclic')
+        seen.add(marker)
+        try:
+            relation = relations.get(current_relation)
+            if relation is not None:
+                if current_field not in {item.field_id for item in relation.fields}:
+                    raise VerificationError('Observed reference property is absent from source relation')
+                source = row_sources.source(relation.source.row_source_id)
+                return {(source.id, source.field(current_field).field_ref)}
+            spec = producers.get(current_relation)
+            if isinstance(spec, (FilterSpec, OrderSpec, ReferenceGuardSpec)):
+                return trace(spec.input_relation, current_field)
+            if isinstance(spec, ProjectToKeySpec):
+                if current_field not in (*spec.key_fields, *spec.carry_fields):
+                    raise VerificationError('Observed property is absent from key projection')
+                return trace(spec.input_relation, current_field)
+            if isinstance(spec, ProjectSpec):
+                value = next((item.expression for item in spec.outputs
+                              if item.output_field == current_field), None)
+                if not isinstance(value, FieldRef):
+                    raise VerificationError('Observed property must preserve an input field')
+                return trace(spec.input_relation, value.field_id)
+            if isinstance(spec, UnionSpec):
+                return set().union(*(trace(item, current_field) for item in spec.inputs))
+            raise VerificationError('Observed property has no field-preserving source path')
+        except (KeyError, ValueError) as exc:
+            raise VerificationError('Observed reference property has no declared source field') from exc
+        finally:
+            seen.remove(marker)
+
+    return trace(relation_id, field_id)

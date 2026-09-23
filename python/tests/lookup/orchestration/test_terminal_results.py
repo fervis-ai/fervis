@@ -67,6 +67,64 @@ def test_executed_reference_uses_real_keys_without_inventing_field_match_evidenc
     assert all(not option.matched_field and not option.resolver_read_id for option in options)
 
 
+def test_anonymous_reference_choice_roundtrips_observed_properties_without_key():
+    from fervis.lookup.identity_types import (
+        ReferenceResolutionFailure, ObservedReferenceCandidate, ObservedReferenceValue,
+    )
+    from fervis.lookup.outcomes.errors import ExecutionIssue, ExecutionIssueKind
+    from fervis.lookup.orchestration.terminal_results import reference_clarification_fact_result
+    from fervis.lookup.clarification.payload import clarification_payload, clarification_from_payload
+    from fervis.lookup.clarification.response import (
+        parse_clarification_response, clarification_response_payload,
+        clarification_response_from_payload,
+    )
+
+    parsed = _semantic_contract()
+    use = parsed.semantic_indexes[0].input_use_sites[0]
+    candidates = tuple(ObservedReferenceCandidate(
+        "staff", (ObservedReferenceValue("staff.region", "string", "region", region),)
+    ) for region in ("West", "East"))
+    issue = ExecutionIssue(
+        ExecutionIssueKind.REFERENCE_RESOLUTION, "Ambiguous observed record",
+        proof_refs=("read:staff",),
+        reference=ReferenceResolutionFailure(
+            use.input_ref, IdentityExecutionFailureReason.AMBIGUOUS_RESULT,
+            observed_candidates=candidates,
+        ),
+    )
+    clarification = reference_clarification_fact_result(
+        issue, contract=parsed.contract
+    ).outcome.clarifications[0]
+    payload = clarification_payload(clarification)
+    restored = clarification_from_payload(payload)
+    options = restored.subjects[0].options
+    assert len(options) == 2
+    assert all(option.key is None and option.observed_source_ref == "staff"
+               for option in options)
+    assert {option.observed_properties[0].value for option in options} == {
+        "West", "East"
+    }
+    response = parse_clarification_response(
+        restored, response_id="choose_west", response_text="West",
+        selected_option_id=options[0].id,
+    )
+    replayed = clarification_response_from_payload(
+        clarification_response_payload(response)
+    )
+    assert replayed.option == options[0]
+    import copy
+    import pytest
+
+    tampered = copy.deepcopy(payload)
+    tampered["subjects"][0]["options"][0]["observedProperties"][0].pop("value")
+    with pytest.raises(ValueError, match="observed reference property"):
+        clarification_from_payload(tampered)
+    from fervis.lookup.orchestration.semantic_compilation import _grounding_response_values
+    assert _grounding_response_values(
+        indexes=parsed.semantic_indexes, responses=(replayed,)
+    ) == ()
+
+
 def test_reference_choice_resumes_with_user_authority_and_no_fabricated_read():
     from fervis.lookup.identity_types import ReferenceResolutionFailure
     from fervis.lookup.outcomes.errors import ExecutionIssue,ExecutionIssueKind

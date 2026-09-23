@@ -103,6 +103,7 @@ def test_observed_record_reference_replays_and_guards_dependent_reads(substituti
     if substitution == 'persisted':
         from fervis.lookup.answer_program.operations import SqlQuerySpec
         from fervis.lookup.plan_execution.reference_resolution import verify_observed_reference_guards
+        from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
         from fervis.lookup.plan_execution.errors import VerificationError
         from sqlglot import exp, parse_one
         operation = next(op for op in program.operations if isinstance(op.spec, SqlQuerySpec) and op.spec.lookup_input_ref)
@@ -116,7 +117,9 @@ def test_observed_record_reference_replays_and_guards_dependent_reads(substituti
         changed = replace(operation, spec=replace(operation.spec, query=statement.sql(dialect='duckdb')))
         program = replace(program, operations=tuple(changed if op.id == changed.id else op for op in program.operations))
         with pytest.raises(VerificationError, match='selected carrier property'):
-            verify_observed_reference_guards(program)
+            verify_observed_reference_guards(
+                program, row_sources=build_api_row_source_catalog(catalog)
+            )
         return
     for rows,expected in [([{'id':1,'label':'Alpha'}],1),([{'id':2,'label':'Alpha'}],2),([],None),
         ([{'id':1,'label':'Alpha'},{'id':2,'label':'Alpha'}],None),

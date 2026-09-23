@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fervis.lookup.canonical_data import EntityKeyValue
+from fervis.lookup.identity_types import ObservedReferenceValue
 from fervis.lookup.answer_program.values import NamedValuePayload, StringSetValuePayload
 from fervis.lookup.available_sources import SourceFieldBinding
 from fervis.lookup.expression_operators import ExpressionBinaryOperator
@@ -41,13 +42,16 @@ class SelectedReferenceChoice:
     requested_fact_id: str
     input_ref: str
     operand: str
-    key: EntityKeyValue
+    key: EntityKeyValue | None
     proof_ref: str
+    observed_source_ref: str = ""
+    observed_properties: tuple[ObservedReferenceValue, ...] = ()
 
     def __post_init__(self) -> None:
         if (
             not all((self.requested_fact_id, self.input_ref, self.operand, self.proof_ref))
-            or not isinstance(self.key, EntityKeyValue)
+            or (self.key is None) == (not self.observed_properties)
+            or (self.observed_properties and not self.observed_source_ref)
         ):
             raise ValueError("Selected reference choice requires fact, member and proof")
 
@@ -401,9 +405,8 @@ def validate_reference_bindings(request, set_bindings, bindings, *, complete=Tru
                     binding for binding in bindings
                     if binding.branch_id == branch.branch_id
                     and uses[binding.input_use_ref].input_ref == choice.input_ref
-                    and binding.member_index is not None
                     and _reference_operands(request, uses[binding.input_use_ref])[
-                        binding.member_index
+                        binding.member_index or 0
                     ] == choice.operand
                 ]
                 if not matches:
@@ -414,10 +417,20 @@ def validate_reference_bindings(request, set_bindings, bindings, *, complete=Tru
                         item for item in set_bindings[use.identity_set_ref.token]
                         if item.branch_id == branch.branch_id
                     )
-                    if owner.identity_ref is None:
-                        raise ValueError("Selected nominal key requires entity identity authority")
-                    identity = request.source_catalog.identity(owner.identity_ref)
-                    if (choice.key.entity_kind, choice.key.key_id) != (
-                        identity.entity_kind, identity.key_id
-                    ):
-                        raise ValueError("Selected reference key differs from carrier identity")
+                    if choice.key is not None:
+                        if owner.identity_ref is None:
+                            raise ValueError("Selected nominal key requires entity identity authority")
+                        identity = request.source_catalog.identity(owner.identity_ref)
+                        if (choice.key.entity_kind, choice.key.key_id) != (
+                            identity.entity_kind, identity.key_id
+                        ):
+                            raise ValueError("Selected reference key differs from carrier identity")
+                    else:
+                        if owner.identity_ref is not None or owner.source_ref != choice.observed_source_ref:
+                            raise ValueError("Selected observed record differs from its carrier")
+                        source = request.source_catalog.source(owner.source_ref)
+                        available = {field.field_ref: field for field in source.fields}
+                        if any(property_value.field_ref not in available
+                               or property_value.type_name != available[property_value.field_ref].type.value
+                               for property_value in choice.observed_properties):
+                            raise ValueError("Selected observed property is absent or changed")

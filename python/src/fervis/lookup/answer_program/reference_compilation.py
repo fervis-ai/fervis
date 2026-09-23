@@ -8,6 +8,9 @@ from fervis.lookup.answer_program.expressions import (
     FieldRef,
     BinaryExpression,
     ExpressionBinaryOperator,
+    UnaryExpression,
+    ExpressionUnaryOperator,
+    Expression,
 )
 from fervis.lookup.answer_program.operations import (
     Operation,
@@ -20,6 +23,7 @@ from fervis.lookup.answer_program.values import (
     ConstantRef,
 )
 from fervis.lookup.canonical_data import EntityKeyValue
+from fervis.lookup.identity_types import ObservedReferenceValue
 from fervis.lookup.answer_program.relations import Relation
 from fervis.lookup.answer_program.result_projection import EntityKeyProjection
 from .relation_views import RelationView
@@ -50,7 +54,7 @@ def selected_reference_filter(
         != {item.component_id for item in projection.components}
     ):
         raise ValueError("Reference choice must preserve complete identity authority and user proof")
-    conditions = []
+    conditions: list[Expression] = []
     for index, component in enumerate(projection.components):
         value = source_value_literal(
             value_ref=f"{namespace}.selected_{index}",
@@ -70,6 +74,52 @@ def selected_reference_filter(
     return Operation(
         f"{namespace}.choice",
         FilterSpec(relation_id, condition, proof_refs=(proof_ref,)),
+        output_relation=f"{namespace}.chosen_rows",
+    )
+
+
+def selected_observed_filter(
+    *, relation_id: str, namespace: str, source,
+    selected_source_ref: str, properties: tuple[ObservedReferenceValue, ...],
+    proof_ref: str, execution_field_ids: Mapping[str, str],
+) -> Operation:
+    """Recheck selected observed properties without promoting them to a key."""
+    from fervis.lookup.available_sources import source_value_literal
+
+    if not proof_ref or source.id != selected_source_ref or not properties:
+        raise ValueError("Observed reference selection lacks current carrier authority")
+    fields = {field.field_ref: field for field in source.fields}
+    conditions: list[Expression] = []
+    for index, property_value in enumerate(properties):
+        field = fields.get(property_value.field_ref)
+        if field is None or field.type.value != property_value.type_name:
+            raise ValueError("Observed reference property changed on replay")
+        field_id = execution_field_ids.get(property_value.field_ref)
+        if field_id is None:
+            raise ValueError("Observed reference property is absent from candidate rows")
+        condition: Expression
+        if property_value.value is None:
+            condition = UnaryExpression(
+                ExpressionUnaryOperator.IS_NULL, FieldRef(field_id)
+            )
+        else:
+            value = source_value_literal(
+                value_ref=f"{namespace}.observed_choice_{index}",
+                value=property_value.value, declared_type=field.type,
+                label=property_value.label, source_ref=source.id,
+                proof_refs=(proof_ref,),
+            )
+            condition = BinaryExpression(
+                ExpressionBinaryOperator.EQUALS, FieldRef(field_id),
+                ConstantRef(value.id, "observed_reference_choice@1", value),
+            )
+        conditions.append(condition)
+    combined: Expression = conditions[0]
+    for other in conditions[1:]:
+        combined = BinaryExpression(ExpressionBinaryOperator.AND, combined, other)
+    return Operation(
+        f"{namespace}.choice",
+        FilterSpec(relation_id, combined, proof_refs=(proof_ref,)),
         output_relation=f"{namespace}.chosen_rows",
     )
 

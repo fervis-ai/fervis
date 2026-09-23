@@ -310,6 +310,18 @@ class SqlQuerySpec:
 
 
 @dataclass(frozen=True)
+class ObservedReferenceProperty:
+    field_id: str
+    source_field_ref: str
+    type_name: str
+    label: str
+
+    def __post_init__(self):
+        if not all((self.field_id, self.source_field_ref, self.type_name, self.label)):
+            raise ValueError("Observed reference property requires a typed source field")
+
+
+@dataclass(frozen=True)
 class ReferenceGuardSpec:
     input_relation: str
     fields: tuple[str, ...]
@@ -317,6 +329,8 @@ class ReferenceGuardSpec:
     reference_operand: str = ""
     entity_key: EntityKeyProjection | None = None
     occurrence_fields: tuple[str, ...] = ()
+    observed_source_ref: str = ""
+    observed_properties: tuple[ObservedReferenceProperty, ...] = ()
     kind: OperationKind = field(default=OperationKind.REFERENCE_GUARD, init=False)
 
     def __post_init__(self):
@@ -334,6 +348,14 @@ class ReferenceGuardSpec:
 
         if self.entity_key is not None and set(self.fields) != {item.field_id for item in self.entity_key.components}:
             raise ValueError('Nominal reference guard must preserve its complete key')
+        if self.observed_properties and (
+            self.entity_key is not None or not self.occurrence_fields
+            or not self.observed_source_ref
+            or not {item.field_id for item in self.observed_properties} <= set(self.fields) - set(self.occurrence_fields)
+            or len({item.field_id for item in self.observed_properties}) != len(self.observed_properties)
+            or len({item.source_field_ref for item in self.observed_properties}) != len(self.observed_properties)
+        ):
+            raise ValueError('Observed reference candidates require distinct carried source properties')
 
 
 OperationSpec: TypeAlias = (

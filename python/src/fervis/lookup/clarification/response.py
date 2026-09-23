@@ -24,6 +24,7 @@ from fervis.lookup.clarification.model import (
     SourceBindingCatalogInputResponse,
 )
 from fervis.lookup.canonical_data import entity_key_from_payload, entity_key_to_payload
+from fervis.lookup.identity_types import observed_reference_values_from_payload
 from fervis.lookup.clarification.render import render_clarification_question
 
 
@@ -215,6 +216,10 @@ def _option_from_payload(payload: Mapping[str, object]) -> ClarificationOption:
             if payload.get("key") is not None
             else None
         ),
+        observed_source_ref=_optional_text(payload, "observedSourceRef"),
+        observed_properties=observed_reference_values_from_payload(
+            payload.get("observedProperties")
+        ),
         matched_label=_optional_text(payload, "matched_label"),
         matched_field=_optional_text(payload, "matched_field"),
         matched_value=_optional_text(payload, "matched_value"),
@@ -224,7 +229,7 @@ def _option_from_payload(payload: Mapping[str, object]) -> ClarificationOption:
 
 
 def _option_payload(option: ClarificationOption) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "id": option.id,
         "label": option.label,
         "value": option.value,
@@ -235,6 +240,12 @@ def _option_payload(option: ClarificationOption) -> dict[str, object]:
         "resolver_read_id": option.resolver_read_id,
         "resolver_label": option.resolver_label,
     }
+    if option.observed_properties:
+        payload["observedSourceRef"] = option.observed_source_ref
+        payload["observedProperties"] = [
+            item.to_payload() for item in option.observed_properties
+        ]
+    return payload
 
 
 def _mapping(payload: Mapping[str, object], field: str) -> Mapping[str, object]:

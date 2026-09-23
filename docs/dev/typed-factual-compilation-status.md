@@ -129,6 +129,16 @@ set cannot be substituted under an existing input ID.
   result equals a high-precision reference at precisions 6, 28 and 50. Full
   verification passed with 2,755 Python tests, Mypy over 635 source files,
   Ruff, distribution checks, 93 desktop tests and build.
+- Complete duplicate anonymous reference rows can now offer a user choice
+  based on observed scalar properties without promoting a sampled `id` or a
+  query-local occurrence number to an entity key. The choice shows a minimal
+  distinguishing property set but pins every present nonnullable scalar
+  property. Typed replay rechecks those properties and the original literal;
+  changed names, other properties, missing rows, forged source-field lineage
+  and indistinguishable records fail closed. The answer-program schema advances
+  to revision 27 / compiler `@54` so older saved programs recompile. Full
+  verification passed with 2,761 Python tests, Mypy over 635 source files,
+  Ruff, distribution checks, 93 desktop tests and build.
 - A typed local-day regression now covers the New York spring DST transition:
   two instants within March 8 and the first instant of March 9 fall into their
   correct local-day buckets. This preserves a SQL-era factual obligation in
@@ -190,7 +200,7 @@ handoff is proved for this host and case; other APIs and question classes still
 need live coverage.
 
 The 281-case live matrix and required repetitions have not passed on this
-revision. Anonymous-record ambiguity without a stable declared key,
+revision. Truly indistinguishable anonymous records remain ambiguous;
 descriptive subqueries, cross-API
 authority, and arbitrary REST completeness declarations need further proof.
 Schema-free dependent reads whose required address comes only from an observed

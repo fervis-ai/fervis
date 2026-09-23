@@ -632,6 +632,7 @@ _CONTRACT_TYPES = (
     operations.SqlNamedInput,
     operations.SqlOutputField,
     operations.SqlQuerySpec,
+    operations.ObservedReferenceProperty,
     operations.ReferenceGuardSpec,
     operations.ProjectSpec,
     operations.ProjectToKeySpec,

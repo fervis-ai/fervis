@@ -65,17 +65,30 @@ from .logical_planning import (
 from . import semantic_compilation as shared
 
 
-def _selected_reference_choices(responses):
+def _selected_reference_choices(responses, *, contract=None):
     choices = []
     for response in responses:
-        if not isinstance(response, GroundingIdentityResponse) or not response.reference_operand:
+        if not isinstance(response, GroundingIdentityResponse):
             continue
-        if response.option.key is None:
-            raise ValueError("Reference member clarification requires an entity key")
+        operand = response.reference_operand
+        if not operand and response.option.observed_properties:
+            if contract is None:
+                raise ValueError("Observed scalar reference choice requires its question contract")
+            term = next((item for item in contract.inputs
+                         if item.id == response.known_input_id), None)
+            if term is None or not isinstance(term.operand, str):
+                raise ValueError("Observed reference choice has no original scalar input")
+            operand = term.operand
+        if not operand:
+            continue
+        if response.option.key is None and not response.option.observed_properties:
+            raise ValueError("Reference member clarification needs a key or observed properties")
         choices.append(SelectedReferenceChoice(
             response.requested_fact_id, response.known_input_id,
-            response.reference_operand, response.option.key,
+            operand, response.option.key,
             clarification_response_ref(response.response_id),
+            observed_source_ref=response.option.observed_source_ref,
+            observed_properties=response.option.observed_properties,
         ))
     return tuple(choices)
 
@@ -400,7 +413,9 @@ def _realize_eligible_sources(
     }
     binding_requests = prepare_logical_realizations(
         logical, sources_by_fact=per_fact, canonical_values=canonical,
-        selected_reference_choices=_selected_reference_choices(request.clarification_responses),
+        selected_reference_choices=_selected_reference_choices(
+            request.clarification_responses, contract=contract,
+        ),
     )
     missing = next(
         (item for item in binding_requests if not item.strategy.branches), None

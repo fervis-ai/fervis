@@ -587,8 +587,9 @@ class SemanticSourceBindingRequest:
             if (
                 choice.requested_fact_id != self.index.requested_fact_id
                 or term is None
-                or not isinstance(term.operand, tuple)
-                or choice.operand not in term.operand
+                or choice.operand not in (
+                    term.operand if isinstance(term.operand, tuple) else (term.operand,)
+                )
             ):
                 raise ValueError("Reference choice is not a member of its supplied input")
         uses_by_input = {

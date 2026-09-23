@@ -375,7 +375,9 @@ def _grounding_response_values(
     values: list[CanonicalInputValue] = []
     indexes_by_fact = {item.requested_fact_id: item for item in indexes}
     for response in responses:
-        if not isinstance(response, GroundingIdentityResponse) or response.reference_operand:
+        if (not isinstance(response, GroundingIdentityResponse)
+                or response.reference_operand
+                or response.option.observed_properties):
             continue
         index = indexes_by_fact.get(response.requested_fact_id)
         if index is None:

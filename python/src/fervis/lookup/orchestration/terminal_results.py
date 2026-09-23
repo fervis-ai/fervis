@@ -280,27 +280,62 @@ def reference_clarification_fact_result(issue, *, contract):
     )
     if not uses:
         raise ValueError("Reference clarification has no declared question input")
-    cause = IdentityExecutionClarification(
-        task_ref=f"executed_reference:{failure.input_ref}",
-        input_ref=failure.input_ref,
-        use_refs=uses,
-        reason=failure.reason,
-        evidence_refs=issue.proof_refs,
-        candidates=tuple(
-            IdentityExecutionCandidate(
-                key=key,
-                display_value=canonical_runtime_json(key.component_values()),
-                matched_field_ref="",
-                matched_field_path="",
-                resolver_read_id="",
+    if failure.observed_candidates:
+        input_term = next(item for item in contract.inputs if item.id == failure.input_ref)
+        denotation = next(item for item in contract.input_denotations
+                          if item.input_ref == failure.input_ref)
+        options = tuple(
+            ClarificationOption(
+                id="observed_option:" + sha256(canonical_runtime_json({
+                    "source": candidate.source_ref,
+                    "properties": tuple((item.field_ref, item.value)
+                                        for item in candidate.properties),
+                }).encode()).hexdigest(),
+                label="; ".join(
+                    f"{item.label}: {item.value if isinstance(item.value, str) else canonical_runtime_json(item.value)}"
+                    for item in (candidate.display_properties or candidate.properties)
+                ),
+                observed_source_ref=candidate.source_ref,
+                observed_properties=candidate.properties,
             )
-            for key in failure.candidates
-        ),
-    )
-    result = semantic_clarification_fact_result(cause, contract=contract)
+            for candidate in failure.observed_candidates
+        )
+        reference = TargetReferenceAmbiguous(
+            clarification_id=f"clarify_identity:executed_reference:{failure.input_ref}",
+            requested_fact_id=_requested_fact_id(contract, use_refs=uses),
+            known_input_id=failure.input_ref,
+            source_text=input_term.operand if isinstance(input_term.operand, str)
+                        else ", ".join(input_term.operand),
+            target_label=denotation.operand_meaning,
+            options=options, proof_refs=issue.proof_refs,
+        )
+        result = FactResult(outcome=NeedsClarification(clarifications=(clarify(reference),)))
+    else:
+        cause = IdentityExecutionClarification(
+            task_ref=f"executed_reference:{failure.input_ref}",
+            input_ref=failure.input_ref,
+            use_refs=uses,
+            reason=failure.reason,
+            evidence_refs=issue.proof_refs,
+            candidates=tuple(
+                IdentityExecutionCandidate(
+                    key=key,
+                    display_value=canonical_runtime_json(key.component_values()),
+                    matched_field_ref="",
+                    matched_field_path="",
+                    resolver_read_id="",
+                )
+                for key in failure.candidates
+            ),
+        )
+        result = semantic_clarification_fact_result(cause, contract=contract)
     if failure.operand:
         term = next(item for item in contract.inputs if item.id == failure.input_ref)
-        if not isinstance(term.operand, tuple) or failure.operand not in term.operand:
+        if isinstance(term.operand, str):
+            if failure.operand != term.operand:
+                raise ValueError("Reference operand differs from its original input")
+            return result
+        if failure.operand not in term.operand:
             raise ValueError("Reference operand is not a member of its declared input")
         result = replace(
             result,

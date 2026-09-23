@@ -1140,6 +1140,13 @@ def _relation_fields(
             binding = builder.verified.request.source_catalog.field_binding(field_ref)
             if binding.source_ref == source_ref:
                 roles.setdefault(binding.field.field_ref, set()).add(FieldBindingRole.PREDICATE)
+    for field in _anonymous_reference_property_fields(
+        builder, plan, branch_id=branch_id, source_ref=source_ref
+    ):
+        role = (FieldBindingRole.PREDICATE
+                if FieldBindingRole.PREDICATE in field.allowed_roles
+                else FieldBindingRole.OUTPUT)
+        roles.setdefault(field.field_ref, set()).add(role)
     relation_evidence = {
         item.evidence_ref: item
         for item in builder.verified.request.source_catalog.relation_evidence
@@ -1198,6 +1205,35 @@ def _relation_fields(
         )
         for field_ref, field_roles in sorted(roles.items())
     )
+
+
+def _anonymous_reference_property_fields(builder, plan, *, branch_id, source_ref):
+    from fervis.lookup.source_binding.reference_bindings import runtime_reference_uses
+    from fervis.lookup.relation_catalog.row_sources.model import row_source_value_type_is_scalar
+
+    request = builder.verified.request
+    uses = {use.use_ref: use for use in runtime_reference_uses(request)}
+    owns_anonymous_reference = False
+    for binding in plan.reference_bindings:
+        if binding.branch_id != branch_id:
+            continue
+        use = uses.get(binding.input_use_ref)
+        if use is None or use.identity_set_ref is None:
+            continue
+        realization = next((item for item in plan.set_bindings[use.identity_set_ref.token]
+                            if item.branch_id == branch_id), None)
+        if realization is not None and realization.source_ref == source_ref and realization.identity_ref is None:
+            owns_anonymous_reference = True
+            break
+    if not owns_anonymous_reference:
+        return ()
+    source = request.source_catalog.source(source_ref)
+    return tuple(field for field in source.fields
+                 if not field.declared_entity_kind
+                 and not field.nullable
+                 and row_source_value_type_is_scalar(field.type)
+                 and (FieldBindingRole.PREDICATE in field.allowed_roles
+                      or FieldBindingRole.OUTPUT in field.allowed_roles))
 
 
 def _source_grain_field_ids(source: RowSource) -> tuple[str, ...]:
@@ -3042,7 +3078,9 @@ def _compile_runtime_reference_comparison(builder, node, *, branch_id):
     from fervis.lookup.source_binding.reference_bindings import (
         runtime_reference_uses, ReferenceMatchKind,
     )
-    from fervis.lookup.answer_program.operations import ReferenceGuardSpec
+    from fervis.lookup.answer_program.operations import (
+        ReferenceGuardSpec, ObservedReferenceProperty,
+    )
 
     request = builder.verified.request
     uses = {use.use_ref: use for use in runtime_reference_uses(request)
@@ -3125,27 +3163,62 @@ def _compile_runtime_reference_comparison(builder, node, *, branch_id):
             candidates = filtered.output_relation if filtered is not None else carrier
             choice_operation = None
             if selected is not None:
-                if entity_key is None:
-                    raise ValueError('Observed reference cannot accept a nominal key choice')
-                from fervis.lookup.answer_program.reference_compilation import selected_reference_filter
-
-                source = request.source_catalog.source(occurrence.source_ref)
-                choice_operation = selected_reference_filter(
-                    relation_id=candidates, namespace=prefix,
-                    projection=entity_key, selected_key=selected.key,
-                    proof_ref=selected.proof_ref,
-                    field_types={
-                        _execution_field_id(builder, occurrence.source_ref, field.id,
-                            occurrence_ref=occurrence.id): field.type.value
-                        for field in source.fields
-                    },
+                from fervis.lookup.answer_program.reference_compilation import (
+                    selected_reference_filter, selected_observed_filter,
                 )
+                source = request.source_catalog.source(occurrence.source_ref)
+                if selected.key is not None:
+                    if entity_key is None:
+                        raise ValueError('Observed reference cannot accept a nominal key choice')
+                    choice_operation = selected_reference_filter(
+                        relation_id=candidates, namespace=prefix,
+                        projection=entity_key, selected_key=selected.key,
+                        proof_ref=selected.proof_ref,
+                        field_types={
+                            _execution_field_id(builder, occurrence.source_ref, field.id,
+                                occurrence_ref=occurrence.id): field.type.value
+                            for field in source.fields
+                        },
+                    )
+                else:
+                    if entity_key is not None:
+                        raise ValueError('Nominal reference cannot accept an observed-property choice')
+                    choice_operation = selected_observed_filter(
+                        relation_id=candidates, namespace=prefix,
+                        source=source,
+                        selected_source_ref=selected.observed_source_ref,
+                        properties=selected.observed_properties,
+                        proof_ref=selected.proof_ref,
+                        execution_field_ids={
+                            field.field_ref: _execution_field_id(
+                                builder, occurrence.source_ref, field.id,
+                                occurrence_ref=occurrence.id,
+                            ) for field in source.fields
+                        },
+                    )
                 candidates = choice_operation.output_relation
-            guard_fields = keys if entity_key is not None else tuple(dict.fromkeys((*keys,*fields)))
+            observed = (
+                _anonymous_reference_property_fields(
+                    builder, builder.verified.binding_plan,
+                    branch_id=branch_id, source_ref=occurrence.source_ref,
+                ) if entity_key is None else ()
+            )
+            observed_properties = tuple(
+                ObservedReferenceProperty(
+                    _execution_field_id(builder, occurrence.source_ref, field.id,
+                                        occurrence_ref=occurrence.id),
+                    field.field_ref, field.type.value, field.label,
+                ) for field in observed
+            )
+            guard_fields = keys if entity_key is not None else tuple(dict.fromkeys((
+                *keys, *fields, *(item.field_id for item in observed_properties)
+            )))
             guard = Operation(prefix+'.guard', ReferenceGuardSpec(
                 candidates,
                 guard_fields,use.input_ref,operand,
-                entity_key=entity_key, occurrence_fields=keys if entity_key is None else ()),prefix+'.selected')
+                entity_key=entity_key, occurrence_fields=keys if entity_key is None else (),
+                observed_source_ref=occurrence.source_ref if observed_properties else "",
+                observed_properties=observed_properties),prefix+'.selected')
             builder.operations.extend(item for item in (filtered, choice_operation, guard) if item is not None)
             values = tuple(NodeOutputRef(guard.id,key) for key in keys)
             builder.reference_values[cache_key] = values

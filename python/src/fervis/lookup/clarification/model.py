@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fervis.lookup.canonical_data import EntityKeyValue
+from fervis.lookup.identity_types import ObservedReferenceValue
 from fervis.types.enums import StrEnum
 
 
@@ -64,10 +65,17 @@ class ClarificationOption:
     matched_value: str = ""
     resolver_read_id: str = ""
     resolver_label: str = ""
+    observed_source_ref: str = ""
+    observed_properties: tuple[ObservedReferenceValue, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id:
             raise ValueError("clarification option requires id")
+        if self.observed_properties and (
+            self.key is not None or not self.observed_source_ref
+            or len({item.field_ref for item in self.observed_properties}) != len(self.observed_properties)
+        ):
+            raise ValueError("observed clarification choice needs unique properties without nominal key")
 
 
 @dataclass(frozen=True)
@@ -263,8 +271,8 @@ def _validate_continuation_authority(clarification: Clarification) -> None:
             raise ValueError(
                 "grounding continuation requires canonical options or a free-text slot"
             )
-        if any(option.key is None for option in subject.options):
-            raise ValueError("grounding options require complete canonical identity")
+        if any(option.key is None and not option.observed_properties for option in subject.options):
+            raise ValueError("grounding options require declared keys or observed property selections")
         return
 
     target = continuation.target

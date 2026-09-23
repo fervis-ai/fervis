@@ -43,11 +43,11 @@ def test_member_clarification_enters_typed_reference_choice_with_user_proof():
             "clarification_response:choose_lake_d3",
         ),
     )
-    with pytest.raises(ValueError, match="requires an entity key"):
+    with pytest.raises(ValueError, match="key or observed properties"):
         _selected_reference_choices((replace(response, option=ClarificationOption("none")),))
 
 
-@pytest.mark.parametrize("data_case", ["distinct", "same_entity", "missing", "selected_member"])
+@pytest.mark.parametrize("data_case", ["distinct", "same_entity", "missing", "selected_member", "selected_observed_member"])
 def test_named_collection_rechecks_each_member_and_counts_once(data_case):
     path = Path(__file__).resolve().parents[2] / (
         "conformance/cases/algorithms/semantic_kernel/"
@@ -99,7 +99,8 @@ def test_named_collection_rechecks_each_member_and_counts_once(data_case):
         candidate_keys=() if data_case != "selected_member" else _read("districts", value_type="string").candidate_keys,
         fields=(*_read("districts", value_type="string").fields,
                 CatalogField("name", "string", path="name", row_path_id="root"),
-                CatalogField("alias", "string", path="alias", row_path_id="root", nullable=True)),
+                CatalogField("alias", "string", path="alias", row_path_id="root", nullable=True),
+                CatalogField("region", "string", path="region", row_path_id="root")),
     )
     catalog = RelationCatalog(reads=(facilities, districts))
     sources = {source.read_id: source for source in build_api_row_source_catalog(catalog).sources}
@@ -204,7 +205,19 @@ def test_named_collection_rechecks_each_member_and_counts_once(data_case):
         ),)
         if data_case == "selected_member" else ()
     )
-    if selected:
+    if data_case == "selected_observed_member":
+        from fervis.lookup.identity_types import ObservedReferenceValue
+        selected = (SelectedReferenceChoice(
+            "fact_1", "i1", "Lake District", None,
+            "clarification_response:choose_lake_west",
+            observed_source_ref=sources["districts"].id,
+            observed_properties=(ObservedReferenceValue(
+                next(field.field_ref for field in sources["districts"].fields
+                     if field.path == "region"),
+                "string", "region", "West",
+            ),),
+        ),)
+    if data_case == "selected_member":
         from fervis.lookup.source_binding.verification import SourceStrategyVerificationFailure
 
         bad = realize_and_compile_logical_plan(
@@ -228,6 +241,8 @@ def test_named_collection_rechecks_each_member_and_counts_once(data_case):
     assert sum(isinstance(op.spec, ReferenceGuardSpec) for op in program.operations) == 2
     calls = []
     drop_chosen = False
+    change_chosen_property = False
+    change_chosen_name = False
 
     class Port:
         def read(self, *, endpoint_name, args):
@@ -236,15 +251,20 @@ def test_named_collection_rechecks_each_member_and_counts_once(data_case):
             if endpoint_name == "districts":
                 return {"responseStatus": 200, "responseBody": [
                     {"id": "d1", "name": "River District",
-                     "alias": "Lake District" if data_case == "same_entity" else None},
+                     "alias": "Lake District" if data_case == "same_entity" else None,
+                     "region": "North"},
                     {"id": "d2", "name": "Other" if data_case in {"same_entity", "missing"} else "Lake District",
-                     "alias": None},
-                    *([{"id": "d3", "name": "Lake District", "alias": None}]
-                      if data_case == "selected_member" and not drop_chosen else []),
+                     "alias": None, "region": "East"},
+                    *([{"id": "d3",
+                        "name": "Other District" if change_chosen_name else "Lake District",
+                        "alias": None,
+                        "region": "South" if change_chosen_property else "West"}]
+                      if data_case in {"selected_member", "selected_observed_member"}
+                      and not drop_chosen else []),
                 ]}
             return {"responseStatus": 200, "responseBody": [
                 {"id": str(i), "district": "d1" if i < 2 else "d2" if i < 5 else "d3"}
-                for i in range(9 if data_case == "selected_member" else 5)
+                for i in range(9 if data_case in {"selected_member", "selected_observed_member"} else 5)
             ]}
 
     if data_case == "selected_member":
@@ -263,6 +283,20 @@ def test_named_collection_rechecks_each_member_and_counts_once(data_case):
         )
         assert ambiguous.issue.reference.reason is IdentityExecutionFailureReason.AMBIGUOUS_RESULT
         assert {key.component_value("id") for key in ambiguous.issue.reference.candidates} == {"d2", "d3"}
+    if data_case == "selected_observed_member":
+        unselected = realize_and_compile_logical_plan(
+            logical, sources_by_fact={"fact_1": available},
+            canonical_values=(canonical,), turn=turn,
+        )
+        assert isinstance(unselected, FactCompilationResult)
+        ambiguous = invoke_answer_program(
+            program=unselected.answer_program,
+            bindings=unselected.initial_bindings,
+            environment=ExecutionEnvironment(catalog=catalog),
+            ports=RuntimePorts(Port(), LookupMemory()),
+        )
+        assert len(ambiguous.issue.reference.observed_candidates) == 2
+        assert ambiguous.issue.reference.candidates == ()
 
     result = invoke_answer_program(
         program=program,
@@ -274,9 +308,9 @@ def test_named_collection_rechecks_each_member_and_counts_once(data_case):
         assert result.issue.reference.operand == "Lake District"
     else:
         assert result.issue is None
-        expected = 6 if data_case == "selected_member" else 5 if data_case == "distinct" else 2
+        expected = 6 if data_case in {"selected_member", "selected_observed_member"} else 5 if data_case == "distinct" else 2
         assert next(iter(result.fact_result.outcome.projected_rows[0].values.values())) == expected
-    if data_case == "selected_member":
+    if data_case in {"selected_member", "selected_observed_member"}:
         drop_chosen = True
         missing_choice = invoke_answer_program(
             program=program, bindings=compiled.initial_bindings,
@@ -285,6 +319,17 @@ def test_named_collection_rechecks_each_member_and_counts_once(data_case):
         )
         assert missing_choice.issue.reference.operand == "Lake District"
         drop_chosen = False
+    if data_case == "selected_observed_member":
+        for change in ("property", "name"):
+            change_chosen_property = change == "property"
+            change_chosen_name = change == "name"
+            changed_choice = invoke_answer_program(
+                program=program, bindings=compiled.initial_bindings,
+                environment=ExecutionEnvironment(catalog=catalog),
+                ports=RuntimePorts(Port(), LookupMemory()),
+            )
+            assert changed_choice.issue.reference.operand == "Lake District"
+        change_chosen_property = change_chosen_name = False
     assert calls
     replacement = FactValue.string_set(
         id=value.id, known_input_id="i1",

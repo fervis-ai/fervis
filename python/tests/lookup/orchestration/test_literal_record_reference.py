@@ -119,6 +119,8 @@ def test_literal_reference_is_guarded_before_related_count_and_recomputed_on_rep
             *_read("districts", value_type="string").fields,
             CatalogField("districts.name", "string", path="name", row_path_id="root"),
             CatalogField("districts.is_default", "boolean", path="is_default", row_path_id="root"),
+            CatalogField("districts.nickname", "string", path="nickname",
+                         row_path_id="root", nullable=True),
         ),
     )
     catalog = RelationCatalog(reads=(facilities, districts))
@@ -390,8 +392,9 @@ def test_literal_reference_is_guarded_before_related_count_and_recomputed_on_rep
     reads = []
 
     class Port:
-        def __init__(self, selected):
+        def __init__(self, selected, *, changed_default=False):
             self.selected = selected
+            self.changed_default = changed_default
 
         def read(self, *, endpoint_name, args):
             reads.append(endpoint_name)
@@ -403,7 +406,7 @@ def test_literal_reference_is_guarded_before_related_count_and_recomputed_on_rep
                     {
                         "id": "d1",
                         "name": "River District" if self.selected == "d1" else "Other",
-                        "is_default": self.selected == "d1",
+                        "is_default": self.selected == "d1" and not self.changed_default,
                     },
                     {
                         "id": "d2",
@@ -438,6 +441,96 @@ def test_literal_reference_is_guarded_before_related_count_and_recomputed_on_rep
                 )
                 == expected
             )
+    if duplicate_name and not descriptor:
+        from fervis.lookup.orchestration.terminal_results import reference_clarification_fact_result
+        from fervis.lookup.clarification.response import parse_clarification_response
+        from fervis.lookup.orchestration.logical_compilation import _selected_reference_choices
+
+        ambiguous = invoke_answer_program(
+            program=program, bindings=result.initial_bindings,
+            environment=ExecutionEnvironment(catalog=catalog),
+            ports=RuntimePorts(Port("d1"), LookupMemory()),
+        )
+        clarification = reference_clarification_fact_result(
+            ambiguous.issue, contract=logical.contract
+        ).outcome.clarifications[0]
+        assert len(clarification.subjects[0].options) == 2
+        option = next(item for item in clarification.subjects[0].options
+                      if item.observed_properties[0].value == "d1")
+        response = parse_clarification_response(
+            clarification, response_id="choose_d1", response_text=option.label,
+            selected_option_id=option.id,
+        )
+        choice = _selected_reference_choices((response,), contract=logical.contract)
+        calls.clear()
+        if use_runtime:
+            selected_outcome = compile_logical_question(
+                replace(request, clarification_responses=(response,))
+            )
+            assert isinstance(selected_outcome, shared.SemanticCompilationSuccess)
+            selected_program = FactCompilationResult(
+                selected_outcome.compilation.answer_program,
+                selected_outcome.compilation.initial_bindings,
+            )
+        else:
+            selected_program = realize_and_compile_logical_plan(
+                logical,
+                sources_by_fact={
+                    "fact_1": snapshot_source_catalog(tuple(sources.values()))
+                },
+                canonical_values=(canonical,), selected_reference_choices=choice,
+                turn=turn,
+            )
+        assert isinstance(selected_program, FactCompilationResult)
+        from fervis.lookup.answer_program.operations import ReferenceGuardSpec
+        from fervis.lookup.plan_execution.errors import VerificationError
+
+        guard = next(op for op in selected_program.answer_program.operations
+                     if isinstance(op.spec, ReferenceGuardSpec)
+                     and op.spec.observed_properties)
+        forged = replace(guard, spec=replace(
+            guard.spec,
+            observed_properties=(replace(
+                guard.spec.observed_properties[0],
+                source_field_ref="forged.source.property",
+            ), *guard.spec.observed_properties[1:]),
+        ))
+        forged_program = replace(
+            selected_program.answer_program,
+            operations=tuple(forged if op.id == guard.id else op
+                             for op in selected_program.answer_program.operations),
+        )
+        read_count = len(reads)
+        with pytest.raises(VerificationError, match="source field authority"):
+            invoke_answer_program(
+                program=forged_program,
+                bindings=selected_program.initial_bindings,
+                environment=ExecutionEnvironment(catalog=catalog),
+                ports=RuntimePorts(Port("d1"), LookupMemory()),
+            )
+        assert len(reads) == read_count
+        chosen = invoke_answer_program(
+            program=selected_program.answer_program,
+            bindings=selected_program.initial_bindings,
+            environment=ExecutionEnvironment(catalog=catalog),
+            ports=RuntimePorts(Port("d1"), LookupMemory()),
+        )
+        assert chosen.issue is None
+        assert next(iter(chosen.fact_result.outcome.projected_rows[0].values.values())) == 2
+        changed_other_property = invoke_answer_program(
+            program=selected_program.answer_program,
+            bindings=selected_program.initial_bindings,
+            environment=ExecutionEnvironment(catalog=catalog),
+            ports=RuntimePorts(Port("d1", changed_default=True), LookupMemory()),
+        )
+        assert changed_other_property.issue.reference.reason.value == "NOT_FOUND"
+        changed_name = invoke_answer_program(
+            program=selected_program.answer_program,
+            bindings=selected_program.initial_bindings,
+            environment=ExecutionEnvironment(catalog=catalog),
+            ports=RuntimePorts(Port("d2"), LookupMemory()),
+        )
+        assert changed_name.issue.reference.reason.value == "NOT_FOUND"
     assert calls == [
         "SemanticSourceRealizationTurnPrompt",
         "SetPopulationTurnPrompt",
