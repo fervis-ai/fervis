@@ -37,9 +37,10 @@ set cannot be substituted under an existing input ID.
   104 seconds with nine model calls, zero source-access turns and $0.079 of
   model spend. The host JWT was carried through the encrypted delegated-read
   contract and reauthenticated as the same Django principal.
-- The private Ozana suite's 281 oracles were computed offline against the
-  merged current-main host checkout's isolated fixture database with no
-  exceptions or `oracle_failed` results.
+- The private Ozana suite's 281 oracles were computed offline against a fresh
+  seeded database on the merged current-main host checkout, with each case's
+  fixture rolled back before the next and no exceptions or `oracle_failed`
+  results. The guarded independence command is tracked in the private suite.
   This checks fixture/oracle readiness, not assistant answers.
 - The merged host checkout passed 3,683 distinct Ozana/accounts/brands Docker
   tests with no failures, and Fervis catalog inspection found 202 endpoints,
