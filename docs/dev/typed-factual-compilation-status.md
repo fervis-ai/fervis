@@ -99,7 +99,9 @@ set cannot be substituted under an existing input ID.
   doctor finds 18 readable GET endpoints.
   The sample's own suite has 51 passes and one review-count failure, reproduced
   unchanged in a baseline copy with Fervis removed. This is integration/setup
-  evidence, not a live factual-answer receipt. Full repository verification
+  evidence, not a live factual-answer receipt. A Fervis Flask adapter GET under
+  `flask_principal:eval-principal` also returned HTTP 200 JSON with six
+  categories from `api.list_categories`. Full repository verification
   after the import migration passed with 2,736 Python tests, Mypy over 634
   source files, Ruff, distribution checks, 93 desktop tests and build.
 - Typed SUM, AVG and arithmetic no longer inherit the caller's Decimal context.
