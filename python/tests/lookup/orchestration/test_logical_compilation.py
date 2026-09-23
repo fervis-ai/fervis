@@ -294,14 +294,23 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
     assert len(reads) == 1
 
 
-def test_typed_source_access_revisits_deferred_dependent_read_when_direct_sources_fail(monkeypatch):
+@pytest.mark.parametrize(
+    "parent_ids,expected", [((1, 2), 3), ((1, 1, 2), 3), ((), 0)]
+)
+@pytest.mark.parametrize("parent_has_key", [False, True])
+def test_typed_source_access_revisits_deferred_dependent_read_when_direct_sources_fail(
+    monkeypatch, parent_ids, expected, parent_has_key,
+):
     from fervis.lookup.source_reads.access_model import (
         AccessArgument, ReadAccessCatalog, ReadDependency,
     )
     from fervis.lookup.relation_catalog import CatalogParam, ParamSource
     from fervis.lookup.relation_catalog.row_sources import build_api_row_source_catalog
 
-    parent = replace(_read("a_stores"), resource_names=("stores",))
+    parent = replace(
+        _read("a_stores"), resource_names=("stores",),
+        **({} if parent_has_key else {"candidate_keys": ()}),
+    )
     decoys = tuple(replace(_read(name), resource_names=("stores",))
                    for name in ("b_stores", "c_stores"))
     child = replace(
@@ -389,6 +398,42 @@ def test_typed_source_access_revisits_deferred_dependent_read_when_direct_source
     assert isinstance(result, shared.SemanticCompilationSuccess)
     assert access_calls[0] == ()
     assert access_calls[-1] == ("z_store_details",)
+    program = decode_answer_program(
+        canonical_answer_program_json(result.compilation.answer_program)
+    )
+    assert not any(isinstance(op.spec, SqlQuerySpec) for op in program.operations)
+    calls = []
+
+    class Port:
+        def read(self, *, endpoint_name, args, **kwargs):
+            calls.append((endpoint_name, dict(args)))
+            if endpoint_name == "a_stores":
+                rows = [{"id": value} for value in parent_ids]
+            elif endpoint_name == "z_store_details":
+                rows = {
+                    1: [{"id": 11}, {"id": 12}],
+                    2: [{"id": 21}],
+                }[args["store_id"]]
+            else:
+                raise AssertionError(endpoint_name)
+            return {
+                "responseStatus": 200,
+                "responseFormat": "json",
+                "responseBody": rows,
+            }
+
+    executed = invoke_answer_program(
+        program=program,
+        bindings=result.compilation.initial_bindings,
+        environment=ExecutionEnvironment(catalog=catalog),
+        ports=RuntimePorts(Port(), LookupMemory()),
+    )
+    assert executed.issue is None
+    assert next(iter(executed.fact_result.outcome.projected_rows[0].values.values())) == expected
+    assert calls == [
+        ("a_stores", {}),
+        *(("z_store_details", {"store_id": value}) for value in dict.fromkeys(parent_ids)),
+    ]
 
 
 def test_two_requested_facts_keep_distinct_outputs_through_one_rest_read(monkeypatch):

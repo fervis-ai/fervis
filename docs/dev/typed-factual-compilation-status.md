@@ -64,11 +64,14 @@ set cannot be substituted under an existing input ID.
 - A typed REST-binding regression proves that ranking related records by their
   average amount selects a different winner than ranking by sum, while returning
   the associated count. It also exercises duplicated observed parent rows.
+- Serialized typed programs traverse dependent REST reads from keyed or
+  anonymous complete parent rows, bind observed path values, avoid duplicate
+  child calls, and count normal or empty populations without a SQL operation.
 - Framework mount regressions now prove that Fervis routes remain reachable
   ahead of host catch-all routes in Django, FastAPI and Flask. Django `doctor` rejects
   an existing shadowed mount, and `init` repairs its position.
-- The repository verifier passed after the three-framework mount conformance
-  check: 2,716
+- The repository verifier passed after typed dependent-read replay coverage:
+  2,721
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
   93 desktop tests and the desktop build.
 - A pull-request workflow now runs that full repository verifier with a
