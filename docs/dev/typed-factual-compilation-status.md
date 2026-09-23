@@ -71,7 +71,8 @@ set cannot be substituted under an existing input ID.
   observed value rows, including nested arrays whose parent context has a
   colliding `value` field. Mixed object/scalar arrays and a changed response
   shape fail closed. No identity key is inferred from these values. The full
-  repository verifier passed with 2,725 Python tests, Mypy over 633 source
+  typed count path now re-inspects a schema-free primitive array on replay and
+  executes without SQL. The full repository verifier passed with 2,726 Python tests, Mypy over 633 source
   files, Ruff, installed-package checks, 93 desktop tests and desktop build.
 - Framework mount regressions now prove that Fervis routes remain reachable
   ahead of host catch-all routes in Django, FastAPI and Flask. Django `doctor` rejects

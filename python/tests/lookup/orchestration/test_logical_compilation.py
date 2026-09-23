@@ -55,6 +55,15 @@ def count_payload():
 def test_typed_runtime_authors_independent_contract_then_executes_native_count(
     monkeypatch, annotated, batched, outcome
 ):
+    _run_typed_native_count(monkeypatch, annotated=annotated, batched=batched, outcome=outcome)
+
+
+def test_typed_runtime_counts_schema_free_primitive_array(monkeypatch):
+    _run_typed_native_count(monkeypatch, annotated=False, batched=False,
+                            outcome="normal", primitive=True)
+
+
+def _run_typed_native_count(monkeypatch, *, annotated, batched, outcome, primitive=False):
     seen = []
     logical = []
 
@@ -189,7 +198,7 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
             reads.append((endpoint_name, args))
             return {
                 "responseStatus": 200,
-                "responseBody": [{"id": 1}, {"id": 2}, {"id": 3}],
+                "responseBody": [1, 2, 3] if primitive else [{"id": 1}, {"id": 2}, {"id": 3}],
                 "responseFormat": "json",
             }
 
@@ -206,7 +215,7 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
                     "params": (CatalogParam("page", "page", ParamSource.QUERY, "integer"),),
                     "source_metadata": {"representation_authority": "unobserved"},
                 }
-                if batched and outcome in {"normal", "unavailable"} and name == "fourth_stores"
+                if primitive or batched and outcome in {"normal", "unavailable"} and name == "fourth_stores"
                 else {} if annotated else {"candidate_keys": ()}
             ),
         )
@@ -270,6 +279,7 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
         "SemanticQuestionFrameTurnPrompt",
         "SemanticQuestionContractTurnPrompt",
         "SemanticQueryEnrichmentTurnPrompt",
+        *(["PaginationDiscoveryPrompt"] if primitive else []),
         "SemanticSourceRealizationTurnPrompt",
         "SetPopulationTurnPrompt",
     ]
@@ -280,18 +290,25 @@ def test_typed_runtime_authors_independent_contract_then_executes_native_count(
     assert not any(
         isinstance(operation.spec, SqlQuerySpec) for operation in program.operations
     )
-    assert reads == []
+    assert reads == ([('stores', {})] if primitive else [])
+    execution_catalog = catalog
+    if primitive:
+        from fervis.lookup.orchestration.execution_sources import prepare_execution_catalog
+        execution_catalog = prepare_execution_catalog(
+            run_id="typed-runtime-replay", catalog=catalog, program=program,
+            data_access_port=Port(), lineage_step_sink=None,
+        )
     executed = invoke_answer_program(
         program=program,
         bindings=result.compilation.initial_bindings,
-        environment=ExecutionEnvironment(catalog=catalog),
+        environment=ExecutionEnvironment(catalog=execution_catalog),
         ports=RuntimePorts(Port(), LookupMemory()),
     )
     assert executed.issue is None
     assert (
         next(iter(executed.fact_result.outcome.projected_rows[0].values.values())) == 3
     )
-    assert len(reads) == 1
+    assert len(reads) == (3 if primitive else 1)
 
 
 @pytest.mark.parametrize(
