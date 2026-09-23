@@ -56,7 +56,7 @@ def test_inspection_input_contract_excludes_unrelated_supplied_values():
     assert "the supplied facility" in prompt.prompt_text
     assert "00000000-0000-0000-0000-000000000002" not in prompt.prompt_text
     payload = {"reads": {"readings": {
-        "kind": "supplied_input", "mapping_basis": "The path names the supplied facility.",
+        "kind": "bound_arguments", "mapping_basis": "The path names the supplied facility.",
         "parameter_inputs": {"facility_id": "facility"},
     }}}
     validate(payload, inspection_input_schema(request))
@@ -100,7 +100,7 @@ def test_optional_schema_free_argument_can_bind_or_be_explicitly_omitted():
     )
     assert len(request.targets) == 1
     payload = {"reads": {"reports": {
-        "kind": "supplied_input", "mapping_basis": "Compact is the requested representation.",
+        "kind": "bound_arguments", "mapping_basis": "Compact is the requested representation.",
         "parameter_inputs": {"shape": "shape"},
     }}}
     validate(payload, inspection_input_schema(request))
@@ -128,7 +128,7 @@ def test_schema_free_inspection_can_select_a_declared_finite_shape_choice():
     )
     assert len(request.targets) == 1
     payload = {"reads": {"reports": {
-        "kind": "supplied_input", "mapping_basis": "The summary shape carries the requested total.",
+        "kind": "bound_arguments", "mapping_basis": "The summary shape carries the requested total.",
         "parameter_inputs": {"shape": "choice:summary"},
     }}}
     validate(payload, inspection_input_schema(request))
@@ -155,10 +155,52 @@ def test_boolean_catalog_choice_is_typed_before_schema_free_inspection():
         certified_values=(),
     )
     payload = {"reads": {"flags": {
-        "kind": "supplied_input", "mapping_basis": "The requested flags are active.",
+        "kind": "bound_arguments", "mapping_basis": "The requested flags are active.",
         "parameter_inputs": {"active": "choice:true"},
     }}}
     validate(payload, inspection_input_schema(request))
     assert parse_inspection_inputs(payload, request=request) == {
         "flags": {"active": True}
     }
+
+
+def test_numeric_catalog_choice_is_parsed_under_its_declared_parameter_type():
+    read = EndpointRead(
+        "tiers", "tiers", path="/tiers", resource_names=("tiers",),
+        params=(CatalogParam("tier", "tier", ParamSource.QUERY, "integer",
+                             required=True, choices=("1", "2")),),
+    )
+    request = inspection_input_request(
+        catalog=RelationCatalog(reads=(read,)), read_ids=(read.id,),
+        contract=SimpleNamespace(inputs=(), input_denotations=()),
+        indexes=(SimpleNamespace(requested_fact_id="fact", input_use_sites=()),),
+        fact_selections=(SimpleNamespace(requested_fact_id="fact",
+                                         selected_read_ids=(read.id,)),),
+        certified_values=(),
+    )
+    assert request.targets[0].choice_values["tier"] == ("1", "2")
+    payload = {"reads": {"tiers": {
+        "kind": "bound_arguments", "mapping_basis": "The second tier is requested.",
+        "parameter_inputs": {"tier": "choice:2"},
+    }}}
+    validate(payload, inspection_input_schema(request))
+    assert parse_inspection_inputs(payload, request=request) == {
+        "tiers": {"tier": 2}
+    }
+
+
+def test_inconsistent_catalog_choices_cannot_supply_required_inspection_input():
+    read = EndpointRead(
+        "tiers", "tiers", path="/tiers", resource_names=("tiers",),
+        params=(CatalogParam("tier", "tier", ParamSource.QUERY, "integer",
+                             required=True, choices=("invalid", "2")),),
+    )
+    request = inspection_input_request(
+        catalog=RelationCatalog(reads=(read,)), read_ids=(read.id,),
+        contract=SimpleNamespace(inputs=(), input_denotations=()),
+        indexes=(SimpleNamespace(requested_fact_id="fact", input_use_sites=()),),
+        fact_selections=(SimpleNamespace(requested_fact_id="fact",
+                                         selected_read_ids=(read.id,)),),
+        certified_values=(),
+    )
+    assert request.targets == ()

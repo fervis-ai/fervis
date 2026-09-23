@@ -65,7 +65,7 @@ def test_schema_free_address_compiles_typed_count_from_original_input(
                       for task in prompt.request.reference_tasks))
         elif name == "InspectionInputTurnPrompt":
             result = parse({"reads": {"facilities": {
-                "kind": "supplied_input",
+                "kind": "bound_arguments",
                 "mapping_basis": "The question supplies the district path UUID.",
                 "parameter_inputs": {"district_id": "i1"},
             }}})

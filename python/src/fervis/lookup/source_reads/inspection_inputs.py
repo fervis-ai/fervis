@@ -26,11 +26,25 @@ class InspectionInputRequest:
     meanings: dict[str, str]
 
 
+def _valid_declared_choices(param) -> tuple[str, ...]:
+    declared = param.choices or (
+        ("false", "true") if param.type == "boolean" else ()
+    )
+    for choice in declared:
+        try:
+            parse_catalog_parameter_text(
+                choice, type_name=param.type
+            )
+        except ValueError:
+            return ()
+    return declared
+
+
 def inspection_input_request(
     *, catalog: RelationCatalog, read_ids: tuple[str, ...],
     contract: QuestionContract, indexes, fact_selections, certified_values,
 ) -> InspectionInputRequest:
-    """Offer only original question operands used by the selected fact."""
+    """Offer fact-owned original inputs and API-declared finite choices."""
     certified = {
         value.input_ref for value in certified_values
         if f"question_input:{value.input_ref}" in value.certification_refs
@@ -63,21 +77,22 @@ def inspection_input_request(
         choice_values = {}
         missing_required = False
         for param in read.params:
+            choices = _valid_declared_choices(param)
             candidates = []
             for input_ref in selected[read.id] & certified:
                 term = inputs[input_ref]
                 if not isinstance(term.operand, str):
                     continue
+                if param.choices and not choices:
+                    continue
                 try:
                     parse_catalog_parameter_text(
-                        term.operand, type_name=param.type, choices=param.choices
+                        term.operand, type_name=param.type,
+                        choices=choices or param.choices,
                     )
                 except ValueError:
                     continue
                 candidates.append(term)
-            choices = param.choices or (
-                ("false", "true") if param.type == "boolean" else ()
-            )
             if requires_caller_supplied_input(param) and not (candidates or choices):
                 missing_required = True
             if candidates or choices:
@@ -108,7 +123,7 @@ def inspection_input_schema(request: InspectionInputRequest):
         "oneOf": [
             obj({"kind": {"enum": ["unsupported"]},
                  "reason": {"type": "string", "minLength": 1}}),
-            obj({"kind": {"enum": ["supplied_input"]},
+            obj({"kind": {"enum": ["bound_arguments"]},
                  "mapping_basis": {"type": "string", "minLength": 1},
                  "parameter_inputs": parameter_inputs(target)}),
         ]
@@ -119,7 +134,7 @@ def inspection_input_schema(request: InspectionInputRequest):
 class InspectionInputTurnPrompt(TurnPromptBase):
     request: InspectionInputRequest
     turn_name: str = "inspection input grounding"
-    turn_task: str = "map original question values to required read addresses"
+    turn_task: str = "bind selected read arguments before response inspection"
 
     def instruction_sections(self, builder):
         return (builder.instruction_block("Response inspection address", (
@@ -132,7 +147,7 @@ class InspectionInputTurnPrompt(TurnPromptBase):
         )),)
 
     def data_sections(self, builder):
-        return (builder.json_section("Selected API reads and supplied inputs:", [
+        return (builder.json_section("Selected API reads and certified argument options:", [
             {
                 "read_id": target.read.id,
                 "path": target.read.path,
@@ -181,7 +196,7 @@ def parse_inspection_inputs(payload, *, request: InspectionInputRequest):
             if not str(proposal.get("reason") or "").strip():
                 raise ValueError("unsupported inspection route requires a reason")
             continue
-        if proposal["kind"] != "supplied_input":
+        if proposal["kind"] != "bound_arguments":
             raise ValueError("inspection grounding has unknown decision")
         target = targets[read_id]
         chosen = proposal["parameter_inputs"]
@@ -198,11 +213,9 @@ def parse_inspection_inputs(payload, *, request: InspectionInputRequest):
                 choice = input_ref.removeprefix("choice:")
                 if choice not in target.choice_values[ref]:
                     raise ValueError("inspection choice is not a declared inspection choice")
-                from fervis.lookup.relation_catalog.parameter_values import (
-                    parse_catalog_parameter_value,
-                )
-                args[ref] = parse_catalog_parameter_value(
-                    choice, type_name=params[ref].type, choices=params[ref].choices
+                args[ref] = parse_catalog_parameter_text(
+                    choice, type_name=params[ref].type,
+                    choices=target.choice_values[ref],
                 )
                 continue
             term = next((item for item in target.options[ref] if item.id == input_ref), None)
