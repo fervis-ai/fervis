@@ -37,6 +37,9 @@ from fervis.lookup.plan_execution.declared_values import (
     parse_declared_value,
 )
 from fervis.lookup.plan_execution.errors import RelationEngineError
+from fervis.lookup.plan_execution.exact_decimal import (
+    exact_add, exact_subtract, exact_multiply, stable_divide,
+)
 from fervis.lookup.plan_execution.relations import Row
 
 
@@ -176,7 +179,7 @@ def _unary(
         if operand.value is None:
             return EvaluatedExpression(value=None, value_type="decimal")
         value = declared_number(operand.value, operand.value_type or "decimal")
-        return EvaluatedExpression(value=-value, value_type="decimal")
+        return EvaluatedExpression(value=value.copy_negate(), value_type="decimal")
     if signature.kind is OperatorKind.BOOLEAN:
         truth = _boolean(operand)
         return EvaluatedExpression(value=None if truth is None else not truth, value_type="boolean")
@@ -219,16 +222,16 @@ def _arithmetic(
     left_value = declared_number(left.value, left.value_type or "decimal")
     right_value = declared_number(right.value, right.value_type or "decimal")
     if operator is ExpressionBinaryOperator.ADD:
-        value = left_value + right_value
+        value = exact_add(left_value, right_value)
     elif operator is ExpressionBinaryOperator.SUBTRACT:
-        value = left_value - right_value
+        value = exact_subtract(left_value, right_value)
     elif operator is ExpressionBinaryOperator.MULTIPLY:
-        value = left_value * right_value
+        value = exact_multiply(left_value, right_value)
     elif operator is ExpressionBinaryOperator.DIVIDE:
         reason = division_undefined_reason(right_value)
         if reason is not None:
             raise UndefinedOperationError(reason_code=reason)
-        value = left_value / right_value
+        value = stable_divide(left_value, right_value)
     else:
         raise RelationEngineError(f"unsupported arithmetic operator {operator}")
     return EvaluatedExpression(value=value, value_type="decimal")

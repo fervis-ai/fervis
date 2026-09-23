@@ -554,14 +554,16 @@ def _aggregate_value(
                 input_refs=(aggregation.input_field,),
             )
     if function in {AggregationFunction.SUM, AggregationFunction.AVG}:
+        from fervis.lookup.plan_execution.exact_decimal import exact_sum, stable_divide
+
         numeric = [
             declared_number(value, field_types.get(aggregation.input_field))
             for value in values
         ]
-        total = sum(numeric, start=declared_number(0, "decimal"))
+        total = exact_sum(tuple(numeric))
         if function == AggregationFunction.SUM:
             return total
-        return total / len(numeric)
+        return stable_divide(total, declared_number(len(numeric), "integer"))
     if function == AggregationFunction.MIN:
         return (
             min(
