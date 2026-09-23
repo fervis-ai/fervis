@@ -137,9 +137,18 @@ set cannot be substituted under an existing input ID.
   changed names, other properties, missing rows, forged source-field lineage,
   field types or display labels, and indistinguishable records fail closed. The
   answer-program schema advances
-  to revision 27 / compiler `@54` so older saved programs recompile. Full
+  to revision 27 so older saved programs recompile. Full
   verification passed with 2,761 Python tests, Mypy over 635 source files,
   Ruff, distribution checks, 93 desktop tests and build.
+- A within-fact scalar aggregate can now feed a row predicate that filters a
+  second aggregate. Typed controls compute AVG of values below or above the
+  complete population AVG as 2 or 10, respectively. A plan omitting the scoped
+  Boolean realization is rejected; singleton aggregate producers execute in
+  dependency order, and independent one-row outputs combine without SQL.
+  Compiler compatibility advances to `@55` to reject older saved plans that
+  could have silently treated the filter as true. Full verification passed
+  with 2,764 Python tests, Mypy over 635 source files, Ruff, distribution
+  checks, 93 desktop tests and build.
 - A typed local-day regression now covers the New York spring DST transition:
   two instants within March 8 and the first instant of March 9 fall into their
   correct local-day buckets. This preserves a SQL-era factual obligation in

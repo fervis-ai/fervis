@@ -938,6 +938,14 @@ def _combine_domains(
     first = nonconstant[0]
     if all(item == first for item in nonconstant[1:]):
         return first
+    non_scalar = tuple(
+        item for item in nonconstant
+        if not (isinstance(item, AggregateDomain) and not item.grouping_refs)
+    )
+    if non_scalar and len(non_scalar) != len(nonconstant):
+        # A complete ungrouped aggregate is one scalar value. Its producer
+        # still owns its population; consumers may use that result per row.
+        return _combine_domains(non_scalar, terms=terms)
     expanded = tuple(
         item for item in nonconstant if isinstance(item, AssociationExpandedDomain)
     )

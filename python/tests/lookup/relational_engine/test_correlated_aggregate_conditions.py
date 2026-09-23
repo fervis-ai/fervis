@@ -230,3 +230,89 @@ def test_scalar_aggregate_materializes_its_complete_dependency_scope(shape, bran
         result.relation(output.relation_id).rows[0][output.field_id]
         == {"filter": 100, "nested": 200, "qualified_filter": 0}[shape]
     )
+
+
+@pytest.mark.parametrize("operator,expected", [
+    (ExpressionBinaryOperator.LT, Decimal("2")),
+    (ExpressionBinaryOperator.GT, Decimal("10")),
+])
+def test_typed_filtered_average_reuses_independent_population_average(
+    operator, expected,
+):
+    from tests.lookup.fact_compilation.test_compiler import _compile_memory_count
+    from fervis.lookup.question_contract.model import FactTerm, RequestedOutput
+    from fervis.lookup.semantic_types import DecimalType, UnitlessMeasure
+    from fervis.lookup.relation_catalog import RelationCatalog
+    from fervis.lookup.relation_catalog.row_sources import build_row_source_catalog
+    from fervis.lookup.source_binding.model import FactRealization, FactRealizationKind
+    from fervis.lookup.answer_program.invocation import RuntimePorts, invoke_answer_program
+    from fervis.lookup.answer_program.instantiation import ExecutionEnvironment
+    from fervis.lookup.memory.projection import LookupMemory
+
+    rows = tuple({"id": str(index), "amount": Decimal(value)}
+                 for index, value in enumerate((1, 3, 10), start=1))
+    _, _, memory, _, _, original = _compile_memory_count(rows)
+    memory = replace(memory, field_types={"id": "string", "amount": "decimal"})
+    source = next(item for item in build_row_source_catalog(
+        RelationCatalog(), memory_relations=(memory,)
+    ).sources if item.memory_ref == memory.id)
+    fact = original.request.index.requested_fact
+    expressions = (
+        Aggregate("all_average", AggregateFunction.AVERAGE,
+                  "amount", None, False, fact.origin),
+        Comparison("qualifies", operator, "amount", "all_average", fact.origin),
+        Aggregate("filtered_average", AggregateFunction.AVERAGE,
+                  "amount", "qualifies", False, fact.origin),
+    )
+    fact = replace(
+        fact,
+        facts=(FactTerm("amount", "s1", DecimalType(UnitlessMeasure()), fact.origin),),
+        expressions=expressions,
+        outputs=(RequestedOutput("average", "filtered_average", fact.origin),),
+    )
+    index = analyze_requested_fact(fact, inputs={}, input_denotations={})
+    branch = original.request.strategy.branches[0]
+    field = next(item for item in source.fields if item.id == "amount")
+    plan = replace(original.binding_plan, fact_bindings={
+        index.fact_local_ref_by_local_id["amount"].token: (
+            FactRealization(branch.branch_id, "Observed amount.", source.id,
+                FactRealizationKind.RETURNED_FIELD, None,
+                (field.field_ref,), (source.id, field.field_ref)),
+        ),
+    })
+    request = replace(
+        original.request, index=index,
+        source_catalog=replace(original.request.source_catalog,
+                               sources=(source,)),
+    )
+    from fervis.lookup.source_binding.verification import SourceStrategyVerificationFailure
+    from fervis.lookup.source_binding.model import (
+        BooleanRequirementRealization, SourceMechanic, SourceMechanicKind,
+    )
+    assert isinstance(
+        verify_source_strategy(plan, request=request),
+        SourceStrategyVerificationFailure,
+    )
+    plan = replace(plan, boolean_bindings={
+        requirement.requirement_ref: (BooleanRequirementRealization(
+            branch.branch_id, (SourceMechanic(
+                "Evaluate the typed row comparison against the complete average.",
+                source.id, (), (source.id, requirement.requirement_ref),
+                SourceMechanicKind.RETURNED_ROW_PREDICATE,
+            ),),
+        ),)
+        for requirement in index.boolean_requirements
+    })
+    verified = verify_source_strategy(plan, request=request)
+    assert isinstance(verified, VerifiedSourceStrategy)
+    compiled = compile_verified_source_strategy(verified)
+    execution = invoke_answer_program(
+        program=compiled.answer_program, bindings=compiled.initial_bindings,
+        environment=ExecutionEnvironment(
+            catalog=RelationCatalog(), memory_relations=(memory,)
+        ),
+        ports=RuntimePorts(data_access_port=None,
+                           memory=LookupMemory(relations=(memory,))),
+    )
+    assert execution.issue is None
+    assert next(iter(execution.fact_result.outcome.projected_rows[0].values.values())) == expected

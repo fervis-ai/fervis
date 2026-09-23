@@ -19,7 +19,7 @@ input:
           provenance: {kind: semantic_choice}
       compatibility: &missing_function
         schema_revision: 27
-        compiler_version: fervis.answer_program.compiler@54
+        compiler_version: fervis.answer_program.compiler@55
         function_semantics:
           - {function_key: answer.materialize, version: '4'}
           - {function_key: fact.materialize, version: '4'}

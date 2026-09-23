@@ -498,11 +498,11 @@ def _qualification_guarantee(
     proofs: dict[BooleanAtomRef, tuple[str, ...]] = {}
     failed: list[str] = []
     for requirement in request.index.boolean_requirements:
-        if requirement.use_site is not BooleanRequirementUseSite.POPULATION:
-            continue
         realizations = plan.boolean_bindings.get(requirement.requirement_ref, ())
         if not realizations or any(not item.mechanics for item in realizations):
             failed.append(requirement.requirement_ref)
+            continue
+        if requirement.use_site is not BooleanRequirementUseSite.POPULATION:
             continue
         proofs[requirement.atom_ref] = tuple(
             dict.fromkeys(

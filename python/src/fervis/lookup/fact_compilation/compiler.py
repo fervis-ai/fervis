@@ -1757,6 +1757,93 @@ def _aggregate_input_relation(
     )
 
 
+def _ordered_scalar_aggregates(index, aggregates):
+    """Place each singleton producer before aggregates that consume it."""
+    by_ref = dict(aggregates)
+    ordered, visiting, visited = [], set(), set()
+
+    def visit(ref):
+        if ref in visited:
+            return
+        if ref in visiting:
+            raise ValueError("aggregate dependencies contain a cycle")
+        visiting.add(ref)
+        pending = list(index.direct_dependencies_by_ref.get(ref, ()))
+        seen_dependencies = set()
+        while pending:
+            dependency = pending.pop()
+            if dependency in seen_dependencies:
+                continue
+            seen_dependencies.add(dependency)
+            if dependency in by_ref:
+                visit(dependency)
+            else:
+                pending.extend(index.direct_dependencies_by_ref.get(dependency, ()))
+        visiting.remove(ref)
+        visited.add(ref)
+        ordered.append((ref, by_ref[ref]))
+
+    for ref, _ in aggregates:
+        visit(ref)
+    return tuple(ordered)
+
+
+def _emit_aggregate_group(
+    builder, *, index, aggregate_input, scoped_aggregates,
+    group_fields, aggregate_fields, position, total_groups,
+):
+    aggregate_input = _project_semantic_values(
+        builder,
+        input_relation=aggregate_input,
+        refs=tuple(
+            _semantic_ref(index, aggregate.argument_ref)
+            for _, aggregate in scoped_aggregates
+        ),
+        aggregate_fields={},
+        label=f"aggregate_arguments_{position}",
+    )
+    specs = tuple(
+        AggregationSpec(
+            function=_aggregation_function(aggregate),
+            output_field=aggregate_fields[ref],
+            input_field=""
+            if (argument := _semantic_ref(index, aggregate.argument_ref)).kind
+            is FactLocalKind.SET
+            else _result_field(builder, argument, aggregate_fields={}),
+            filter=None
+            if aggregate.filter_ref is None or not group_fields
+            else _compile_aggregate_filter(
+                builder, index=index, aggregate_ref=ref,
+                filter_ref=aggregate.filter_ref,
+            ),
+            distinct_argument=aggregate.distinct_argument,
+            grain_fields=_aggregate_grain_fields(builder, argument),
+        )
+        for ref, aggregate in scoped_aggregates
+    )
+    suffix = "" if total_groups == 1 else f"_{position}"
+    output_relation = f"{index.requested_fact_id}.aggregate{suffix}"
+    operation_id = f"{index.requested_fact_id}.aggregate_operation{suffix}"
+    builder.operations.append(Operation(
+        id=operation_id, output_relation=output_relation,
+        spec=AggregateSpec(aggregate_input, group_fields, specs),
+    ))
+    builder.fields_by_relation[output_relation] = tuple(
+        RelationField(field_id, (FieldBindingRole.OUTPUT,))
+        for field_id in (
+            *group_fields,
+            *(aggregate_fields[ref] for ref, _ in scoped_aggregates),
+        )
+    )
+    builder.grain_by_relation[output_relation] = group_fields
+    if not group_fields:
+        builder.scalar_aggregate_outputs.update({
+            ref: NodeOutputRef(operation_id, aggregate_fields[ref])
+            for ref, _ in scoped_aggregates
+        })
+    return output_relation
+
+
 def _compile_result(
     builder: _ProgramBuilder,
     *,
@@ -1769,6 +1856,9 @@ def _compile_result(
         for requirement in index.output_requirements
         for dependency in requirement.dependencies
         if isinstance(dependency, FactLocalRef)
+    } | {
+        requirement.value_ref for requirement in index.output_requirements
+        if isinstance(requirement.value_ref, FactLocalRef)
     } | set(index.ordering_refs)
     aggregates = tuple(
         (ref, node)
@@ -1804,80 +1894,50 @@ def _compile_result(
         and isinstance(index.expression_by_ref[ref], Aggregate)
     }
     if aggregates:
-        input_groups: dict[str, list[tuple[FactLocalRef, Aggregate]]] = {}
         for position, (ref, aggregate) in enumerate(aggregates, start=1):
             aggregate_fields[ref] = f"aggregate_{position}"
-            argument = _semantic_ref(index, aggregate.argument_ref)
-            aggregate_input = (
-                _aggregate_input_relation(
+        aggregate_relations = []
+        if not group_fields:
+            ordered = _ordered_scalar_aggregates(index, aggregates)
+            for position, (ref, aggregate) in enumerate(ordered, start=1):
+                aggregate_input = _aggregate_input_relation(
                     builder, aggregate, input_relation=current, index=index
                 )
-                if not group_fields
-                else current
-            )
-            input_groups.setdefault(aggregate_input, []).append((ref, aggregate))
-        aggregate_relations = []
-        for group_position, (aggregate_input, scoped_aggregates) in enumerate(
-            input_groups.items(), start=1
-        ):
-            aggregate_input = _project_semantic_values(
-                builder,
-                input_relation=aggregate_input,
-                refs=tuple(
-                    _semantic_ref(index, aggregate.argument_ref)
-                    for _, aggregate in scoped_aggregates
-                ),
-                aggregate_fields={},
-                label=f"aggregate_arguments_{group_position}",
-            )
-            specs = tuple(
-                AggregationSpec(
-                    function=_aggregation_function(aggregate),
-                    output_field=aggregate_fields[ref],
-                    input_field=""
-                    if (argument := _semantic_ref(index, aggregate.argument_ref)).kind
-                    is FactLocalKind.SET
-                    else _result_field(builder, argument, aggregate_fields={}),
-                    filter=None
-                    if aggregate.filter_ref is None or not group_fields
-                    else _compile_aggregate_filter(
-                        builder,
-                        index=index,
-                        aggregate_ref=ref,
-                        filter_ref=aggregate.filter_ref,
-                    ),
-                    distinct_argument=aggregate.distinct_argument,
-                    grain_fields=_aggregate_grain_fields(builder, argument),
-                )
-                for ref, aggregate in scoped_aggregates
-            )
-            suffix = "" if len(input_groups) == 1 else f"_{group_position}"
-            output_relation = f"{index.requested_fact_id}.aggregate{suffix}"
-            operation_id = f"{index.requested_fact_id}.aggregate_operation{suffix}"
-            builder.operations.append(
-                Operation(
-                    id=operation_id,
-                    output_relation=output_relation,
-                    spec=AggregateSpec(aggregate_input, group_fields, specs),
-                )
-            )
-            builder.fields_by_relation[output_relation] = tuple(
-                RelationField(field_id, (FieldBindingRole.OUTPUT,))
-                for field_id in (
-                    *group_fields,
-                    *(aggregate_fields[ref] for ref, _ in scoped_aggregates),
-                )
-            )
-            builder.grain_by_relation[output_relation] = group_fields
-            if not group_fields:
-                builder.scalar_aggregate_outputs.update(
-                    {
-                        ref: NodeOutputRef(operation_id, aggregate_fields[ref])
-                        for ref, _ in scoped_aggregates
-                    }
-                )
-            aggregate_relations.append(output_relation)
+                aggregate_relations.append(_emit_aggregate_group(
+                    builder, index=index, aggregate_input=aggregate_input,
+                    scoped_aggregates=((ref, aggregate),),
+                    group_fields=(), aggregate_fields=aggregate_fields,
+                    position=position, total_groups=len(ordered),
+                ))
+        else:
+            input_groups: dict[str, list[tuple[FactLocalRef, Aggregate]]] = {}
+            for ref, aggregate in aggregates:
+                aggregate_input = current
+                input_groups.setdefault(aggregate_input, []).append((ref, aggregate))
+            for position, (aggregate_input, scoped_aggregates) in enumerate(
+                input_groups.items(), start=1
+            ):
+                aggregate_relations.append(_emit_aggregate_group(
+                    builder, index=index, aggregate_input=aggregate_input,
+                    scoped_aggregates=tuple(scoped_aggregates),
+                    group_fields=group_fields, aggregate_fields=aggregate_fields,
+                    position=position, total_groups=len(input_groups),
+                ))
         current = aggregate_relations[0]
+        if not group_fields:
+            for position, other in enumerate(aggregate_relations[1:], start=2):
+                output_relation = f"{index.requested_fact_id}.aggregate_product_{position}"
+                builder.operations.append(Operation(
+                    id=f"{output_relation}.operation",
+                    output_relation=output_relation,
+                    spec=CrossJoinSpec(current, other),
+                ))
+                builder.fields_by_relation[output_relation] = (
+                    *builder.fields_by_relation[current],
+                    *builder.fields_by_relation[other],
+                )
+                builder.grain_by_relation[output_relation] = ()
+                current = output_relation
     result_value_refs = tuple(
         dict.fromkeys(
             (
@@ -2090,6 +2150,9 @@ def _compile_semantic_ref(
 ) -> Expression:
     if ref.kind is FactLocalKind.FACT:
         return FieldRef(_compiled_field(builder, ref, branch_id=branch_id))
+    scalar_aggregate = builder.scalar_aggregate_outputs.get(ref)
+    if scalar_aggregate is not None:
+        return scalar_aggregate
     node = builder.verified.request.index.expression_by_ref.get(ref)
     if node is None:
         raise ValueError("semantic expression reference is unavailable")
