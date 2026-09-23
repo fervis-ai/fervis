@@ -29,7 +29,7 @@ from .capability_contracts import (
     CapabilityKind,
     NarrowPopulationCapability,
 )
-from .compiler_inputs import CompilerInputContext, compiler_input_context
+from .compiler_inputs import CompilerInputContext
 from .model import (
     ANSWER_PROGRAM_SCHEMA_REVISION,
     AnswerProgram,
@@ -39,20 +39,6 @@ from .model import (
     SourceContractKind,
     SourceContractPin,
 )
-from .codec import (
-    answer_program_id,
-    binding_patch_id,
-    canonical_answer_program_json,
-    canonical_answer_program_payload,
-    canonical_binding_set_json,
-    canonical_binding_patch_json,
-    canonical_contract_fingerprint,
-    canonicalize_answer_program,
-    decode_answer_program,
-    decode_binding_set,
-    decode_binding_patch,
-)
-
 __all__ = [
     "AnswerProgramContractError",
     "AnswerProgram",
@@ -86,17 +72,5 @@ __all__ = [
     "ValueExpressionOrigin",
     "ValueDependency",
     "ValueDependencyKind",
-    "answer_program_id",
-    "binding_patch_id",
-    "canonical_answer_program_json",
-    "canonical_answer_program_payload",
-    "canonical_binding_set_json",
-    "canonical_binding_patch_json",
-    "canonical_contract_fingerprint",
-    "canonicalize_answer_program",
     "canonical_fact_value",
-    "compiler_input_context",
-    "decode_answer_program",
-    "decode_binding_set",
-    "decode_binding_patch",
 ]

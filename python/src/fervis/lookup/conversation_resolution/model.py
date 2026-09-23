@@ -16,6 +16,12 @@ from fervis.lookup.clarification.model import (
 )
 
 
+class RequestShapeSource(StrEnum):
+    CURRENT = "current_clause_supplies_request"
+    ACTIVE_CLARIFICATION = "active_clarification_supplies_request"
+    PRIOR_FRAME = "prior_frame_supplies_omitted_request_parts"
+
+
 class ResolutionSourceKind(StrEnum):
     CURRENT_SPAN = "current_span"
     CONTEXT_ANCHOR = "context_anchor"
@@ -167,6 +173,8 @@ class ResolvedConversationValue:
 
 @dataclass(frozen=True)
 class ResolvedConversationClause:
+    request_shape_source: RequestShapeSource
+    request_shape_sources: tuple[ContextAnchorSource, ...]
     current_clause_text: str
     occurrence: int
     resolved_text: str
@@ -187,8 +195,15 @@ class ResolvedConversationClause:
         if len(retained_refs) != len(set(retained_refs)):
             raise ValueError("resolved clause contains duplicate retained frame parts")
 
+    @property
+    def attribution_sources(self) -> tuple[ResolutionSource, ...]:
+        return (*self.request_shape_sources, *self.retained_frame_parts,
+                *(source for value in self.values for source in value.sources))
+
     def to_model_dict(self) -> dict[str, object]:
         return {
+            "request_shape_source": self.request_shape_source.value,
+            "request_shape_sources": [source.to_model_dict() for source in self.request_shape_sources],
             "current_clause_text": self.current_clause_text,
             "occurrence": self.occurrence,
             "resolved_text": self.resolved_text,
@@ -395,10 +410,7 @@ class ConversationResolution:
         return self.frame_call is not None or any(
             source.uses_prior_context()
             for clause in self.clauses
-            for source in (
-                *clause.retained_frame_parts,
-                *(source for value in clause.values for source in value.sources),
-            )
+            for source in clause.attribution_sources
         )
 
     def to_model_dict(self) -> dict[str, Any]:

@@ -60,6 +60,7 @@ class OpenAICompatibleRequestPayload:
     max_retries: int
     timeout: float
     temperature: float
+    reasoning_effort: str | None
     prompt: str
     output_mode: ProviderOutputMode
     tool_specs: list[dict[str, Any]]
@@ -86,6 +87,7 @@ class OpenAICompatibleLoopRuntime(ConfiguredChatLoopRuntime):
             max_retries=provider_max_retries(),
             timeout=provider_timeout_seconds(),
             temperature=self.config.temperature,
+            reasoning_effort=self.config.reasoning_effort,
             prompt=request.prompt,
             output_mode=request.output_mode,
             tool_specs=[_openai_tool_spec(item) for item in request.tool_specs],
@@ -166,7 +168,7 @@ def _base_completion_kwargs(payload: OpenAICompatibleRequestPayload) -> dict[str
         if payload.output_mode == ProviderOutputMode.TOOL_CALL
         else chat_json_system_prompt(payload.system_prompt)
     )
-    return {
+    kwargs: dict[str, Any] = {
         "model": payload.model,
         token_limit_parameter: payload.max_tokens,
         "temperature": payload.temperature,
@@ -178,6 +180,9 @@ def _base_completion_kwargs(payload: OpenAICompatibleRequestPayload) -> dict[str
             },
         ],
     }
+    if payload.reasoning_effort is not None:
+        kwargs["reasoning_effort"] = payload.reasoning_effort
+    return kwargs
 
 
 def _tool_call_kwargs(payload: OpenAICompatibleRequestPayload) -> dict[str, Any]:
@@ -196,7 +201,7 @@ def _tool_call_kwargs(payload: OpenAICompatibleRequestPayload) -> dict[str, Any]
     }
 
 
-def _openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
+def openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(schema, dict):
         return schema
     if "$ref" in schema:
@@ -210,29 +215,33 @@ def _openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
         if key == "const":
             transformed["enum"] = [value]
             continue
-        if key == "oneOf" and isinstance(value, list):
+        if key == "oneOf" and isinstance(value, (list, tuple)):
             transformed["anyOf"] = [
-                _openai_strict_schema(item) if isinstance(item, dict) else item
+                openai_strict_schema(item) if isinstance(item, dict) else item
                 for item in value
             ]
             continue
         if isinstance(value, dict):
-            transformed[key] = _openai_strict_schema(value)
+            transformed[key] = openai_strict_schema(value)
             continue
-        if isinstance(value, list):
+        if isinstance(value, (list, tuple)):
             transformed[key] = [
-                _openai_strict_schema(item) if isinstance(item, dict) else item
+                openai_strict_schema(item) if isinstance(item, dict) else item
                 for item in value
             ]
             continue
         transformed[key] = value
+    if "type" not in transformed:
+        enum_type = _homogeneous_enum_type(transformed.get("enum"))
+        if enum_type is not None:
+            transformed["type"] = enum_type
     properties = transformed.get("properties")
     if not isinstance(properties, dict):
         return transformed
     original_required = set(transformed.get("required") or [])
     normalized_properties: dict[str, Any] = {}
     for name, value in properties.items():
-        child = _openai_strict_schema(value) if isinstance(value, dict) else value
+        child = openai_strict_schema(value) if isinstance(value, dict) else value
         if name not in original_required:
             child = _nullable_schema(child)
         normalized_properties[name] = child
@@ -240,6 +249,30 @@ def _openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     transformed["required"] = list(normalized_properties.keys())
     transformed["additionalProperties"] = False
     return transformed
+
+
+def _homogeneous_enum_type(values: object) -> str | None:
+    if not isinstance(values, (list, tuple)):
+        return None
+    if not values:
+        return "string"
+    value_types = {_json_scalar_type(value) for value in values}
+    value_types.discard(None)
+    if len(value_types) != 1 or any(value is None for value in values):
+        return None
+    return next(iter(value_types))
+
+
+def _json_scalar_type(value: object) -> str | None:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    return None
 
 
 def _openai_tuple_array_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -252,24 +285,24 @@ def _openai_tuple_array_schema(schema: dict[str, Any]) -> dict[str, Any]:
         if key == "const":
             transformed["enum"] = [value]
             continue
-        if key == "oneOf" and isinstance(value, list):
+        if key == "oneOf" and isinstance(value, (list, tuple)):
             transformed["anyOf"] = [
-                _openai_strict_schema(item) if isinstance(item, dict) else item
+                openai_strict_schema(item) if isinstance(item, dict) else item
                 for item in value
             ]
             continue
         if isinstance(value, dict):
-            transformed[key] = _openai_strict_schema(value)
+            transformed[key] = openai_strict_schema(value)
             continue
-        if isinstance(value, list):
+        if isinstance(value, (list, tuple)):
             transformed[key] = [
-                _openai_strict_schema(item) if isinstance(item, dict) else item
+                openai_strict_schema(item) if isinstance(item, dict) else item
                 for item in value
             ]
             continue
         transformed[key] = value
     prefix_items = [
-        _openai_strict_schema(item) if isinstance(item, dict) else item
+        openai_strict_schema(item) if isinstance(item, dict) else item
         for item in schema["prefixItems"]
     ]
     object_prefix_items = [item for item in prefix_items if isinstance(item, dict)]
@@ -308,7 +341,7 @@ def _openai_tool_spec(spec: ToolSpec) -> dict[str, Any]:
         OpenAIToolType.FUNCTION.value: {
             "name": spec.name,
             "description": spec.description,
-            "parameters": _openai_strict_schema(spec.input_schema),
+            "parameters": openai_strict_schema(spec.input_schema),
             "strict": spec.strict,
         },
     }

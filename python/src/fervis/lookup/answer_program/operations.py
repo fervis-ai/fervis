@@ -7,13 +7,14 @@ from fervis.types.enums import StrEnum
 from typing import TypeAlias
 from typing_extensions import assert_never
 
-from fervis.lookup.answer_program.expressions import Expression, expression_input_id
-from fervis.lookup.answer_program.values import ConstantRef, ParameterRef
-from fervis.lookup.answer_program.relations import PopulationCoverageClaim
-from fervis.lookup.predicate_operators import PredicateOperator
+from fervis.lookup.answer_program.expressions import Expression, ExpressionReferences, expression_input_id, expression_references
+from fervis.lookup.answer_program.values import ConstantRef, ParameterRef, NodeOutputRef
+from fervis.lookup.answer_program.result_projection import EntityKeyProjection
 
 
 class OperationKind(StrEnum):
+    SQL_QUERY = "sql_query"
+    REFERENCE_GUARD = "reference_guard"
     FILTER = "filter"
     PROJECT = "project"
     PROJECT_TO_KEY = "project_to_key"
@@ -39,6 +40,8 @@ class AggregationFunction(StrEnum):
     MIN = "min"
     MAX = "max"
     AVG = "avg"
+    BOOL_ANY = "bool_any"
+    BOOL_ALL = "bool_all"
 
 
 class RelationRole(StrEnum):
@@ -60,13 +63,6 @@ class RelationRoleRef:
     relation_id: str
     role: RelationRole
     required_identity_fields: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class Predicate:
-    left: Expression
-    operator: PredicateOperator
-    right: Expression | None = None
 
 
 @dataclass(frozen=True)
@@ -93,14 +89,16 @@ class AggregationSpec:
     function: AggregationFunction
     output_field: str
     input_field: str = ""
+    filter: Expression | None = None
+    distinct_argument: bool = False
+    grain_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class FilterSpec:
     input_relation: str
-    predicate: Predicate
+    condition: Expression
     proof_refs: tuple[str, ...] = ()
-    population_coverage_claims: tuple[PopulationCoverageClaim, ...] = ()
     kind: OperationKind = field(default=OperationKind.FILTER, init=False)
 
 
@@ -115,7 +113,18 @@ class ProjectSpec:
 class ProjectToKeySpec:
     input_relation: str
     key_fields: tuple[str, ...]
+    carry_fields: tuple[str, ...] = ()
     kind: OperationKind = field(default=OperationKind.PROJECT_TO_KEY, init=False)
+
+
+class JoinMode(StrEnum):
+    INNER = "inner"
+    LEFT = "left"
+
+
+class JoinBasis(StrEnum):
+    DECLARED_IDENTITY = "declared_identity"
+    OBSERVED_EQUALITY = "observed_equality"
 
 
 @dataclass(frozen=True)
@@ -123,6 +132,8 @@ class JoinSpec:
     left: str
     right: str
     join_keys: tuple[JoinKey, ...]
+    mode: JoinMode = JoinMode.INNER
+    basis: JoinBasis = JoinBasis.DECLARED_IDENTITY
     kind: OperationKind = field(default=OperationKind.JOIN, init=False)
 
 
@@ -167,7 +178,7 @@ class UniversalConditionSpec:
     observation: RelationRoleRef
     subject_keys: tuple[JoinKey, ...]
     dimension_keys: tuple[JoinKey, ...]
-    predicate: Predicate
+    condition: Expression
     output_fields: tuple[NamedExpression, ...]
     kind: OperationKind = field(
         default=OperationKind.UNIVERSAL_CONDITION,
@@ -193,7 +204,20 @@ class Take:
     limit: Expression
 
 
-OrderSelection: TypeAlias = KeepAll | Take
+@dataclass(frozen=True)
+class AtPosition:
+    position: Expression
+
+
+OrderSelection: TypeAlias = KeepAll | Take | AtPosition
+
+
+def order_selection_expression(selection: OrderSelection) -> Expression | None:
+    if isinstance(selection, Take):
+        return selection.limit
+    if isinstance(selection, AtPosition):
+        return selection.position
+    return None
 
 
 @dataclass(frozen=True)
@@ -205,26 +229,10 @@ class OrderSpec:
 
 
 @dataclass(frozen=True)
-class ComputeInputPopulationCoverage:
-    input_id: str
-    claims: tuple[PopulationCoverageClaim, ...]
-
-    def __post_init__(self) -> None:
-        if not self.input_id:
-            raise ValueError("compute input population coverage requires input")
-
-
-@dataclass(frozen=True)
 class ComputeSpec:
     expression: Expression
     output_scalar: str = ""
-    input_population_coverage: tuple[ComputeInputPopulationCoverage, ...] = ()
     kind: OperationKind = field(default=OperationKind.COMPUTE, init=False)
-
-    def __post_init__(self) -> None:
-        input_ids = tuple(item.input_id for item in self.input_population_coverage)
-        if len(set(input_ids)) != len(input_ids):
-            raise ValueError("compute input population coverage must be unique")
 
 
 def compute_value_input_id(expression: Expression) -> str:
@@ -233,8 +241,127 @@ def compute_value_input_id(expression: Expression) -> str:
     raise ValueError("compute input coverage requires a parameter or constant")
 
 
+@dataclass(frozen=True)
+class SqlColumnBinding:
+    name: str
+    field_id: str
+
+
+@dataclass(frozen=True)
+class SqlRelationInput:
+    name: str
+    relation_id: str
+    columns: tuple[SqlColumnBinding, ...]
+
+    def __post_init__(self):
+        names = tuple(item.name.casefold() for item in self.columns)
+        if not self.name or not self.relation_id or len(set(names)) != len(names):
+            raise ValueError('SQL relation input requires unique named columns')
+        if any(not item.name or not item.field_id for item in self.columns):
+            raise ValueError('SQL column binding is incomplete')
+
+
+@dataclass(frozen=True)
+class SqlNamedInput:
+    name: str
+    expression: Expression
+
+
+SQL_VALUE_TYPES = ("integer", "number", "string", "boolean", "date", "datetime", "uuid")
+
+
+@dataclass(frozen=True)
+class SqlOutputField:
+    id: str
+    value_type: str
+
+    def __post_init__(self):
+        if self.value_type not in SQL_VALUE_TYPES:
+            raise ValueError("SQL output has an unsupported scalar type")
+
+
+@dataclass(frozen=True)
+class SqlQuerySpec:
+    query: str
+    inputs: tuple[SqlRelationInput, ...]
+    outputs: tuple[SqlOutputField, ...]
+    parameters: tuple[SqlNamedInput, ...] = ()
+    scalar: bool = False
+    # Fixed lexical inputs interpreted against catalog semantics when authoring
+    # this query. They carry evidence and cannot be rebound as runtime values.
+    meaning_inputs: tuple[ParameterRef, ...] = ()
+    entity_keys: tuple[EntityKeyProjection, ...] = ()
+    lookup_input_ref: str = ""
+    timezone: str = "UTC"
+    kind: OperationKind = field(default=OperationKind.SQL_QUERY, init=False)
+
+    def __post_init__(self):
+        if not isinstance(self.lookup_input_ref, str) or (self.lookup_input_ref and not self.lookup_input_ref.strip()):
+            raise ValueError('Literal lookup input ref must be a nonempty string when present')
+        if not isinstance(self.timezone, str) or not self.timezone.strip():
+            raise ValueError("SQL timezone must be a nonempty name")
+        if not self.query.strip() or not self.inputs or not self.outputs:
+            raise ValueError('SQL operation requires a query, input views and output fields')
+        for names in (tuple(item.name for item in self.inputs),
+                      tuple(item.name for item in self.parameters),
+                      tuple(item.id for item in self.outputs)):
+            if len(names) != len(set(names)) or any(not name for name in names):
+                raise ValueError('SQL operation names must be nonempty and unique')
+
+
+@dataclass(frozen=True)
+class ObservedReferenceProperty:
+    field_id: str
+    source_field_ref: str
+    type_name: str
+    label: str
+
+    def __post_init__(self):
+        if not all((self.field_id, self.source_field_ref, self.type_name, self.label)):
+            raise ValueError("Observed reference property requires a typed source field")
+
+
+@dataclass(frozen=True)
+class ReferenceGuardSpec:
+    input_relation: str
+    fields: tuple[str, ...]
+    reference_input_ref: str
+    reference_operand: str = ""
+    entity_key: EntityKeyProjection | None = None
+    occurrence_fields: tuple[str, ...] = ()
+    observed_source_ref: str = ""
+    observed_properties: tuple[ObservedReferenceProperty, ...] = ()
+    kind: OperationKind = field(default=OperationKind.REFERENCE_GUARD, init=False)
+
+    def __post_init__(self):
+        if (not isinstance(self.input_relation, str) or not self.input_relation.strip()
+                or not isinstance(self.reference_input_ref, str) or not self.reference_input_ref.strip() or not self.fields
+                or len(self.fields) != len(set(self.fields)) or any(not field for field in self.fields)):
+            raise ValueError('Reference guard requires an input, owning reference and unique observed fields')
+        if not isinstance(self.reference_operand, str):
+            raise ValueError('Reference guard operand must be text')
+        if self.occurrence_fields and (
+            self.entity_key is not None or len(set(self.occurrence_fields)) != len(self.occurrence_fields)
+            or not set(self.occurrence_fields) < set(self.fields)
+        ):
+            raise ValueError('Occurrence guards require observed properties and distinct local occurrence fields')
+
+        if self.entity_key is not None and set(self.fields) != {item.field_id for item in self.entity_key.components}:
+            raise ValueError('Nominal reference guard must preserve its complete key')
+        if self.observed_properties and (
+            self.entity_key is not None or not self.occurrence_fields
+            or not self.observed_source_ref
+            or not {item.field_id for item in self.observed_properties} <= set(self.fields) - set(self.occurrence_fields)
+            or len({item.field_id for item in self.observed_properties}) != len(self.observed_properties)
+            or len({item.source_field_ref for item in self.observed_properties}) != len(self.observed_properties)
+        ):
+            raise ValueError('Observed reference candidates require distinct carried source properties')
+
+
 OperationSpec: TypeAlias = (
-    FilterSpec
+    ReferenceGuardSpec
+    | SqlQuerySpec
+    | FilterSpec
     | ProjectSpec
     | ProjectToKeySpec
     | JoinSpec
@@ -280,6 +407,7 @@ def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
             RoleExpandSpec,
             AggregateSpec,
             OrderSpec,
+            ReferenceGuardSpec,
         ),
     ):
         return (spec.input_relation,)
@@ -297,7 +425,35 @@ def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
         )
     if isinstance(spec, ComputeSpec):
         return ()
+    if isinstance(spec, SqlQuerySpec):
+        return tuple(dict.fromkeys(item.relation_id for item in spec.inputs))
     assert_never(spec)
+
+
+def operation_expression_references(spec: OperationSpec) -> tuple[ExpressionReferences, ...]:
+    expressions: tuple[Expression, ...]
+    if isinstance(spec, SqlQuerySpec):
+        expressions = (*tuple(item.expression for item in spec.parameters), *spec.meaning_inputs)
+    elif isinstance(spec, ComputeSpec):
+        expressions = (spec.expression,)
+    elif isinstance(spec, FilterSpec):
+        expressions = (spec.condition,)
+    elif isinstance(spec, ProjectSpec):
+        expressions = tuple(output.expression for output in spec.outputs)
+    elif isinstance(spec, UniversalConditionSpec):
+        expressions = (spec.condition,)
+    elif isinstance(spec, AggregateSpec):
+        expressions = tuple(item.filter for item in spec.aggregations if item.filter is not None)
+    elif isinstance(spec, OrderSpec):
+        expression = order_selection_expression(spec.selection)
+        expressions = () if expression is None else (expression,)
+    else:
+        expressions = ()
+    return tuple(expression_references(expression) for expression in expressions)
+
+
+def operation_node_output_refs(spec: OperationSpec) -> tuple[NodeOutputRef, ...]:
+    return tuple(dict.fromkeys(ref for references in operation_expression_references(spec) for ref in references.outputs))
 
 
 def operation_scalar_output_ids(spec: OperationSpec) -> tuple[str, ...]:
@@ -305,6 +461,10 @@ def operation_scalar_output_ids(spec: OperationSpec) -> tuple[str, ...]:
 
     if isinstance(spec, ComputeSpec):
         return (spec.output_scalar,) if spec.output_scalar else ()
+    if isinstance(spec, SqlQuerySpec) and spec.scalar:
+        return tuple(item.id for item in spec.outputs)
+    if isinstance(spec, ReferenceGuardSpec):
+        return spec.fields
     if isinstance(spec, AggregateSpec) and not spec.group_by:
         return tuple(aggregation.output_field for aggregation in spec.aggregations)
     return ()

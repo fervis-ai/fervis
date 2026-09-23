@@ -16,11 +16,6 @@ input:
         sourceKind: requested_fact
         outcome: answered
         sourceQuestion: How many stores are open?
-        provenance:
-          question_contract:
-            answer_requests:
-              - id: fact_1
-                answer_fact: count open stores
     - memory_artifact_id: mem_fact_result_1
       run_id: run_1
       source_kind: fact_result
@@ -45,11 +40,6 @@ expect:
       - artifactId: mem_requested_fact_1
         outcome: answered
         sourceQuestion: How many stores are open?
-        provenance:
-          question_contract:
-            answer_requests:
-              - id: fact_1
-                answer_fact: count open stores
       - artifactId: mem_fact_result_1
         outcome: answered
         sourceQuestion: How many stores are open?

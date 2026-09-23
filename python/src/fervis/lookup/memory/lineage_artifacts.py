@@ -358,38 +358,11 @@ def _memory_provenance(
     }
     if requested_fact_key:
         provenance["requestedFactKey"] = requested_fact_key
-    if question_contract is not None:
-        provenance["question_contract"] = _question_contract_memory_payload(
-            question_contract,
-            requested_fact_key=requested_fact_key,
-        )
     if conversation_resolution_activation:
         provenance["conversation_resolution_activation"] = dict(
             conversation_resolution_activation
         )
     return provenance
-
-
-def _question_contract_memory_payload(
-    question_contract: QuestionContract,
-    *,
-    requested_fact_key: str,
-) -> dict[str, Any]:
-    requested_fact = next(
-        (
-            fact
-            for fact in question_contract.requested_facts
-            if fact.id == requested_fact_key
-        ),
-        None,
-    )
-    if requested_fact is None:
-        raise ValueError("memory artifact references unknown requested fact")
-    scoped_contract = QuestionContract(
-        question_inputs=question_contract.inputs_for_fact(requested_fact_key),
-        requested_facts=(requested_fact,),
-    )
-    return dict(scoped_contract.to_model_dict())
 
 
 def _answer_output_ids_by_requested_fact(

@@ -1,4 +1,4 @@
-"""Render-reference checks for fact-plan verification."""
+"""Result-projection checks for answer-program verification."""
 
 from ._shared import (
     AnswerProgram,
@@ -8,17 +8,20 @@ from ._shared import (
     VerificationError,
 )
 from .contract_types import (
-    PopulationCoverage,
     ProofLineage,
     RelationContract,
     RelationEntityKey,
     RelationEntityKeyComponent,
+    RelationSemanticGuarantee,
 )
 from .contracts import _scalar_contracts
 from .operations import _operation_input_refs
-from .scalars import _operation_node_output_refs, _operation_scalar_inputs
+from .scalars import _operation_scalar_inputs
+from fervis.lookup.answer_program.operations import operation_node_output_refs
 from fervis.lookup.plan_execution.operation_runtime import ResolvedOperationInput
 from fervis.lookup.answer_program.result_projection import (
+    ResultProjectionError,
+    verify_entity_display_type,
     RelationResultOutput,
     ScalarResultOutput,
 )
@@ -38,6 +41,32 @@ def _result_output_fact_refs(
     return {output_id: proof.fulfillment_refs() for output_id, proof in proofs.items()}
 
 
+def _result_output_semantic_guarantees(
+    answer: AnswerProgram,
+    *,
+    relation_contracts: dict[str, RelationContract],
+    operation_inputs: tuple[ResolvedOperationInput, ...],
+) -> dict[str, dict[str, RelationSemanticGuarantee]]:
+    output = {
+        item.id: dict(relation_contracts[item.relation_id].semantic_guarantees)
+        for item in answer.result_projection.relation_outputs
+        if item.relation_id in relation_contracts
+    }
+    scalar_contracts = _scalar_contracts(
+        answer,
+        relation_contracts=relation_contracts,
+        operation_inputs=operation_inputs,
+    )
+    output.update(
+        {
+            item.id: dict(scalar_contracts[item.scalar_id].semantic_guarantees)
+            for item in answer.result_projection.scalar_outputs
+            if item.scalar_id in scalar_contracts
+        }
+    )
+    return output
+
+
 def _result_output_proofs(
     answer: AnswerProgram,
     *,
@@ -49,7 +78,7 @@ def _result_output_proofs(
         contract = relation_contracts.get(result_output.relation_id)
         if contract is None:
             continue
-        field_ids = _result_output_field_ids(result_output)
+        field_ids = result_output.field_ids
         field_proofs = tuple(
             contract.field_proofs.get(field_id, ProofLineage())
             for field_id in field_ids
@@ -57,10 +86,7 @@ def _result_output_proofs(
         proofs[result_output.id] = ProofLineage(
             value_refs=frozenset(
                 ref for field_proof in field_proofs for ref in field_proof.value_refs
-            ),
-            population_coverage=PopulationCoverage.guaranteed_by_every(
-                tuple(field_proof.population_coverage for field_proof in field_proofs)
-            ),
+            )
         )
     scalar_contracts = _scalar_contracts(
         answer,
@@ -84,13 +110,17 @@ def _verify_result_references(
     result_outputs = tuple(answer.result_projection.relation_outputs)
     for relation_output in result_outputs:
         contract = relation_contracts.get(relation_output.relation_id)
-        field_ids = _result_output_field_ids(relation_output)
+        field_ids = relation_output.field_ids
         if contract is None or any(
             field_id not in contract.fields for field_id in field_ids
         ):
             raise VerificationError(
                 f"result output {relation_output.id} references unknown output field"
             )
+        try:
+            verify_entity_display_type(relation_output.display_field_id, contract.field_types)
+        except ResultProjectionError as exc:
+            raise VerificationError(str(exc)) from exc
         if relation_output.entity_key is not None:
             _verify_declared_entity_key(relation_output, contract=contract)
         if relation_output.entity_key is None and any(
@@ -147,9 +177,12 @@ def _verify_result_output_targets(
         for operation in answer.operations
         if operation.output_relation
     }
-    terminal_outputs = operation_outputs - set(
+    available_relations = {
+        relation.id for relation in answer.relations
+    } | operation_outputs
+    terminal_outputs = available_relations - set(
         _operation_input_refs_for_all(answer.operations)
-    )
+    ) - {relation.source.argument_relation_id for relation in answer.relations}
     result_outputs = tuple(answer.result_projection.relation_outputs)
     scalar_outputs = answer.result_projection.scalar_outputs
     _verify_unique_result_output_ids(result_outputs, scalar_outputs)
@@ -161,10 +194,10 @@ def _verify_result_output_targets(
         result_relations = {
             relation_output.relation_id for relation_output in result_outputs
         }
-        unknown_result_relations = result_relations - operation_outputs
+        unknown_result_relations = result_relations - available_relations
         if unknown_result_relations:
             raise VerificationError(
-                f"result output {result_outputs[0].id} references unknown operation output"
+                f"result output {result_outputs[0].id} references unknown relation"
             )
         non_terminal_result_relations = result_relations - terminal_outputs
         if non_terminal_result_relations:
@@ -240,13 +273,7 @@ def _operation_input_refs_for_all(operations: tuple[Operation, ...]) -> tuple[st
         refs.extend(_operation_input_refs(operation))
         refs.extend(
             output_relation_by_node_id[reference.node_id]
-            for reference in _operation_node_output_refs(operation)
+            for reference in operation_node_output_refs(operation.spec)
             if reference.node_id in output_relation_by_node_id
         )
     return tuple(refs)
-
-
-def _result_output_field_ids(output: RelationResultOutput) -> tuple[str, ...]:
-    if output.entity_key is not None:
-        return tuple(component.field_id for component in output.entity_key.components)
-    return (output.field_id,)

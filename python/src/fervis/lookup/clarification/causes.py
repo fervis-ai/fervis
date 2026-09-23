@@ -16,7 +16,6 @@ from fervis.lookup.clarification.model import (
     ClarificationSubjectKind,
     ConversationInterpretationCandidate,
     ConversationResolutionContinuation,
-    FactPlanningCatalogInputContinuation,
     GroundingContinuation,
     QuestionContractContinuation,
     SourceBindingCatalogInputContinuation,
@@ -73,10 +72,7 @@ class MissingCatalogRequiredValue:
     requested_fact_id: str
     required_input_id: str
     label: str
-    continuation: (
-        SourceBindingCatalogInputContinuation
-        | FactPlanningCatalogInputContinuation
-    )
+    continuation: SourceBindingCatalogInputContinuation
     evidence: tuple[ClarificationEvidence, ...] = ()
     proof_refs: tuple[str, ...] = ()
 
@@ -88,10 +84,7 @@ class MissingCatalogChoice:
     required_choice_input_id: str
     label: str
     options: tuple[ClarificationOption, ...]
-    continuation: (
-        SourceBindingCatalogInputContinuation
-        | FactPlanningCatalogInputContinuation
-    )
+    continuation: SourceBindingCatalogInputContinuation
     evidence: tuple[ClarificationEvidence, ...] = ()
     proof_refs: tuple[str, ...] = ()
 
@@ -261,14 +254,9 @@ def _target_reference_clarification(
 
 
 def _catalog_owner(
-    continuation: (
-        SourceBindingCatalogInputContinuation
-        | FactPlanningCatalogInputContinuation
-    ),
+    continuation: SourceBindingCatalogInputContinuation,
 ) -> ClarificationOwner:
-    if isinstance(continuation, SourceBindingCatalogInputContinuation):
-        return ClarificationOwner.SOURCE_BINDING
-    return ClarificationOwner.FACT_PLANNING
+    return ClarificationOwner.SOURCE_BINDING
 
 
 def _target_reference_candidate_evidence(

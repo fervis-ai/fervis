@@ -257,10 +257,8 @@ def test_http_read_executor_preserves_non_json_response_body(monkeypatch) -> Non
     )
 
     assert result.response_status == 403
-    assert result.response_body == {
-        "contentType": "text/plain; charset=utf-8",
-        "text": "forbidden",
-    }
+    assert result.response_format.value == "text"
+    assert result.response_body == "forbidden"
 
 
 @pytest.mark.parametrize(

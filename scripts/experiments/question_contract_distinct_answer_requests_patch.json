@@ -1,9 +1,0 @@
-{
-  "prompt_replacements": [
-    {
-      "old": "Each answer_request describes exactly one complete requested fact.",
-      "new": "Each answer_request describes one distinct complete requested fact; never repeat the same fact.",
-      "expected_count": 1
-    }
-  ]
-}

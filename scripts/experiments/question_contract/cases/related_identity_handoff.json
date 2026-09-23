@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "\"input_kind\": \"IDENTITY_REFERENCE\",\n      \"input_ref\":",
+      "new": "\"input_kind\": \"IDENTITY_REFERENCE\",\n      \"row_identity_basis\": \"The supplied entity is a different entity related to each qualifying row.\",\n      \"row_identity_role\": \"related_entity_identity\",\n      \"input_ref\":",
+      "expected_count": 1
+    }
+  ]
+}

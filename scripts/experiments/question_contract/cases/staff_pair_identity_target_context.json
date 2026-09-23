@@ -1,0 +1,90 @@
+{
+  "question_context_texts": [
+    "How many sales did the staff members with ids: 51515151-0000-0000-0002-000000000001 and 51515151-0000-0000-0002-000000000002 sell each today?"
+  ],
+  "frame_payload": {
+    "decision_basis": "The question asks for one result row per specified staff member, with each row giving that staff member’s sales count for today. The concrete staff ids and the today time scope constrain the candidate sales records; the staff member identity is the grouping dimension; the requested unknown is the count of sales per staff member.",
+    "outcome": {
+      "kind": "question_meaning",
+      "answer_requests": [
+        {
+          "result_kind": "grouped_results",
+          "qualifying_row_kind": {
+            "meaning": "sales record",
+            "origin": {
+              "kind": "question"
+            }
+          },
+          "grouping_meanings": [
+            {
+              "meaning": "staff member",
+              "origin": {
+                "kind": "question"
+              },
+              "grouping_kind": "related_entity_identity"
+            }
+          ],
+          "return_request_basis": "Return each staff member's number of sales today.",
+          "returned_result": {
+            "kind": "identities_and_values"
+          },
+          "answer_values": [
+            {
+              "value_ref": "v1",
+              "value_kind_basis": "The answer states the sales count value.",
+              "value_kind": "value",
+              "meaning": "number of sales",
+              "origin": {
+                "kind": "question"
+              }
+            }
+          ],
+          "returned_value_refs": [
+            "v1"
+          ],
+          "ordering_value_refs": [],
+          "selection": {
+            "kind": "all_results"
+          },
+          "relational_shape": "ordinary"
+        }
+      ],
+      "supplied_values": [
+        {
+          "meaning": "staff member id",
+          "denotation_basis": "the ids named in the question",
+          "entity_reference": {
+            "instance_kind": "staff member",
+            "value": {
+              "operands": [
+                "51515151-0000-0000-0002-000000000001",
+                "51515151-0000-0000-0002-000000000002"
+              ],
+              "origin": {
+                "kind": "question"
+              }
+            }
+          }
+        },
+        {
+          "meaning": "today",
+          "denotation_basis": "the time expression named in the question",
+          "non_entity_value": {
+            "value": {
+              "operands": [
+                "today"
+              ],
+              "value_type": {
+                "kind": "temporal_scope"
+              },
+              "origin": {
+                "kind": "question"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "reference_identifier_set": "grouping"
+}

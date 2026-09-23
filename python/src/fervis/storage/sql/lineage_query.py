@@ -461,9 +461,9 @@ def _requested_fact_row(row: dict[str, Any]) -> RequestedFactRow:
         produced_by_step_id=str(row["produced_by_step_id"]),
         fact_key=str(row["fact_key"]),
         description=str(row["description"]),
-        answer_expression_family=str(row["answer_expression_family"]),
+        requested_fact_fingerprint=str(row["requested_fact_fingerprint"]),
         requested_fact_json=_dict(row["requested_fact_json"]),
-        answer_requests_json=_dict(row["answer_requests_json"]),
+        inputs_json=_dict(row["inputs_json"]),
     )
 
 

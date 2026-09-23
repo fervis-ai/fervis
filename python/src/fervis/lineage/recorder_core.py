@@ -592,10 +592,13 @@ def _require_source_read_step(*, step_key: str, kind: str, label: str) -> None:
         RunStepKey.READ_ELIGIBILITY.value,
     }:
         return
-    if kind == RunStepKind.DETERMINISTIC.value and step_key == RunStepKey.EXECUTE.value:
+    if kind == RunStepKind.DETERMINISTIC.value and step_key in {
+        RunStepKey.EXECUTE.value,
+        RunStepKey.SOURCE_INSPECTION.value,
+    }:
         return
     raise LineageRecorderConflict(
-        f"{label} cannot own source reads; expected grounding, read eligibility, or execute"
+        f"{label} cannot own source reads; expected grounding, read eligibility, source inspection, or execute"
     )
 
 

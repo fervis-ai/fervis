@@ -1,16 +1,3 @@
-from fervis.lookup.question_contract import (
-    AnswerPopulationMembershipTestKind,
-    AnswerPopulationMembershipTestPolarity,
-    KnownInputSource,
-    LiteralInputRole,
-    QuestionContract,
-    RequestedFact,
-    RequestedFactAnswerOutput,
-    RequestedFactAnswerPopulation,
-    RequestedFactAnswerPopulationMembershipTest,
-    RequestedFactKnownInput,
-    RequestedFactLiteralInput,
-)
 from fervis.lookup.relation_catalog import (
     CandidateKey,
     CandidateKeyComponent,
@@ -25,241 +12,6 @@ from fervis.lookup.relation_catalog import (
     RowCardinality,
     RowPath,
 )
-
-
-def _reference_input(
-    input_id: str,
-    text: str,
-    *,
-    value_meaning_hint: str = "",
-    resolved_value_text: str | None = None,
-    field_label_text: str = "",
-) -> RequestedFactKnownInput:
-    return RequestedFactLiteralInput(
-        id=input_id,
-        source=KnownInputSource.QUESTION_CONTEXT,
-        text=text,
-        resolved_value_text=resolved_value_text or text,
-        field_label_text=field_label_text,
-        value_meaning_hint=value_meaning_hint,
-        role=LiteralInputRole.REFERENCE_VALUE,
-    )
-
-
-def _time_input(input_id: str, text: str) -> RequestedFactKnownInput:
-    return RequestedFactLiteralInput(
-        id=input_id,
-        source=KnownInputSource.QUESTION_CONTEXT,
-        text=text,
-        resolved_value_text=text,
-        role=LiteralInputRole.TIME_VALUE,
-    )
-
-
-def _endpoint_result(response_body):
-    return {
-        "responseStatus": 200,
-        "responseBody": response_body,
-    }
-
-
-def _question_contract(
-    text: str,
-    *,
-    description: str = "",
-) -> QuestionContract:
-    return QuestionContract(
-        requested_facts=(
-            RequestedFact(
-                id="fact_1",
-                description="sales total",
-                answer_outputs=(
-                    RequestedFactAnswerOutput(
-                        id="total_sales",
-                        role="ANSWER_VALUE",
-                        description="total sales",
-                    ),
-                ),
-                known_inputs=(
-                    _reference_input(
-                        "input_location",
-                        text,
-                        value_meaning_hint=description,
-                    ),
-                ),
-            ),
-        )
-    )
-
-
-def _city_question_contract(text: str) -> QuestionContract:
-    return QuestionContract(
-        requested_facts=(
-            RequestedFact(
-                id="fact_1",
-                description="count of stores in city",
-                answer_population=RequestedFactAnswerPopulation(
-                    counted_unit="store",
-                    membership_tests=(
-                        RequestedFactAnswerPopulationMembershipTest(
-                            id="test_1",
-                            kind=AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY,
-                            polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
-                            test_question="Is the row a store?",
-                        ),
-                    ),
-                ),
-                answer_outputs=(
-                    RequestedFactAnswerOutput(
-                        id="answer_1",
-                        role="ANSWER_VALUE",
-                        description="number of stores",
-                    ),
-                ),
-                known_inputs=(
-                    _reference_input(
-                        "input_city",
-                        text,
-                        value_meaning_hint="city",
-                    ),
-                ),
-            ),
-        )
-    )
-
-
-def _staff_question_contract(
-    text: str,
-    *,
-    description: str = "",
-    resolved_value_text: str | None = None,
-    field_label_text: str = "",
-) -> QuestionContract:
-    return QuestionContract(
-        requested_facts=(
-            RequestedFact(
-                id="fact_1",
-                description="staff sales total",
-                answer_outputs=(
-                    RequestedFactAnswerOutput(
-                        id="total_sales",
-                        role="ANSWER_VALUE",
-                        description="total sales",
-                    ),
-                ),
-                known_inputs=(
-                    _reference_input(
-                        "input_staff",
-                        text,
-                        value_meaning_hint=description,
-                        resolved_value_text=resolved_value_text,
-                        field_label_text=field_label_text,
-                    ),
-                ),
-            ),
-        )
-    )
-
-
-def _shared_staff_question_contract(text: str) -> QuestionContract:
-    staff = _reference_input("input_staff", text)
-    fact_1 = RequestedFact(
-        id="fact_1",
-        description="staff sales total",
-        answer_outputs=(
-            RequestedFactAnswerOutput(
-                id="total_sales",
-                role="ANSWER_VALUE",
-                description="total sales",
-            ),
-        ),
-        known_inputs=(staff,),
-        input_refs=("input_staff",),
-    )
-    fact_2 = RequestedFact(
-        id="fact_2",
-        description="store associated with staff sales",
-        answer_outputs=(
-            RequestedFactAnswerOutput(
-                id="store",
-                role="ANSWER_VALUE",
-                description="store",
-            ),
-        ),
-        known_inputs=(staff,),
-        input_refs=("input_staff",),
-    )
-    return QuestionContract(
-        question_inputs=(staff,),
-        requested_facts=(fact_1, fact_2),
-    )
-
-
-def _staff_question_contract_with_resolved_value_text(
-    *,
-    reference_text: str,
-    resolved_value_text: str,
-) -> QuestionContract:
-    return QuestionContract(
-        requested_facts=(
-            RequestedFact(
-                id="fact_1",
-                description="staff ID",
-                answer_outputs=(
-                    RequestedFactAnswerOutput(
-                        id="staff_id",
-                        role="ANSWER_VALUE",
-                        description="staff ID",
-                    ),
-                ),
-                known_inputs=(
-                    _reference_input(
-                        "input_staff",
-                        reference_text,
-                        resolved_value_text=resolved_value_text,
-                    ),
-                ),
-            ),
-        )
-    )
-
-
-def _time_question_contract(text: str) -> QuestionContract:
-    return QuestionContract(
-        requested_facts=(
-            RequestedFact(
-                id="fact_1",
-                description="sales total",
-                answer_outputs=(
-                    RequestedFactAnswerOutput(
-                        id="total_sales",
-                        role="ANSWER_VALUE",
-                        description="total sales",
-                    ),
-                ),
-                known_inputs=(_time_input("input_date", text),),
-            ),
-        )
-    )
-
-
-def _quarter_question_contract(text: str) -> QuestionContract:
-    return QuestionContract(
-        requested_facts=(
-            RequestedFact(
-                id="fact_1",
-                description="sales total",
-                answer_outputs=(
-                    RequestedFactAnswerOutput(
-                        id="total_sales",
-                        role="ANSWER_VALUE",
-                        description="total sales",
-                    ),
-                ),
-                known_inputs=(_time_input("input_date", text),),
-            ),
-        )
-    )
 
 
 def _candidate_key(
@@ -824,6 +576,50 @@ def _staff_read() -> EndpointRead:
                 "field.data.first_name",
                 "field.data.last_name",
             ),
+        ),
+    )
+
+
+def _staff_detail_read() -> EndpointRead:
+    return EndpointRead(
+        id="get_staff_detail",
+        endpoint_name="get_staff_detail",
+        params=(
+            CatalogParam(
+                ref="get_staff_detail.path.staff_id",
+                name="staff_id",
+                source=ParamSource.PATH,
+                type="string",
+                required=True,
+                entity_target=_entity_target("staff", "staff_id"),
+            ),
+        ),
+        row_paths=(
+            RowPath(
+                id="root",
+                path="root",
+                cardinality=RowCardinality.ONE,
+            ),
+        ),
+        fields=(
+            CatalogField(
+                ref="field.staff_id",
+                path="staff_id",
+                row_path_id="root",
+                type="string",
+            ),
+            CatalogField(
+                ref="field.full_name",
+                path="full_name",
+                row_path_id="root",
+                type="string",
+            ),
+        ),
+        candidate_keys=_candidate_key(
+            "staff",
+            "staff_id",
+            "field.staff_id",
+            context_field_refs=("field.full_name",),
         ),
     )
 

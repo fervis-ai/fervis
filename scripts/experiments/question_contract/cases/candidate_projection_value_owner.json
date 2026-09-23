@@ -1,0 +1,55 @@
+{
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/$defs/answer_request_fact_1/properties/outputs/properties/requested_value_outputs/items/properties/expression/anyOf",
+      "value": [
+        {
+          "$ref": "#/$defs/value_expression_3"
+        },
+        {
+          "$ref": "#/$defs/condition_expression_3"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "fact"
+              ]
+            },
+            "identity_path": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "related_instance"
+                  ]
+                },
+                "association_ref": {
+                  "type": "string",
+                  "pattern": "^a[1-9][0-9]*$"
+                }
+              },
+              "required": [
+                "kind",
+                "association_ref"
+              ]
+            },
+            "origin": {
+              "$ref": "#/$defs/source_origin"
+            }
+          },
+          "required": [
+            "kind",
+            "identity_path",
+            "origin"
+          ]
+        }
+      ]
+    }
+  ]
+}

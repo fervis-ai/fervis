@@ -56,3 +56,8 @@ def test_strip_null_properties_selects_array_branch_under_one_of():
 
     assert normalized == {"items": [{"kind": "beta"}]}
     validate(instance=normalized, schema=schema)
+
+
+def test_required_nullable_enum_keeps_its_explicit_null_decision():
+    schema = {'type': 'object', 'properties': {'source_ref': {'enum': ['source_1', None]}}, 'required': ['source_ref'], 'additionalProperties': False}
+    assert strip_null_properties({'source_ref': None}, schema=schema) == {'source_ref': None}

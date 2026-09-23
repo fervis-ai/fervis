@@ -35,7 +35,6 @@ describe("ExplanationProof", () => {
         run={runWithLineageSteps(
           [
             semanticLineageStep("question_contract", {
-              groundingResults: [],
               knownInputs: [
                 {
                   description: "store",
@@ -56,7 +55,6 @@ describe("ExplanationProof", () => {
           ],
           [
             semanticLineageStep("question_contract", {
-              groundingResults: [],
               knownInputs: [
                 {
                   description: "store",
@@ -84,73 +82,57 @@ describe("ExplanationProof", () => {
     expect(screen.getByText("Sales at ABC Mall this month")).toBeInTheDocument();
   });
 
-  it("shows semantic resolver and grounding signals without leaking generic context", () => {
+  it("shows resource recall and resolver candidates at their owning steps", () => {
     render(
       <ExplanationProof
         mode="verbose"
         run={runWithLineageSteps(
           [
             semanticLineageStep("query_enrichment", {
-              groundingResults: [],
+              knownInputs: [],
+              requestedFacts: [],
+              resourceRecalls: [
+                {
+                  inputUseRef: "fact_1:identity:input_store",
+                  resourceName: "location"
+                }
+              ]
+            }),
+            semanticLineageStep("grounding", {
               knownInputs: [],
               requestedFacts: [],
               resolverCandidates: [
                 {
-                  basis: "location can identify ABC Mall because target meaning is store.",
+                  basis: "The route can resolve the named location.",
                   inputId: "fact_1_entity_1",
                   resolverLabel: "List Location List",
                   resolverReadId: "list_location_list"
                 }
               ]
-            }),
-            semanticLineageStep("grounding", {
-              groundingResults: [
-                {
-                  inputId: "fact_1_entity_1",
-                  inputText: "ABC Mall",
-                  entityKind: "location",
-                  matchedField: "location_id",
-                  matchedLabel: "ABC Mall",
-                  matchedValue: "60606060-0000-0000-0001-000000000001",
-                  resolverLabel: "List Location List",
-                  resolverReadId: "list_location_list"
-                }
-              ],
-              knownInputs: [],
-              requestedFacts: [],
-              resolverCandidates: []
             })
           ],
           [
             semanticLineageStep("query_enrichment", {
-              groundingResults: [],
+              knownInputs: [],
+              requestedFacts: [],
+              resourceRecalls: [
+                {
+                  inputUseRef: "fact_1:identity:input_store",
+                  resourceName: "location"
+                }
+              ]
+            }),
+            semanticLineageStep("grounding", {
               knownInputs: [],
               requestedFacts: [],
               resolverCandidates: [
                 {
-                  basis: "location can identify ABC Mall because target meaning is store.",
+                  basis: "The route can resolve the named location.",
                   inputId: "fact_1_entity_1",
                   resolverLabel: "List Location List",
                   resolverReadId: "list_location_list"
                 }
               ]
-            }),
-            semanticLineageStep("grounding", {
-              groundingResults: [
-                {
-                  inputId: "fact_1_entity_1",
-                  inputText: "ABC Mall",
-                  entityKind: "location",
-                  matchedField: "location_id",
-                  matchedLabel: "ABC Mall",
-                  matchedValue: "60606060-0000-0000-0001-000000000001",
-                  resolverLabel: "List Location List",
-                  resolverReadId: "list_location_list"
-                }
-              ],
-              knownInputs: [],
-              requestedFacts: [],
-              resolverCandidates: []
             })
           ]
         )}
@@ -158,18 +140,15 @@ describe("ExplanationProof", () => {
     );
 
     expect(screen.getByText("Query Enrichment")).toBeInTheDocument();
-    expect(screen.getByText("Resolver")).toBeInTheDocument();
-    expect(screen.getByText(/List Location List:/)).toBeInTheDocument();
+    expect(screen.getByText("Resource recall")).toBeInTheDocument();
+    expect(screen.getByText("Location")).toBeInTheDocument();
     expect(screen.getByText("Grounding")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "\"ABC Mall\": Location (location_id: 60606060-0000-0000-0001-000000000001 via List Location List)"
-      )
-    ).toBeInTheDocument();
+    expect(screen.getByText("Resolver candidate")).toBeInTheDocument();
+    expect(screen.getByText(/List Location List:/)).toBeInTheDocument();
     expect(screen.queryByText("Business context")).not.toBeInTheDocument();
   });
 
-  it("keeps semantic grounding visible when the grounding step has resolver reads", () => {
+  it("keeps resolver candidates and interpreted inputs visible during grounding", () => {
     render(
       <ExplanationProof
         mode="compact"
@@ -177,14 +156,10 @@ describe("ExplanationProof", () => {
           [
             {
               ...semanticLineageStep("grounding", {
-                groundingResults: [
+                resolverCandidates: [
                   {
+                    basis: "The route can resolve the named location.",
                     inputId: "fact_1_entity_1",
-                    inputText: "ABC Mall",
-                    entityKind: "location",
-                    matchedField: "location_id",
-                    matchedLabel: "ABC Mall",
-                    matchedValue: "60606060-0000-0000-0001-000000000001",
                     resolverLabel: "List Location List",
                     resolverReadId: "list_location_list"
                   }
@@ -217,15 +192,50 @@ describe("ExplanationProof", () => {
     );
 
     expect(screen.getByText("Grounding")).toBeInTheDocument();
+    expect(screen.getByText("Resolver candidate")).toBeInTheDocument();
     expect(screen.getByText("Inputs:")).toBeInTheDocument();
     expect(
       screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "\"ABC Mall\": Location (location_id: 60606060-0000-0000-0001-000000000001 via List Location List)"
-      )
-    ).toBeInTheDocument();
+  });
+
+  it("shows the identity route selected by Read Eligibility", () => {
+    render(
+      <ExplanationProof
+        mode="verbose"
+        run={runWithLineageSteps(
+          [
+            semanticLineageStep("read_eligibility", {
+              identitySelections: [
+                {
+                  basis: "The route accepts the location name and returns its canonical key.",
+                  canonicalOptionId: "Area.primary_key",
+                  inputId: "input_store",
+                  outcome: "SELECTED",
+                  resolverRouteId: "list_area_list"
+                }
+              ]
+            })
+          ],
+          [
+            semanticLineageStep("read_eligibility", {
+              identitySelections: [
+                {
+                  basis: "The route accepts the location name and returns its canonical key.",
+                  canonicalOptionId: "Area.primary_key",
+                  inputId: "input_store",
+                  outcome: "SELECTED",
+                  resolverRouteId: "list_area_list"
+                }
+              ]
+            })
+          ]
+        )}
+      />
+    );
+
+    expect(screen.getByText("Identity selection")).toBeInTheDocument();
+    expect(screen.getByText(/Area\.Primary Key via List Area List:/)).toBeInTheDocument();
   });
 
   it("renders source-selection rationale without model-facing row or field prefixes", () => {

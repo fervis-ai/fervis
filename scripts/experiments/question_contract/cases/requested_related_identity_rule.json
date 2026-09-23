@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Each requested_value_meaning is another value the answer must state. Write its\nexpression in requested_value_outputs. A requested value may itself be an\nentity identity. Preserve the shown order within each output list.",
+      "new": "Each requested_value_meaning is another value the answer must state. Write its\nexpression in requested_value_outputs. Decide whether it is an observed value\nor an entity identity. An entity identity distinct from the candidate and from\nany supplied identity role uses its own declared related set and association,\nthen a related_instance identifier fact. Preserve the shown order within each\noutput list.",
+      "expected_count": 1
+    }
+  ]
+}

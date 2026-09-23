@@ -1,0 +1,163 @@
+{
+  "question_context_texts": [
+    "What is the precision of the Borealis instrument?"
+  ],
+  "frame_payload": {
+    "decision_basis": "The question asks for a single attribute value of one identified instrument: the precision of the Borealis instrument. This is a row-level property request for the Borealis instrument, so it is modeled as one result per qualifying row with the instrument as the qualifying candidate and the precision as the requested value.",
+    "outcome": {
+      "kind": "question_meaning",
+      "answer_requests": [
+        {
+          "return_request_basis": "State the precision of the Borealis instrument.",
+          "relational_shape_basis": "The request is about one identified instrument and does not require any special same-row, every-related-row, or every-required-member logic.",
+          "request": {
+            "relational_shape": "ordinary",
+            "result_grain_basis": "One result row for the qualifying Borealis instrument.",
+            "result": {
+              "kind": "one_result_per_qualifying_row",
+              "result_candidates": {
+                "instance_kind": "instrument",
+                "origin": {
+                  "kind": "question"
+                }
+              },
+              "projection": {
+                "projection_basis": "Return the precision value for the qualifying instrument.",
+                "candidate_identity": "omitted",
+                "explicitly_requested_values": [
+                  {
+                    "value_ref": "v1",
+                    "value_kind_basis": "The answer states a measurement/property value rather than identifying another entity.",
+                    "value_kind": "value",
+                    "meaning": "precision",
+                    "origin": {
+                      "kind": "question"
+                    }
+                  }
+                ]
+              },
+              "result_order": {
+                "ordering_request_basis": "The question does not ask to rank or order instruments.",
+                "ordering": {
+                  "kind": "no_ordering_requested"
+                },
+                "selection": {
+                  "kind": "all_results"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "supplied_values": {
+        "operands": [
+          {
+            "meaning": "Borealis",
+            "denotation_basis": "The instrument named in the question.",
+            "entity_reference": {
+              "instance_kind": "instrument",
+              "value": {
+                "kind": "single_identity",
+                "identity_value": {
+                  "kind": "literal",
+                  "value": "Borealis"
+                },
+                "origin": {
+                  "kind": "question"
+                }
+              }
+            },
+            "answer_request_numbers": [
+              1
+            ]
+          }
+        ],
+        "selection_limits": []
+      },
+      "question_input_inventory_check": {
+        "all_input_like_phrases_declared": true
+      }
+    }
+  },
+  "payload": {
+    "decision_basis": "The question is complete and identifiable: it asks for one value, the precision, for the instrument Borealis. This is a direct qualifying-instance request with a single identity input and one requested value.",
+    "outcome": {
+      "kind": "question_contract",
+      "answer_requests": [
+        {
+          "requested_fact_ref": "fact_1",
+          "origin": {
+            "source": "question_context",
+            "meaning": "precision",
+            "resolved_input_ref": null
+          },
+          "candidate_set": {
+            "instance_kind": "instrument",
+            "instance_interpretation": "resource_population"
+          },
+          "set_graph": {
+            "identity_input_relations": {
+              "i1": null
+            },
+            "requested_output_relations": {},
+            "other_related_sets": []
+          },
+          "grouping": [],
+          "qualification": {
+            "kind": "input_comparison",
+            "input": {
+              "kind": "input_ref",
+              "input_ref": "i1",
+              "operand_meaning": "Borealis",
+              "instance_kind": "instrument"
+            },
+            "operator": "equals",
+            "fact": {
+              "kind": "fact",
+              "identity_path": {
+                "kind": "candidate_instance"
+              },
+              "origin": {
+                "source": "question_context",
+                "meaning": "the instrument named in the question",
+                "resolved_input_ref": null
+              }
+            }
+          },
+          "ordering": [],
+          "selection": null,
+          "distinct_by": [
+            {
+              "kind": "fact",
+              "identity_path": {
+                "kind": "candidate_instance"
+              },
+              "origin": {
+                "source": "question_context",
+                "meaning": "precision",
+                "resolved_input_ref": null
+              }
+            }
+          ],
+          "outputs": {
+            "result_key_outputs": [],
+            "requested_value_outputs": [
+              {
+                "output_ref": "v1",
+                "expression": {
+                  "kind": "fact",
+                  "observed_for_ref": "s1",
+                  "origin": {
+                    "source": "question_context",
+                    "meaning": "precision",
+                    "resolved_input_ref": null
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

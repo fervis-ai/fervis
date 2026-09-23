@@ -93,6 +93,8 @@ def _append_run(
     _append_clarification_responses(lines, run.clarification_responses, indent=4)
     _append_activated_memory(lines, run.activated_memory_ids, indent=4)
     _append_memory_artifacts(lines, run.memory_artifacts, indent=4)
+    if step is None:
+        _append_runtime_errors(lines, run.runtime_errors, indent=4)
     for timeline_step in run.steps:
         if step is not None and timeline_step.step_key != step:
             continue

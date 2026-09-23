@@ -80,3 +80,24 @@ def buffered_source_read_lineage(
         ),
         buffer=buffer,
     )
+
+
+class SourceInspectionAudit:
+    """Own buffered response evidence for one deterministic read phase."""
+
+    def __init__(self, *, run_id, sink, phase):
+        self.sink = sink
+        self.phase = phase
+        self.buffered = buffered_source_read_lineage(
+            run_id=run_id,
+            step_id=sink.source_inspection_step_id(phase) if sink is not None else None,
+        )
+
+    def flush(self):
+        if self.sink is not None and self.buffered.source_reads:
+            self.sink.record_source_inspection(
+                phase=self.phase,
+                catalog_endpoints=self.buffered.catalog_endpoints,
+                source_reads=self.buffered.source_reads,
+                artifacts=self.buffered.artifacts,
+            )

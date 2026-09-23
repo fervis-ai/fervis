@@ -70,8 +70,8 @@ def test_runtime_usage_service_summarizes_answer_usage() -> None:
                 ObservabilityModelCall(
                     model_call_id="call_fact",
                     run_id="run_1",
-                    step_id="step_fact_planning",
-                    step_key=RunStepKey.FACT_PLANNING,
+                    step_id="step_plan_selection",
+                    step_key=RunStepKey.PLAN_SELECTION,
                     step_sequence=3,
                     call_index=1,
                     provider="anthropic",
@@ -134,14 +134,14 @@ def test_runtime_usage_service_summarizes_answer_usage() -> None:
     assert report.duration_ms_total == 2000
     assert report.duration_ms_by_step == {
         RunStepKey.SOURCE_BINDING: 1200,
-        RunStepKey.FACT_PLANNING: 800,
+        RunStepKey.PLAN_SELECTION: 800,
     }
     assert report.pricing_versions == ("2026-06",)
     assert [
         (call.step_key, call.provider, call.model_key) for call in report.calls
     ] == [
         (RunStepKey.SOURCE_BINDING, "openai", "gpt-test"),
-        (RunStepKey.FACT_PLANNING, "anthropic", "claude-test"),
+        (RunStepKey.PLAN_SELECTION, "anthropic", "claude-test"),
     ]
     assert report.calls[0].reasoning_effort == "medium"
     assert report.calls[0].tool_spec_chars == 75
@@ -176,8 +176,8 @@ def test_runtime_usage_service_supports_step_scoped_usage() -> None:
                 ObservabilityModelCall(
                     model_call_id="call_fact",
                     run_id="run_1",
-                    step_id="step_fact_planning",
-                    step_key=RunStepKey.FACT_PLANNING,
+                    step_id="step_plan_selection",
+                    step_key=RunStepKey.PLAN_SELECTION,
                     step_sequence=3,
                     call_index=1,
                     provider="anthropic",
@@ -199,7 +199,7 @@ def test_runtime_usage_service_supports_step_scoped_usage() -> None:
     )
 
     report = service.for_run(
-        "run_1", filters=RuntimeUsageFilter(step_key=RunStepKey.FACT_PLANNING)
+        "run_1", filters=RuntimeUsageFilter(step_key=RunStepKey.PLAN_SELECTION)
     )
 
     assert report.scope == UsageScope.RUN
@@ -281,8 +281,8 @@ def test_runtime_usage_service_supports_provider_model_and_usage_filters() -> No
                 ObservabilityModelCall(
                     model_call_id="call_anthropic",
                     run_id="run_1",
-                    step_id="step_fact_planning",
-                    step_key=RunStepKey.FACT_PLANNING,
+                    step_id="step_plan_selection",
+                    step_key=RunStepKey.PLAN_SELECTION,
                     step_sequence=2,
                     call_index=1,
                     provider="anthropic",

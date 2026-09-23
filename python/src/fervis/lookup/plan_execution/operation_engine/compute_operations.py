@@ -14,8 +14,11 @@ def _compute(
     spec: ComputeSpec,
     node_outputs: dict[str, dict[str, RuntimeValue]],
     *,
+    node_output_types: dict[str, dict[str, str]],
     scalars: dict[str, RuntimeValue],
     scalar_types: dict[str, str],
+    environment_values: dict[str, RuntimeValue],
+    environment_types: dict[str, str],
 ) -> RuntimeValue:
     try:
         return evaluate_expression(
@@ -23,7 +26,9 @@ def _compute(
             environment=ExpressionEnvironment(
                 scalars=scalars,
                 scalar_types=scalar_types,
-                node_outputs=node_outputs,
+                environment_values=environment_values,
+                environment_types=environment_types,
+                node_outputs=node_outputs, node_output_types=node_output_types,
             ),
         ).value
     except UndefinedOperationError as exc:

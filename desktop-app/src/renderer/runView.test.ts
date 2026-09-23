@@ -18,3 +18,13 @@ describe("run view projection", () => {
     expect(runSummary(run)).not.toContain("clarification:");
   });
 });
+
+it("does not poll completed factual limitations indefinitely", async () => {
+  const { decodeRun } = await import("../fervis-api/decoder");
+  const { pollableRun, completedAnswerText } = await import("./runView");
+  const decoded = decodeRun({ ...completedRunFixture, answer: null,
+    resultData: { kind: "no_data", message: "No matching data was found.", emptyRelation: { relationId: "empty" } } });
+  if (!decoded.ok) throw new Error(decoded.error.message);
+  expect(pollableRun(decoded.value)).toBe(false);
+  expect(completedAnswerText(decoded.value)).toBe("No matching data was found.");
+});

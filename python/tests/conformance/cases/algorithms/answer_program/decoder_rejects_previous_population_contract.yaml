@@ -1,0 +1,13 @@
+id: decoder_rejects_previous_population_contract
+kind: algorithm
+algorithm: answer_program.decode
+description: Programs serialized before scoped population contracts require recompilation.
+input:
+  schema_revision: 1
+  program:
+    schema_revision: 13
+    program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/canonical_a/program}
+expect:
+  result_equals:
+    status: rejected
+    code: incompatible_program_schema

@@ -1,0 +1,26 @@
+id: catalog_selection_uses_model_authored_exhaustive_resource_inventory
+description: Semantic recall does not infer additional resource meanings from catalog field labels after Query Enrichment authors the exhaustive inventory.
+kind: algorithm
+algorithm: semantic.query_enrichment
+input:
+  mode: select_catalog
+  max_reads_per_fact: 2
+  catalog:
+    reads:
+      - {id: exact_population, endpoint_name: list_population, resource_names: [population]}
+      - {id: exact_value_one, endpoint_name: list_measure_one, resource_names: [measure one]}
+      - {id: exact_value_two, endpoint_name: list_measure_two, resource_names: [measure two]}
+      - id: comprehensive_source
+        endpoint_name: list_observations
+        resource_names: [observations]
+        fields:
+          - {ref: comprehensive_source.data.alpha_id, path: data.alpha_id, label: alpha, type: string}
+          - {ref: comprehensive_source.data.beta, path: data.beta, label: beta, type: string}
+          - {ref: comprehensive_source.data.gamma, path: data.gamma, label: gamma, type: string}
+  resource_matches:
+    - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [population, measure one, measure two], matching_resource_names: [population]}
+    - {bucket_ref: "fact_1:recall:output_1", exhaustive_resource_names: [measure one, population, measure two], matching_resource_names: [measure one]}
+    - {bucket_ref: "fact_1:recall:output_2", exhaustive_resource_names: [measure two, population, measure one], matching_resource_names: [measure two]}
+expect:
+  result_contains:
+    selected_read_ids: [exact_population, exact_value_one, exact_value_two]

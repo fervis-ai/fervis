@@ -950,6 +950,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
                 "scheme": "fastapi_principal",
                 "key": "user-1",
                 "tenant_key": None,
+                "origin": "http://testserver",
             },
             "idempotency_key": "idem-1",
         }
@@ -1010,6 +1011,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
                 "scheme": "fastapi_principal",
                 "key": "user-1",
                 "tenant_key": None,
+                "origin": "http://testserver",
             },
             "idempotency_key": "idem-2",
         }
@@ -1046,6 +1048,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
             "scheme": "fastapi_principal",
             "key": "user-1",
             "tenant_key": None,
+            "origin": "http://testserver",
         },
         "idempotency_key": "idem-rerun",
     }
@@ -1102,11 +1105,13 @@ def test_fervis_fastapi_router_captures_configured_dependency_principal() -> Non
         "scheme": "fastapi_principal",
         "key": "dep-user-1",
         "tenant_key": None,
+        "origin": "http://testserver",
     }
     assert interface.continued[0]["read_context_ref"] == {
         "scheme": "fastapi_principal",
         "key": "dep-user-1",
         "tenant_key": None,
+        "origin": "http://testserver",
     }
 
 
@@ -1172,6 +1177,31 @@ def test_fervis_flask_blueprint_exposes_question_lifecycle_routes() -> None:
     }
 
 
+def test_fervis_flask_mount_is_reachable_after_host_catch_all() -> None:
+    from flask import Flask
+    from fervis import FervisConfig, HostConfig, ModelConfig, RuntimeRoutes
+    from fervis.integrations.flask import FlaskIntegration
+
+    app = Flask(__name__)
+
+    @app.get("/<path:rest>")
+    def host_catch_all(rest: str):
+        return {"owner": "host", "path": rest}
+
+    integration = FlaskIntegration(
+        config=FervisConfig(
+            host=HostConfig(timezone="UTC"),
+            routes=RuntimeRoutes(prefix="/fervis/"),
+            model=ModelConfig(default_provider="openai", default_model_key="gpt-5.4-mini"),
+            sources=[],
+        )
+    )
+    integration.init_app(app, question_interface=_FakeQuestionInterface())
+    client = app.test_client()
+    assert client.get("/fervis/").json == {"runtime": "fervis", "status": "ok"}
+    assert client.get("/unrelated").json == {"owner": "host", "path": "unrelated"}
+
+
 def test_fervis_flask_blueprint_uses_configured_common_question_interface() -> None:
     from flask import Flask
     from fervis.host_api.contracts.authority import ReadContextRef
@@ -1212,6 +1242,7 @@ def test_fervis_flask_blueprint_uses_configured_common_question_interface() -> N
                 "scheme": "flask_principal",
                 "key": "user-1",
                 "tenant_key": None,
+                "origin": "http://localhost",
             },
             "idempotency_key": "idem-1",
         }
@@ -1267,6 +1298,7 @@ def test_fervis_flask_blueprint_uses_configured_common_question_interface() -> N
                 "scheme": "flask_principal",
                 "key": "user-1",
                 "tenant_key": None,
+                "origin": "http://localhost",
             },
             "idempotency_key": "idem-2",
         }
@@ -1402,7 +1434,8 @@ def test_common_question_interface_has_no_framework_or_runtime_internal_imports(
 ):
     from pathlib import Path
 
-    source = Path("src/fervis/interfaces/common/questions.py").read_text(
+    python_root = Path(__file__).resolve().parents[2]
+    source = (python_root / "src/fervis/interfaces/common/questions.py").read_text(
         encoding="utf-8"
     )
 

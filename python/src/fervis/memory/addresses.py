@@ -99,13 +99,7 @@ class FactAddressValue:
             }
         else:
             value = runtime_value_to_payload(self.value)
-        return without_empty(
-            {
-                "type": self.type,
-                "value": value,
-                "answer_output_ids": list(self.answer_output_ids),
-            }
-        )
+        return {**without_empty({"type": self.type, "answer_output_ids": list(self.answer_output_ids)}), "value": value}
 
 
 @dataclass(frozen=True)

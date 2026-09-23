@@ -1,12 +1,17 @@
-"""Execution proof inputs projected for fact-plan verification."""
+"""Execution proof inputs projected for answer-program verification."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Protocol
 
-if TYPE_CHECKING:
-    from fervis.lookup.answer_program.instantiation import _MaterializedExecution
+
+class ExecutionProofSource(Protocol):
+    @property
+    def endpoint_arg_scope_refs(self) -> dict[str, frozenset[str]]: ...
+
+    @property
+    def operation_proof_refs(self) -> dict[str, tuple[str, ...]]: ...
 
 
 @dataclass(frozen=True)
@@ -24,7 +29,7 @@ class ExecutionProofContext:
     @classmethod
     def from_materialized_execution(
         cls,
-        materialized: _MaterializedExecution,
+        materialized: ExecutionProofSource,
     ) -> "ExecutionProofContext":
         return cls(
             endpoint_arg_scope_refs=materialized.endpoint_arg_scope_refs,

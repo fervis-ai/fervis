@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass
 from typing import Any
+from fervis.host_api.contracts.response_page import ResponsePage, ResponseFormat
 
 from fervis.host_api.compilation import compile_read_request
+from fervis.host_api.compilation.pagination_binding import bind_pagination_policy
 from fervis.host_api.contracts import EndpointContract, PaginationKind
 from fervis.host_api.contracts.execution import ReadTransportOverlay
 from fervis.host_api.contracts.read import ReadInvocation
@@ -20,8 +22,8 @@ from fervis.host_api.contracts.ports import (
 )
 
 
-PageGetter = Callable[[str, dict[str, Any]], tuple[int, Any]]
-AsyncPageGetter = Callable[[str, dict[str, Any]], Awaitable[tuple[int, Any]]]
+PageGetter = Callable[[str, dict[str, Any]], ResponsePage]
+AsyncPageGetter = Callable[[str, dict[str, Any]], Awaitable[ResponsePage]]
 
 _DEFAULT_MAX_PAGES = 10
 _DEFAULT_MAX_ROWS = 2_000
@@ -72,6 +74,7 @@ def execute_prepared_get(
     page_policy: dict[str, Any] | None = None,
     get_page: PageGetter,
 ) -> EndpointExecutionResult:
+    contract = bind_pagination_policy(contract, page_policy)
     if contract.pagination is not None and _all_pages_requested(page_policy):
         return execute_all_pages(
             contract=contract,
@@ -99,13 +102,15 @@ def execute_single_page(
         prepared=prepared,
         page_policy=page_policy,
     )
-    status, body = get_page(prepared.url, query_params)
+    page = get_page(prepared.url, query_params)
+    status, body = page.status, page.body
     return _single_page_result(
         contract,
         prepared=prepared,
         status=status,
         body=body,
         page_size=page_size,
+        response_format=page.format,
     )
 
 
@@ -131,19 +136,22 @@ async def execute_prepared_get_async(
     page_policy: dict[str, Any] | None,
     get_page: AsyncPageGetter,
 ) -> EndpointExecutionResult:
+    contract = bind_pagination_policy(contract, page_policy)
     if contract.pagination is None or not _all_pages_requested(page_policy):
         query_params, page_size = _single_page_request(
             contract,
             prepared=prepared,
             page_policy=page_policy,
         )
-        status, body = await get_page(prepared.url, query_params)
+        page = await get_page(prepared.url, query_params)
+        status, body = page.status, page.body
         return _single_page_result(
             contract,
             prepared=prepared,
             status=status,
             body=body,
             page_size=page_size,
+            response_format=page.format,
         )
     traversal = _page_traversal(
         contract,
@@ -161,7 +169,7 @@ async def execute_prepared_get_async(
 
 PageTraversal = Generator[
     dict[str, Any],
-    tuple[int, Any],
+    ResponsePage,
     EndpointExecutionResult,
 ]
 
@@ -200,7 +208,8 @@ def _page_traversal(
     has_more = True
     page_count = 0
     while has_more and page_count < max_pages and len(rows) < max_rows:
-        status, body = yield query_params
+        page = yield query_params
+        status, body = page.status, page.body
         page_count += 1
         last_status = status
         if status >= 400:
@@ -211,7 +220,10 @@ def _page_traversal(
                 status=status,
                 body=body,
                 page_count=page_count,
+                response_format=page.format,
             )
+        if page.format is not ResponseFormat.JSON:
+            raise EndpointExecutionError("Pagination requires a JSON response.")
         page_rows, page_total, continuation = parse_page(contract, body=body)
         total = _consistent_total(total, page_total)
         remaining = max_rows - len(rows)
@@ -347,6 +359,7 @@ def _failed_page_result(
     status: int,
     body: Any,
     page_count: int,
+    response_format: ResponseFormat = ResponseFormat.JSON,
 ) -> EndpointExecutionResult:
     return EndpointExecutionResult(
         endpoint_name=contract.endpoint_name,
@@ -354,6 +367,7 @@ def _failed_page_result(
         query_params=query_params,
         response_status=status,
         response_body=body,
+        response_format=response_format,
         page_count=page_count,
     )
 
@@ -397,6 +411,7 @@ def _single_page_result(
     status: int,
     body: Any,
     page_size: int | None,
+    response_format: ResponseFormat = ResponseFormat.JSON,
 ) -> EndpointExecutionResult:
     truncated = False
     if status < 400 and page_size is not None:
@@ -414,6 +429,7 @@ def _single_page_result(
         query_params=prepared.query_params,
         response_status=status,
         response_body=body,
+        response_format=response_format,
         truncated=truncated,
     )
 
@@ -434,7 +450,9 @@ def _page_size(
 
 def _consistent_total(previous: int | None, current: int | None) -> int | None:
     if previous is not None and current is not None and previous != current:
-        raise EndpointExecutionError("Paginated endpoint total changed during traversal.")
+        raise EndpointExecutionError(
+            "Paginated endpoint total changed during traversal."
+        )
     return current if current is not None else previous
 
 
@@ -446,12 +464,12 @@ def _page_has_more(
     returned_rows: int,
     page_size: int,
 ) -> bool:
-    if continuation is True:
-        return True
+    if continuation is not None:
+        if total is not None and continuation != (total > collected_rows):
+            raise EndpointExecutionError("Paginated endpoint completion evidence is inconsistent.")
+        return continuation
     if total is not None and total > collected_rows:
         return True
-    if continuation is False:
-        return False
     return returned_rows >= page_size
 
 

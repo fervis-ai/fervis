@@ -61,3 +61,10 @@ def test_models_dev_pricing_returns_unpriced_for_missing_cost(monkeypatch):
         CostSource.PROVIDER_USAGE_UNPRICED,
         "models.dev:openai/gpt-5.4-mini",
     )
+
+
+def test_cached_input_rate_is_retained_when_the_catalog_declares_it(monkeypatch):
+    monkeypatch.setattr(models_dev, '_load_catalog', lambda: {'openai': {'models': {
+        'gpt-5.4-mini': {'cost': {'input':0.75, 'cache_read':0.075, 'output':4.5}}}}})
+    pricing = models_dev.resolve_model_pricing(provider='openai', model_key='gpt-5.4-mini')
+    assert pricing.cached_input_cost_per_million_tokens == 0.075

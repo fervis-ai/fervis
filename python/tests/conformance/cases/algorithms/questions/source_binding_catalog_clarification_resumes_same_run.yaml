@@ -1,48 +1,45 @@
 id: source_binding_catalog_clarification_resumes_same_run
-description: A source-binding catalog input response resumes only the source-binding owner in the same run.
+description: A source-binding catalog input response retains its closed target and resumes the same run.
 kind: algorithm
 algorithm: questions.lifecycle
 input:
   scenario: clarification_resume
   tenant_id: tenant_1
   principal_id: user_1
-  question: How many orders used the selected channel?
+  question: Compare orders using the selected lifecycle.
   clarification:
-    id: clarification_channel
+    id: clarification_lifecycle
     need: catalog_input
-    reason: catalog_requires_choice
+    reason: missing_required_value
     owner: source_binding
     continuation:
       kind: source_binding_catalog_input
       requestedFactId: fact_1
       target:
         rowSourceId: orders_read
-        paramId: channel
-        paramRef: query.channel
+        paramId: lifecycle
+        paramRef: query.lifecycle
         valueType: string
-        choices: [online, retail]
+        choices: []
     requestedFactId: fact_1
-    question: Which channel should I use?
+    question: Which lifecycle should I use?
     subjects:
-      - kind: catalog_choice
-        id: orders_read.channel
-        label: channel
+      - kind: catalog_input
+        id: orders_read.lifecycle
+        label: lifecycle
         sourceText: ""
-        options:
-          - {id: online, label: Online, value: online}
-          - {id: retail, label: Retail, value: retail}
+        options: []
     evidence:
-      - {kind: catalog_input, id: "required_input:orders_read.channel"}
-  response_text: Online
-  selected_option_id: online
-  resumed_lookup_result: {status: COMPLETED, answer: "4", result_data: {value: 4}}
+      - {kind: catalog_input, id: "required_input:orders_read.lifecycle"}
+  response_text: completed
+  resumed_lookup_result: {status: COMPLETED, answer: "7", result_data: {value: 7}}
 expect:
   result_contains:
-    resumed_result: {status: COMPLETED, run_id: run_1, answer: "4"}
+    resumed_result: {status: COMPLETED, run_id: run_1, answer: "7"}
     question_count: 1
     run_count: 1
     resumed_clarification:
       owner: source_binding
       continuation_kind: source_binding_catalog_input
       dispatch_count: 1
-      closed_target: {rowSourceId: orders_read, paramId: channel, valueType: string, value: online}
+      closed_target: {rowSourceId: orders_read, paramId: lifecycle, valueType: string, value: completed}

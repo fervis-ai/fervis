@@ -1,0 +1,17 @@
+id: concrete_operator_types_must_form_one_valid_signature
+description: Bound operands must satisfy one operator signature together, not merely satisfy independent field capabilities.
+kind: algorithm
+algorithm: semantic.operator_signature
+input:
+  cases:
+    - operator: lt
+      source_types: [string, date]
+    - operator: lt
+      source_types: [string, string]
+    - operator: equals
+      source_types: [boolean, date]
+    - operator: equals
+      source_types: [integer, decimal]
+expect:
+  result_equals:
+    accepted: [false, true, false, true]

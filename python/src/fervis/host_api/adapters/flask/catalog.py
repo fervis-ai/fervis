@@ -229,7 +229,8 @@ def _openapi_schemas_from_app(app: Any) -> tuple[tuple[str, dict[str, Any]], ...
     transport = FlaskInProcessReadTransport(app)
     for path in schema_paths:
         with suppress_host_output():
-            status, body = transport.get(path, {})
+            page = transport.get(path, {})
+            status, body = page.status, page.body
         if status != 200:
             continue
         if isinstance(body, dict) and isinstance(body.get("paths"), dict):

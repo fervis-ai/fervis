@@ -1,0 +1,64 @@
+{
+  "question_context_texts": [
+    "How many stores are in Nairobi?"
+  ],
+  "frame_payload": {
+    "decision_basis": "The question asks for one overall count of the store population constrained by the place Nairobi. The unknown result is the number of stores; Nairobi is the supplied location used to qualify the store candidates.",
+    "outcome": {
+      "kind": "question_meaning",
+      "answer_requests": [
+        {
+          "result_kind": "scalar",
+          "qualifying_row_kind": {
+            "meaning": "stores",
+            "origin": {
+              "kind": "question"
+            }
+          },
+          "grouping_meanings": [],
+          "return_request_basis": "How many stores are in Nairobi",
+          "returned_result": {
+            "kind": "values"
+          },
+          "answer_values": [
+            {
+              "value_ref": "v1",
+              "value_kind_basis": "The answer states the store count value.",
+              "value_kind": "value",
+              "meaning": "number of stores",
+              "origin": {
+                "kind": "question"
+              }
+            }
+          ],
+          "returned_value_refs": [
+            "v1"
+          ],
+          "ordering_value_refs": [],
+          "selection": {
+            "kind": "all_results"
+          },
+          "relational_shape": "ordinary"
+        }
+      ],
+      "supplied_values": [
+        {
+          "meaning": "Nairobi",
+          "denotation_basis": "in Nairobi",
+          "entity_reference": {
+            "instance_kind": "place",
+            "value": {
+              "operands": [
+                "Nairobi"
+              ],
+              "origin": {
+                "kind": "question"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "reference_identifier_set": "distinct_from_candidate"
+}

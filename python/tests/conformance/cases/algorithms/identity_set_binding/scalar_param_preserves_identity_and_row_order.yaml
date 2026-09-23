@@ -6,19 +6,19 @@ kind: algorithm
 algorithm: execution.identity_set_binding
 input:
   param_type: uuid
-  identity_values: [store_2, store_1]
+  identity_values: [00000000-0000-0000-0001-000000000002, 00000000-0000-0000-0001-000000000001]
   responses:
-    - param_value: store_2
+    - param_value: 00000000-0000-0000-0001-000000000002
       body:
         results:
-          - {sale_id: sale_2a, store_id: store_2}
-          - {sale_id: sale_2b, store_id: store_2}
-    - param_value: store_1
+          - {sale_id: 00000000-0000-0000-0002-000000000021, store_id: 00000000-0000-0000-0001-000000000002}
+          - {sale_id: 00000000-0000-0000-0002-000000000022, store_id: 00000000-0000-0000-0001-000000000002}
+    - param_value: 00000000-0000-0000-0001-000000000001
       body:
         results:
-          - {sale_id: sale_1a, store_id: store_1}
-          - {sale_id: sale_1b, store_id: store_1}
+          - {sale_id: 00000000-0000-0000-0002-000000000011, store_id: 00000000-0000-0000-0001-000000000001}
+          - {sale_id: 00000000-0000-0000-0002-000000000012, store_id: 00000000-0000-0000-0001-000000000001}
 expect:
   result_contains:
-    request_param_values: [store_1, store_2]
-    sale_ids: [sale_1a, sale_1b, sale_2a, sale_2b]
+    request_param_values: [00000000-0000-0000-0001-000000000001, 00000000-0000-0000-0001-000000000002]
+    sale_ids: [00000000-0000-0000-0002-000000000011, 00000000-0000-0000-0002-000000000012, 00000000-0000-0000-0002-000000000021, 00000000-0000-0000-0002-000000000022]

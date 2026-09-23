@@ -9,7 +9,7 @@ from fervis.lookup.answer_program.capability_contracts import (
     CapabilityApplication,
     NarrowPopulationCapability,
 )
-from fervis.lookup.answer_program.codec import (
+from fervis.lookup.contract_codec import (
     _decode_as,
     _encode,
     answer_program_id,
@@ -25,11 +25,10 @@ from fervis.lookup.answer_program.model import AnswerProgram, FunctionSemanticVe
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
 )
-from fervis.lookup.answer_program.expressions import FieldRef
+from fervis.lookup.answer_program.expressions import BinaryExpression, FieldRef
 from fervis.lookup.answer_program.operations import (
     FilterSpec,
     Operation,
-    Predicate,
 )
 from fervis.lookup.answer_program.values import (
     BindingSet,
@@ -126,7 +125,7 @@ def apply_capability(
                 id=f"capability.{capability.id}",
                 spec=FilterSpec(
                     input_relation=f"{capability.relation_id}__capability_source",
-                    predicate=Predicate(
+                    condition=BinaryExpression(
                         left=FieldRef(capability.field_id),
                         operator=capability.operator,
                         right=ParameterRef(parameter_id=capability.parameter.id),

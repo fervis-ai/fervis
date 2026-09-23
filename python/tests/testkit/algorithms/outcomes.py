@@ -14,19 +14,12 @@ from fervis.lookup.outcomes.model import (
     NeedsClarification,
 )
 from fervis.lookup.outcomes.errors import ExecutionIssue
-from fervis.lookup.outcomes.answerability import classify_plan_impossible
 from fervis.lookup.outcomes.classification import (
     classify_answer_result,
     classify_empty_relation,
 )
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
 from fervis.lookup.answer_program.operations import ComputeSpec, Operation, OrderSpec
-from fervis.lookup.fact_plan.fact_plan import (
-    BlockedFact,
-    BlockedFactBasis,
-    BlockedFactField,
-    PlanImpossible,
-)
 from fervis.lookup.answer_program.result_projection import (
     RelationResultOutput,
     ResultProjection,
@@ -48,7 +41,6 @@ from tests.testkit.assertions import (
     status_mismatches,
     subset_mismatches,
 )
-from tests.testkit.question_contract import question_contract_from_payload
 
 
 def run_outcomes_classify_case(payload: dict[str, Any]) -> list[str]:
@@ -72,11 +64,6 @@ def run_outcomes_classify_case(payload: dict[str, Any]) -> list[str]:
                 kind=EmptyRelationKind(
                     str(input_payload.get("empty_kind") or "answer_rows")
                 ),
-            )
-        elif mode == "impossible":
-            result = classify_plan_impossible(
-                _plan_impossible(input_payload["plan_impossible"]),
-                question_contract=_question_contract(input_payload),
             )
         elif mode == "clarification":
             result = FactResult(
@@ -145,38 +132,6 @@ def _answer_plan(payload: dict[str, Any]) -> AnswerProgram:
         operations=_answer_operations(payload),
         result_projection=ResultProjection(relation_outputs=result_outputs),
     )
-
-
-def _plan_impossible(payload: dict[str, Any]) -> PlanImpossible:
-    return PlanImpossible(
-        blocked_facts=tuple(
-            BlockedFact(
-                requested_fact_id=str(item["requested_fact_id"]),
-                basis=BlockedFactBasis(str(item["basis"])),
-                evidence_refs=tuple(
-                    str(ref) for ref in item.get("evidence_refs") or ()
-                ),
-                reviewed_read_ids=tuple(
-                    str(ref) for ref in item.get("reviewed_read_ids") or ()
-                ),
-                nearest_fields=tuple(
-                    BlockedFactField(
-                        read_id=str(field["read_id"]),
-                        field_id=str(field["field_id"]),
-                    )
-                    for field in item.get("nearest_fields") or ()
-                ),
-            )
-            for item in payload.get("blocked_facts") or ()
-        )
-    )
-
-
-def _question_contract(payload: dict[str, Any]) -> Any:
-    requested_facts = payload.get("requested_facts") or (
-        {"id": "rf_answer", "description": "answer", "answer_outputs": ["answer"]},
-    )
-    return question_contract_from_payload({"requested_facts": requested_facts})
 
 
 def _answer_operations(payload: dict[str, Any]) -> tuple[Operation, ...]:

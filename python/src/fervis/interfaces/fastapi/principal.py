@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from fervis.host_api.contracts.request_origin import origin_from_request_url
+
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.interfaces.common.questions import InterfacePrincipal
 from fervis.interfaces.common.read_contexts import (
@@ -26,6 +29,10 @@ def principal_from_request(
         principal_id_attr=principal_id_attr,
         require_read_context=require_read_context,
     )
+    if getattr(request, "url", None) is not None:
+        read_context_ref = replace(
+            read_context_ref, origin=origin_from_request_url(str(request.url))
+        )
     principal_id = str(read_context_ref.key or "anonymous")
     delegated_credential = (
         None

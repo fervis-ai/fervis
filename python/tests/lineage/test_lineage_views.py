@@ -163,8 +163,9 @@ def test_answer_explanation_json_exposes_semantic_step_contract() -> None:
                 "resolvedValueText": "ABC Mall",
             }
         ],
+        "resourceRecalls": [],
         "resolverCandidates": [],
-        "groundingResults": [],
+        "identitySelections": [],
         "interpretedInputs": [
             {
                 "inputId": "fact_1_time_1",
@@ -690,3 +691,40 @@ def _lineage_rows_with_two_answer_output_branches() -> LineageRows:
             ),
         }
     )
+
+
+def test_proof_view_retains_unresolved_source_dependencies():
+    from copy import deepcopy
+    from dataclasses import replace
+
+    rows = _lineage_rows()
+    graph = rows.proof_graphs[0]
+    payload = deepcopy(graph.payload_json)
+    payload['nodes'][0]['proof_refs'].append('source_read:missing')
+    rows = replace(rows, proof_graphs=(replace(graph, payload_json=payload),))
+    view = AnswerLineageService(_OverbroadLineageQuery(rows)).for_answer('answer_1')
+    proof = view.questions[0].runs[0].requested_facts[0].fact_results[0].proof
+    assert set(proof.required_source_read_ids) == {'source_read_1', 'missing'}
+    assert {read.source_read_id for read in proof.source_reads} == {'source_read_1'}
+    assert proof.execute_step_id == 'step_execute'
+
+
+def test_runtime_error_without_a_step_remains_visible_in_debug_views():
+    from dataclasses import replace
+    from fervis.lineage.enums import RuntimeErrorKind
+    from fervis.lineage.views.query import RuntimeErrorRow
+
+    rows = replace(_lineage_rows(),
+        run_results=(RunResultRow('result_1','run_1',RunResultKind.RUNTIME_ERROR),),
+        runtime_errors=(RuntimeErrorRow('error_1','run_1','result_1',None,
+            RuntimeErrorKind.PLAN_VALIDATION_FAILED,'Population completeness could not be established.'),))
+    from fervis.lineage.views.service import QuestionLineageService
+    view = QuestionLineageService(_OverbroadLineageQuery(rows)).for_run('run_1')
+    timeline = lineage_timeline_view(view)
+    rendered = render_lineage(timeline,errors_only=True)
+    agent = agent_lineage_view(timeline,detail=LineageRenderDetail.COMPACT)
+    assert 'Population completeness could not be established.' in rendered
+    assert agent['summary']['runtime_error_count'] == 1
+    assert agent['index']['runtime_errors'][0]['runtime_error_detail_id'] == 'error_1'
+    assert agent['questions'][0]['runs'][0]['runtime_errors'][0]['message'] == 'Population completeness could not be established.'
+    assert all(not step.runtime_errors for step in timeline.questions[0].runs[0].steps)

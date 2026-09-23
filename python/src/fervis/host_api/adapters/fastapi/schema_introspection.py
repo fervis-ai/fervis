@@ -9,13 +9,14 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from types import GenericAlias, UnionType
-from typing import Protocol, TypeAlias, Union, get_args, get_origin
+from typing import Any, Protocol, TypeAlias, Union, get_args, get_origin
 from uuid import UUID
 
 from fastapi._compat import ModelField
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticUndefined
 from sqlalchemy import Column, ForeignKeyConstraint, Index, Table, UniqueConstraint
 
 from fervis.host_api.contracts import (
@@ -28,6 +29,8 @@ from fervis.host_api.contracts import (
     ParameterContract,
     ResponseFieldContract,
 )
+
+from fervis.host_api.contracts.values import ContractValue, serialize_parameter_default
 
 ResponseAnnotation: TypeAlias = type | GenericAlias | UnionType
 
@@ -73,7 +76,13 @@ def inspect_fastapi_response(route: APIRoute) -> FastAPIResponseInspection:
     response_annotation = route.response_model
     model_annotations = _response_model_annotations(response_annotation)
     if not model_annotations:
-        return FastAPIResponseInspection((), (), (), (), "one")
+        return FastAPIResponseInspection(
+            (),
+            (),
+            (),
+            (),
+            _unmodeled_cardinality(response_annotation),
+        )
     variant_fields: list[tuple[ResponseFieldContract, ...]] = []
     variant_mappings: list[tuple[_MappedResponseModel, ...]] = []
     for annotation in model_annotations:
@@ -109,7 +118,10 @@ def inspect_fastapi_response(route: APIRoute) -> FastAPIResponseInspection:
     )
     cardinality = (
         "many"
-        if all(_collection_item(annotation) is not None for annotation in _union_items(response_annotation))
+        if all(
+            _collection_item(annotation) is not None
+            for annotation in _union_items(response_annotation)
+        )
         else "one"
     )
     return FastAPIResponseInspection(
@@ -119,6 +131,18 @@ def inspect_fastapi_response(route: APIRoute) -> FastAPIResponseInspection:
         entity_references=entity_references,
         cardinality=cardinality,
     )
+
+
+def _unmodeled_cardinality(annotation: ResponseAnnotation | None) -> str:
+    cardinalities = {
+        "many"
+        if (get_origin(item) or item) in {list, tuple, set, frozenset, Sequence}
+        else "one"
+        if (get_origin(item) or item) is dict
+        else "unknown"
+        for item in _union_items(annotation)
+    }
+    return next(iter(cardinalities)) if len(cardinalities) == 1 else "unknown"
 
 
 def fastapi_route_parameters(
@@ -142,8 +166,18 @@ def _parameter(field: ModelField, *, source: str) -> ParameterContract:
         required=_field_is_required(field),
         description=str(field.field_info.description or ""),
         choices=_enum_choices(annotation),
+        default=_parameter_default(field.field_info),
+        default_is_known=field.field_info.default_factory is None,
         source=source,
     )
+
+
+def _parameter_default(info: FieldInfo) -> ContractValue:
+    # Read the declaration directly: ModelField.default can execute factories.
+    value = info.default
+    if value is PydanticUndefined:
+        return None
+    return serialize_parameter_default(value)
 
 
 def _collect_response_model(
@@ -174,6 +208,11 @@ def _collect_response_model(
                 type=_annotation_type(field_annotation),
                 description=field.description,
                 choices=_enum_choices(field_annotation),
+                nullable=(
+                    field_annotation is None
+                    or field_annotation is Any
+                    or type(None) in get_args(field_annotation)
+                ),
             )
         )
         if nested_model is not None:
@@ -208,8 +247,7 @@ def _common_response_fields(
     if not variants:
         return ()
     signatures = tuple(
-        {(field.path, field.type) for field in fields}
-        for fields in variants[1:]
+        {(field.path, field.type) for field in fields} for fields in variants[1:]
     )
     return tuple(
         field
@@ -509,11 +547,7 @@ def _union_items(
     origin = get_origin(annotation)
     if origin not in {Union, UnionType}:
         return (annotation,)
-    return tuple(
-        item
-        for item in get_args(annotation)
-        if item is not type(None)
-    )
+    return tuple(item for item in get_args(annotation) if item is not type(None))
 
 
 def _collection_item(annotation: ResponseAnnotation) -> ResponseAnnotation | None:

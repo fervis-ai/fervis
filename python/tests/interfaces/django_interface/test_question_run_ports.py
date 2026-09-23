@@ -62,8 +62,8 @@ from fervis.lookup.answer_program import (
     CapabilityApplication,
     ParameterBinding,
     SetParameter,
-    answer_program_id,
 )
+from fervis.lookup.contract_codec import answer_program_id
 from fervis.lookup.answer_program.revisions import apply_capability
 from fervis.lookup.answer_program.persistence import (
     program_invocation,

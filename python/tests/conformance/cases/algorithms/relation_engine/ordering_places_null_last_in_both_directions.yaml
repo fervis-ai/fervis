@@ -1,0 +1,41 @@
+id: ordering_places_null_last_in_both_directions
+description: Null ordering is fixed after every non-null value for ascending and descending order.
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: observations
+      rows:
+        - {observation_id: missing, amount: null}
+        - {observation_id: lower, amount: 10}
+        - {observation_id: higher, amount: 20}
+      grain_keys: [observation_id]
+      field_types: {observation_id: string, amount: decimal}
+      completeness: {status: complete, source_kind: api_read, set_kind: universe}
+  operations:
+    - id: ascending
+      output_relation: ascending_result
+      spec:
+        kind: order
+        input_relation: observations
+        order_by: [{field: amount, direction: asc}]
+        selection: {kind: keep_all}
+    - id: descending
+      output_relation: descending_result
+      spec:
+        kind: order
+        input_relation: observations
+        order_by: [{field: amount, direction: desc}]
+        selection: {kind: keep_all}
+expect:
+  result_contains:
+    ascending_result:
+      rows:
+        - {observation_id: lower, amount: 10}
+        - {observation_id: higher, amount: 20}
+        - {observation_id: missing, amount: null}
+    descending_result:
+      rows:
+        - {observation_id: higher, amount: 20}
+        - {observation_id: lower, amount: 10}
+        - {observation_id: missing, amount: null}

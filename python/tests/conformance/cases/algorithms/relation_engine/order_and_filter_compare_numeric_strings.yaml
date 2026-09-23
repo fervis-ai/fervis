@@ -22,7 +22,7 @@ input:
       spec:
         kind: filter
         input_relation: items
-        predicate: {left: amount, operator: gt, right_scalar: minimum}
+        condition: {left: amount, operator: gt, right_scalar: minimum}
     - id: ordered
       output_relation: top_item
       spec:

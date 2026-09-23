@@ -5,6 +5,7 @@ from __future__ import annotations
 
 class UsageKey:
     INPUT_TOKENS = "inputTokens"
+    CACHED_INPUT_TOKENS = "cachedInputTokens"
     OUTPUT_TOKENS = "outputTokens"
     THINKING_TOKENS = "thinkingTokens"
     COST_USD = "costUsd"

@@ -3,12 +3,14 @@ description: Generated calendar row source exposes an authorable date field and 
 migrates:
   - api/tests/fervis/lookup/plan_execution/test_relations.py::test_generated_calendar_is_a_row_source_with_authorable_date_params
 kind: algorithm
-algorithm: planning.relation_contract
+algorithm: relation_catalog.row_source_projection
 input:
-  mode: calendar_row_source
+  catalog: {reads: []}
 expect:
   result_contains:
-    id: rs_calendar_days
-    date_field_label: runtime date
-    start_param_required: true
-    end_param_required: true
+    source_id: rs_calendar_days
+    fields:
+      runtime_date: {field_ref: runtime_date, type: date}
+    params:
+      interval_start: {param_ref: __calendar__.interval_start}
+      interval_end: {param_ref: __calendar__.interval_end}

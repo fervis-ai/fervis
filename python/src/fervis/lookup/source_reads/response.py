@@ -8,7 +8,7 @@ from typing import Any
 
 from fervis.lookup.canonical_data import canonical_runtime_json
 from fervis.lookup.relation_catalog import RowCardinality
-from fervis.lookup.fact_plan.row_sources.model import RowSource
+from fervis.lookup.relation_catalog.row_sources.model import RowSource
 
 
 MISSING = object()
@@ -109,11 +109,12 @@ def endpoint_response_body(result: dict[str, Any], *, endpoint_name: str) -> Any
 def extract_row_source_rows(
     body: Any, *, row_source: RowSource
 ) -> tuple[dict[str, Any], ...]:
-    if not row_source.parent_row_path:
+    if not row_source.parent_row_path and row_source.parent_row_cardinality is None:
         return extract_response_rows(
             body,
             row_source.row_path,
             cardinality=row_source.row_cardinality,
+            primitive_field=row_source.primitive_value_field,
         )
     parent_cardinality = row_source.parent_row_cardinality
     if parent_cardinality is None:
@@ -130,6 +131,7 @@ def extract_row_source_rows(
             parent,
             child_path,
             cardinality=row_source.row_cardinality,
+            primitive_field=row_source.primitive_value_field,
         )
         parent_context = _parent_row_context(parent, child_path=child_path)
         rows.extend({**parent_context, **child} for child in child_rows)
@@ -141,6 +143,7 @@ def extract_response_rows(
     row_path: str,
     *,
     cardinality: RowCardinality,
+    primitive_field: str | None = None,
 ) -> tuple[dict[str, Any], ...]:
     value = path_value(body, row_path, missing=MISSING)
     if isinstance(value, list):
@@ -148,12 +151,25 @@ def extract_response_rows(
             raise EndpointResponseError(
                 f"response row path {row_path or '<root>'} expected one row"
             )
+        if primitive_field is not None:
+            if all(
+                item is None or isinstance(item, (str, int, float, bool))
+                for item in value
+            ):
+                return tuple({primitive_field: item} for item in value)
+            raise EndpointResponseError(
+                f"response row path {row_path or '<root>'} changed from primitive rows"
+            )
         if any(not isinstance(item, dict) for item in value):
             raise EndpointResponseError(
                 f"response row path {row_path or '<root>'} contains non-object rows"
             )
         return tuple(item for item in value if isinstance(item, dict))
     if isinstance(value, dict):
+        if primitive_field is not None:
+            raise EndpointResponseError(
+                f"response row path {row_path or '<root>'} changed from a primitive value"
+            )
         if cardinality != RowCardinality.ONE:
             raise EndpointResponseError(
                 f"response row path {row_path or '<root>'} expected many rows"
@@ -163,6 +179,10 @@ def extract_response_rows(
         raise EndpointResponseError(
             f"response row path {row_path or '<root>'} is unavailable"
         )
+    if primitive_field is not None and cardinality is RowCardinality.ONE and (
+        value is None or isinstance(value, (str, int, float, bool))
+    ):
+        return ({primitive_field: value},)
     raise EndpointResponseError(
         f"response row path {row_path or '<root>'} is not an object row"
     )
@@ -210,6 +230,8 @@ def relative_response_path(field_path: str, row_path: str) -> str:
 
 
 def _path_part_value(value: Any, part: str, *, missing: object = None) -> Any:
+    if value is None:
+        return None
     if isinstance(value, dict):
         return value[part] if part in value else missing
     if isinstance(value, list):

@@ -14,19 +14,16 @@ from fervis.lookup.conversation_resolution.compilation import (
     CompiledConversationResolution,
     CompiledResolvedClause,
     CompiledResolvedValue,
-    ResolvedIdentityInput,
 )
-from fervis.lookup.question_inputs import LiteralInputRole
 from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.conversation_resolution.schema import (
     build_conversation_resolution_tool_schemas,
 )
 from fervis.memory.conversation_context import (
-    ConversationAnswerShape,
+    ConversationCallableParameter,
     ConversationCallableSignature,
     ConversationContextFrame,
     ConversationContextSource,
-    ConversationFrameParameter,
     ConversationFramePart,
     ConversationFramePartKind,
     ConversationMeaningAnchor,
@@ -65,14 +62,19 @@ def run_conversation_resolution_compile_case(payload: dict[str, Any]) -> list[st
         "uses_prior_context": compiled.uses_prior_context,
         "canonical_identity_inputs": [
             _canonical_identity_payload(item)
-            for item in compiled.identity_inputs()
+            for item in compiled.inputs
+            if isinstance(item, ResolvedLiteralQuestionInput)
+            and item.canonical_identity is not None
         ],
     }
     return _mismatches(actual, payload["expect"])
 
 
-def _canonical_identity_payload(item: ResolvedIdentityInput) -> dict[str, object]:
+def _canonical_identity_payload(
+    item: ResolvedLiteralQuestionInput,
+) -> dict[str, object]:
     identity = item.canonical_identity
+    assert identity is not None
     payload: dict[str, object] = {
         "input_ref": item.input_ref,
         "entity_kind": identity.key.entity_kind,
@@ -131,8 +133,7 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
             branch["properties"]["kind"]["enum"][0] for branch in source_branches
         ],
         "frame_parameter_kinds": [
-            branch["properties"]["kind"]["enum"][0]
-            for branch in parameter_branches
+            branch["properties"]["kind"]["enum"][0] for branch in parameter_branches
         ],
         "ambiguity_candidate_fields": sorted(ambiguity_candidate_fields),
         "ambiguity_evidence_source_ids": evidence_source_ids,
@@ -197,34 +198,34 @@ def _context_frame(payload: dict[str, Any]) -> ConversationContextFrame:
     return ConversationContextFrame(
         frame_id=str(payload["frame_id"]),
         source_ids=tuple(str(item) for item in payload.get("source_ids") or ()),
-        answer_shape=ConversationAnswerShape(
-            expression_family=str(payload["answer_shape"]["expression_family"]),
-            output_roles=tuple(
-                str(item) for item in payload["answer_shape"]["output_roles"]
-            ),
-        ),
         parts=tuple(
             ConversationFramePart(
                 part_id=str(part["part_id"]),
                 kind=ConversationFramePartKind(str(part["kind"])),
                 text=str(part["text"]),
                 source_ref=str(part.get("source_ref") or ""),
+                value_type=str(part.get("value_type") or ""),
             )
             for part in payload.get("parts") or ()
         ),
         callable=(
             ConversationCallableSignature(
-                base_run_id=str(callable_payload["base_run_id"]),
-                requested_fact_id=str(callable_payload["requested_fact_id"]),
+                base_invocation_id=str(callable_payload["base_invocation_id"]),
+                program_id=str(callable_payload["program_id"]),
+                requested_fact_ref=str(callable_payload["requested_fact_ref"]),
+                requested_fact_fingerprint=str(
+                    callable_payload["requested_fact_fingerprint"]
+                ),
                 parameters=tuple(
-                    ConversationFrameParameter(
+                    ConversationCallableParameter(
                         parameter_id=str(item["parameter_id"]),
                         part_id=str(item["part_id"]),
-                        kind=ConversationFramePartKind(str(item["kind"])),
+                        value_type=str(item["value_type"]),
+                        input_ref=str(item["input_ref"]),
+                        input_use_refs=tuple(
+                            str(ref) for ref in item["input_use_refs"]
+                        ),
                         current_text=str(item["current_text"]),
-                        resolved_text=str(item["resolved_text"]),
-                        field_label_text=str(item.get("field_label_text") or ""),
-                        value_meaning_hint=str(item.get("value_meaning_hint") or ""),
                     )
                     for item in callable_payload.get("parameters") or ()
                 ),
@@ -277,7 +278,7 @@ def compiled_conversation_resolution_from_payload(
 
 
 def _compiled_input(payload: dict[str, Any]):
-    if str(payload["kind"]) == "literal_text":
+    if str(payload["kind"]) == "literal":
         canonical_identity_payload = payload.get("canonical_identity")
         canonical_identity = (
             ResolvedCanonicalIdentity(
@@ -291,12 +292,10 @@ def _compiled_input(payload: dict[str, Any]):
                     },
                 ),
                 authority_refs=tuple(
-                    str(item)
-                    for item in canonical_identity_payload["authority_refs"]
+                    str(item) for item in canonical_identity_payload["authority_refs"]
                 ),
                 lineage_refs=tuple(
-                    str(item)
-                    for item in canonical_identity_payload["lineage_refs"]
+                    str(item) for item in canonical_identity_payload["lineage_refs"]
                 ),
             )
             if isinstance(canonical_identity_payload, dict)
@@ -306,10 +305,8 @@ def _compiled_input(payload: dict[str, Any]):
             input_ref=str(payload["input_ref"]),
             value_source_text=str(payload["value_source_text"]),
             resolved_value_text=str(payload["resolved_value_text"]),
-            role=LiteralInputRole(str(payload["role"])),
+            value_type=str(payload.get("value_type") or "literal"),
             occurrence=int(payload.get("occurrence") or 1),
-            field_label_text=str(payload.get("field_label_text") or ""),
-            value_meaning_hint=str(payload.get("value_meaning_hint") or ""),
             canonical_identity=canonical_identity,
         )
     return ResolvedRowSetQuestionInput(

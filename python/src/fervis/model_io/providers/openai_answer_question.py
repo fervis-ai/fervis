@@ -17,8 +17,8 @@ from fervis.delivery.answer_question import (
 )
 from fervis.lineage.views.query import LineageQueryPort
 from fervis.model_io.providers.chat_runtime import ChatProviderConfig
-from fervis.model_io.providers.openai_compatible_adapter import (
-    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
+from fervis.model_io.providers.openai_responses_adapter import (
+    OPENAI_RESPONSES_PROVIDER_CONFIG,
 )
 from fervis.model_io.providers.openai_compatible_adapter.loop_adapter import (
     openai_compatible_client,
@@ -164,11 +164,7 @@ def configured_answer_question_service(
 
 
 def _openai_provider_config() -> ChatProviderConfig:
-    return next(
-        config
-        for config in OPENAI_COMPATIBLE_PROVIDER_CONFIGS
-        if config.provider_name == "openai"
-    )
+    return OPENAI_RESPONSES_PROVIDER_CONFIG
 
 
 def _decode_audio_delta(value: object) -> bytes:

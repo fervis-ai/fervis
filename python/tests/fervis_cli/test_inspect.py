@@ -1,6 +1,25 @@
 from __future__ import annotations
 
-from ._support import *  # noqa: F401,F403
+import importlib
+from io import StringIO
+import json
+from pathlib import Path
+
+import pytest
+
+from fervis.interfaces.cli.contracts import FervisCommandKind
+from fervis.interfaces.cli.dispatch import evaluate_fervis, run_fervis
+from fervis.interfaces.cli.rendering import render_fervis_result
+from fervis.lineage.views.detail import LineageRenderDetail
+from fervis.project import ProjectInspection
+
+from ._support import (
+    API_DIR,
+    _PromptCaptureQuery,
+    _blocked_envelope,
+    _command_envelope,
+    _ports,
+)
 
 
 def test_fervis_project_inspect_module_entrypoint_bypasses_full_parser(

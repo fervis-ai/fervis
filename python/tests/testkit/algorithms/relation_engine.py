@@ -20,6 +20,13 @@ from fervis.lookup.plan_execution.relations import (
     CompletenessStatus,
     RelationRows,
     RelationSetKind,
+    api_read_completeness_proof,
+)
+from fervis.lookup.relation_catalog import (
+    CompletenessPolicy,
+    EndpointRead,
+    PaginationMetadata,
+    PaginationMode,
 )
 from fervis.lookup.answer_program.operations import (
     AggregateSpec,
@@ -33,8 +40,6 @@ from fervis.lookup.answer_program.operations import (
     JoinSpec,
     KeepAll,
     OrderSpec,
-    Predicate,
-    PredicateOperator,
     NamedExpression,
     ProjectSpec,
     ProjectToKeySpec,
@@ -45,6 +50,7 @@ from fervis.lookup.answer_program.operations import (
     SortDirection,
     SortKey,
     Take,
+    AtPosition,
     UnionSpec,
     UniversalConditionSpec,
 )
@@ -97,6 +103,9 @@ def run_relation_engine_case(payload: dict[str, Any]) -> list[str]:
     }
     if output.scalars:
         actual["scalars"] = dict(output.scalars)
+        actual["scalar_text"] = {
+            scalar_id: str(value) for scalar_id, value in output.scalars.items()
+        }
     if output.scalar_proofs:
         actual["scalar_proofs"] = {
             scalar_id: list(proof_refs)
@@ -142,6 +151,44 @@ def run_calendar_relation_case(payload: dict[str, Any]) -> list[str]:
             if relation.completeness is not None
             else None
         ),
+    }
+    return subset_mismatches(
+        actual=actual,
+        expected_subset=payload["expect"]["result_contains"],
+    )
+
+
+def run_api_read_completeness_case(payload: dict[str, Any]) -> list[str]:
+    read_payload = payload["input"]["read"]
+    pagination_payload = read_payload.get("pagination")
+    read = EndpointRead(
+        id=str(read_payload["id"]),
+        endpoint_name=str(read_payload.get("endpoint_name") or read_payload["id"]),
+        pagination=(
+            PaginationMetadata(
+                mode=PaginationMode(str(pagination_payload["mode"])),
+                completeness_policy=CompletenessPolicy(
+                    str(pagination_payload["completeness_policy"])
+                ),
+            )
+            if isinstance(pagination_payload, dict)
+            else None
+        ),
+    )
+    actual = {
+        str(item["id"]): {
+            "status": proof.status.value,
+            "pagination": proof.pagination.value,
+        }
+        for item in payload["input"]["proof_requests"]
+        for proof in (
+            api_read_completeness_proof(
+                read,
+                row_count=int(item.get("row_count") or 0),
+                reached_terminal_page=bool(item.get("reached_terminal_page")),
+                page_cap_reached=bool(item.get("page_cap_reached")),
+            ),
+        )
     }
     return subset_mismatches(
         actual=actual,
@@ -248,7 +295,7 @@ def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
     if kind == "filter":
         return FilterSpec(
             input_relation=str(payload["input_relation"]),
-            predicate=_predicate(payload["predicate"]),
+            condition=_condition(payload["condition"]),
         )
     if kind == "project":
         return ProjectSpec(
@@ -292,7 +339,7 @@ def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
             observation=_role_ref(payload["observation"]),
             subject_keys=tuple(_join_key(item) for item in payload["subject_keys"]),
             dimension_keys=tuple(_join_key(item) for item in payload["dimension_keys"]),
-            predicate=_predicate(payload["predicate"]),
+            condition=_condition(payload["condition"]),
             output_fields=tuple(
                 _project_field(item) for item in payload.get("output_fields") or ()
             ),
@@ -322,6 +369,8 @@ def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
                 )
             )
         )
+        if selection_payload["kind"] == "at_position":
+            selection = AtPosition(position=ParameterRef(parameter_id=str(selection_payload["limit_input_id"])))
         return OrderSpec(
             input_relation=str(payload["input_relation"]),
             order_by=tuple(_sort_key(item) for item in payload["order_by"]),
@@ -406,6 +455,12 @@ def _aggregation(payload: dict[str, Any]) -> AggregationSpec:
         function=AggregationFunction(str(payload["function"])),
         output_field=str(payload["output_field"]),
         input_field=str(payload.get("input_field") or ""),
+        filter=(
+            _condition(payload["filter"])
+            if isinstance(payload.get("filter"), dict)
+            else None
+        ),
+        distinct_argument=bool(payload.get("distinct_argument", False)),
     )
 
 
@@ -416,19 +471,30 @@ def _sort_key(payload: dict[str, Any]) -> SortKey:
     )
 
 
-def _predicate(payload: dict[str, Any]) -> Predicate:
+def _condition(payload: dict[str, Any]):
     from fervis.lookup.answer_program.expressions import FieldRef, ParameterRef
 
+    operator = str(payload["operator"])
+    if operator in {
+        ExpressionUnaryOperator.IS_NULL.value,
+        ExpressionUnaryOperator.NOT_NULL.value,
+    }:
+        return UnaryExpression(
+            operator=ExpressionUnaryOperator(operator),
+            operand=FieldRef(str(payload["left"])),
+        )
     right_field = str(payload.get("right") or "")
     right_scalar = str(payload.get("right_scalar") or "")
-    return Predicate(
+    if not right_field and not right_scalar:
+        raise ValueError("binary condition requires right operand")
+    return BinaryExpression(
         left=FieldRef(str(payload["left"])),
-        operator=PredicateOperator(str(payload["operator"])),
+        operator=ExpressionBinaryOperator(operator),
         right=(
             FieldRef(right_field)
             if right_field
             else ParameterRef(right_scalar)
             if right_scalar
-            else None
+            else FieldRef(right_field)
         ),
     )

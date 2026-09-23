@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
+from fervis.host_api.contracts.response_page import ResponsePage
+from fervis.host_api.adapters.response_body import response_page
+from urllib.parse import urlsplit
 
-from django.core.serializers.json import DjangoJSONEncoder
+from fervis.host_api.contracts.request_origin import (
+    in_process_request_origin,
+    request_origin_headers,
+)
+
 from rest_framework.test import APIClient
 
 from fervis.host_api.adapters.get_execution import (
@@ -31,6 +37,8 @@ def execute_get_endpoint(
     query_params: dict[str, Any] | None = None,
     page_policy: dict[str, Any] | None = None,
     transport_overlay: ReadTransportOverlay | None = None,
+    origin: str | None = None,
+    use_delegated_auth: bool = False,
 ) -> EndpointExecutionResult:
     contract = get_endpoint_contract(
         endpoint_name,
@@ -56,6 +64,8 @@ def execute_get_endpoint(
             query_params=params,
             headers=prepared.headers or {},
             cookies=prepared.cookies or {},
+            origin=origin,
+            use_delegated_auth=use_delegated_auth,
         ),
     )
 
@@ -67,20 +77,32 @@ def _get_page(
     query_params: dict[str, Any],
     headers: dict[str, str],
     cookies: dict[str, str],
-) -> tuple[int, Any]:
-    client = _client_for(user)
+    origin: str | None = None,
+    use_delegated_auth: bool = False,
+) -> ResponsePage:
+    client = APIClient() if use_delegated_auth else _client_for(user)
     for name, value in cookies.items():
         client.cookies[name] = value
-    response = client.get(url, query_params, headers=headers)
-    body = response.data if hasattr(response, "data") else {}
-    return response.status_code, _json_safe(body)
+    origin = in_process_request_origin(origin)
+    parsed = urlsplit(origin)
+    response = client.get(
+        url,
+        query_params,
+        headers=request_origin_headers(headers, origin),
+        secure=parsed.scheme == "https",
+        SERVER_NAME=parsed.hostname,
+        SERVER_PORT=str(parsed.port or (443 if parsed.scheme == "https" else 80)),
+    )
+    if use_delegated_auth:
+        authenticated_user = getattr(getattr(response, "wsgi_request", None), "user", None)
+        if str(getattr(authenticated_user, "pk", "")) != str(getattr(user, "pk", "")):
+            raise EndpointExecutionError(
+                "Delegated Django credential authenticated a different principal."
+            )
+    return response_page(response)
 
 
 def _client_for(user: Any) -> APIClient:
     client = APIClient()
     client.force_authenticate(user=user)
     return client
-
-
-def _json_safe(value: Any) -> Any:
-    return json.loads(json.dumps(value, cls=DjangoJSONEncoder))

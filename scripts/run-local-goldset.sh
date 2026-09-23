@@ -8,7 +8,8 @@ Usage:
 
 Options:
   --case-ids CASES        Comma-separated goldset case ids. Defaults to
-                          FERVIS_GOLDSET_CASE_IDS. Required.
+                          FERVIS_GOLDSET_CASE_IDS. Required unless --all-cases.
+  --all-cases             Run every case exported by the selected suite.
   --project-root PATH     Host API project root. Defaults to FERVIS_HOST_PROJECT_ROOT
                           or the current directory when config/fervis.json exists.
   --suite REF             Goldset suite path or import entrypoint. Defaults to
@@ -23,6 +24,8 @@ Options:
   --python PATH           Python executable. Defaults to <project-root>/.venv/bin/python.
   --wait-seconds SECONDS  Per-case wait timeout. Defaults to 300.
   --stable-runs N         Required independent successful runs per case. Defaults to 1.
+  --max-failures N        Stop after N failed cases. Defaults to 5 for batches
+                          larger than 10 cases; otherwise unlimited.
   --enforce-structured-determinism
                           Require identical structured results across repeats.
   --attempts N            Attempts for retryable provider failures. Defaults to 1.
@@ -41,6 +44,8 @@ local_profile="${FERVIS_LOCAL_GOLDSET_PROFILE:-$repo_root/.fervis/local-goldset.
 fervis_load_env_file "$local_profile"
 
 case_ids="${FERVIS_GOLDSET_CASE_IDS:-}"
+all_cases=0
+case_ids_explicit=0
 project_root="${FERVIS_HOST_PROJECT_ROOT:-}"
 suite_ref="${FERVIS_GOLDSET_SUITE:-}"
 tenant_id="${FERVIS_GOLDSET_TENANT_ID:-}"
@@ -50,6 +55,7 @@ ledger_dir=""
 python_bin=""
 wait_seconds="300"
 stable_runs="1"
+max_failures=""
 enforce_structured_determinism="0"
 attempts="1"
 retry_provider_failures="0"
@@ -57,7 +63,12 @@ retry_sleep_seconds="300"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --all-cases)
+      all_cases=1
+      shift
+      ;;
     --case-ids)
+      case_ids_explicit=1
       case_ids="${2:-}"
       shift 2
       ;;
@@ -101,6 +112,10 @@ while [[ $# -gt 0 ]]; do
       stable_runs="${2:-}"
       shift 2
       ;;
+    --max-failures)
+      max_failures="${2:-}"
+      shift 2
+      ;;
     --enforce-structured-determinism)
       enforce_structured_determinism="1"
       shift
@@ -138,8 +153,8 @@ if [[ -z "$project_root" || ! -d "$project_root" ]]; then
   exit 2
 fi
 
-fervis_load_env_file "$project_root/.env"
 fervis_load_env_file "$repo_root/.env"
+fervis_load_env_file "$project_root/.env"
 
 case_ids="${case_ids:-${FERVIS_GOLDSET_CASE_IDS:-}}"
 suite_ref="${suite_ref:-${FERVIS_GOLDSET_SUITE:-}}"
@@ -147,7 +162,11 @@ tenant_id="${tenant_id:-${FERVIS_GOLDSET_TENANT_ID:-}}"
 principal_id="${principal_id:-${FERVIS_GOLDSET_PRINCIPAL_ID:-}}"
 database_url="${database_url:-${FERVIS_LOCAL_DATABASE_URL:-${DATABASE_URL:-}}}"
 
-if [[ -z "$case_ids" ]]; then
+if (( all_cases && case_ids_explicit )); then
+  echo "Choose --all-cases or --case-ids, not both." >&2
+  exit 2
+fi
+if [[ -z "$case_ids" && "$all_cases" == 0 ]]; then
   echo "Goldset case ids not found. Pass --case-ids or set FERVIS_GOLDSET_CASE_IDS." >&2
   usage >&2
   exit 2
@@ -204,7 +223,7 @@ export FERVIS_GOLDSET_TENANT_ID="$tenant_id"
 export FERVIS_GOLDSET_PRINCIPAL_ID="$principal_id"
 export FERVIS_GOLDSET_ADMIN_USER_ID="${FERVIS_GOLDSET_ADMIN_USER_ID:-$principal_id}"
 
-"$python_bin" -P - "$repo_root" <<'PY'
+"$python_bin" - "$repo_root" <<'PY'
 from __future__ import annotations
 
 import inspect
@@ -215,20 +234,46 @@ repo_root = pathlib.Path(sys.argv[1]).resolve()
 expected = (repo_root / "python" / "src" / "fervis").resolve()
 
 import fervis
-import fervis.lookup.question_contract.prompt as question_contract_prompt
+from fervis.lookup.question_contract import SemanticQuestionContractTurnPrompt
 
 actual = pathlib.Path(fervis.__file__).resolve()
-prompt_path = pathlib.Path(inspect.getsourcefile(question_contract_prompt) or "").resolve()
+prompt_path = pathlib.Path(
+    inspect.getsourcefile(SemanticQuestionContractTurnPrompt) or ""
+).resolve()
 if expected not in (actual, *actual.parents):
     raise SystemExit(f"wrong fervis import: {actual} does not come from {expected}")
 if expected not in (prompt_path, *prompt_path.parents):
     raise SystemExit(
-        f"wrong question_contract prompt import: {prompt_path} does not come from {expected}"
+        f"wrong semantic Question Contract import: {prompt_path} does not come from {expected}"
     )
 PY
 
+if (( all_cases )); then
+  case_ids="$("$python_bin" - <<'PYCASES'
+import os
+from fervis.evaluation.goldsets.loader import load_goldset_suite
+suite = load_goldset_suite(os.environ["FERVIS_GOLDSET_SUITE"])
+if not suite.cases:
+    raise SystemExit("Selected goldset suite has no cases")
+print(",".join(case.case_id for case in suite.cases))
+PYCASES
+)"
+fi
+
 IFS=',' read -r -a cases <<< "$case_ids"
-failed=0
+if [[ -z "$max_failures" ]]; then
+  if (( ${#cases[@]} > 10 )); then
+    max_failures=5
+  else
+    max_failures=0
+  fi
+fi
+if ! [[ "$max_failures" =~ ^[0-9]+$ ]]; then
+  echo "Maximum failures must be a non-negative integer: $max_failures" >&2
+  exit 2
+fi
+
+failure_count=0
 for raw_case in "${cases[@]}"; do
   case_id="$(printf '%s' "$raw_case" | xargs)"
   [[ -n "$case_id" ]] || continue
@@ -237,7 +282,7 @@ for raw_case in "${cases[@]}"; do
   stderr_file="$ledger_dir/$case_id.stderr.txt"
   ledger_file="$ledger_dir/$case_id.ledger.jsonl"
 
-  "$python_bin" -P - "$case_id" <<'PY'
+  "$python_bin" - "$case_id" <<'PY'
 from __future__ import annotations
 
 import os
@@ -256,7 +301,7 @@ PY
   set +e
   (
     cd "$project_root"
-    FERVIS_GOLDSET_CASE_IDS="$case_id" "$python_bin" -P - \
+    FERVIS_GOLDSET_CASE_IDS="$case_id" "$python_bin" - \
       "$ledger_file" "$wait_seconds" "$stable_runs" \
       "$enforce_structured_determinism" "$attempts" \
       "$retry_provider_failures" "$retry_sleep_seconds" <<'PY'
@@ -300,7 +345,7 @@ PY
   exit_code=$?
   set -e
 
-  "$python_bin" -P - "$case_id" "$exit_code" "$stdout_file" "$stderr_file" <<'PY'
+  "$python_bin" - "$case_id" "$exit_code" "$stdout_file" "$stderr_file" <<'PY'
 from __future__ import annotations
 
 import json
@@ -367,9 +412,13 @@ if diagnostics:
 PY
 
   if [[ "$exit_code" -ne 0 ]]; then
-    failed=1
+    failure_count=$((failure_count + 1))
+    if (( max_failures > 0 && failure_count >= max_failures )); then
+      echo "Stopping after $failure_count failed cases (--max-failures $max_failures)."
+      break
+    fi
   fi
 done
 
 echo "Artifacts: $ledger_dir"
-exit "$failed"
+(( failure_count == 0 ))

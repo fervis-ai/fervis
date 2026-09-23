@@ -10,6 +10,7 @@ from pathlib import Path
 import time
 import uuid
 
+from fervis.model_io.structured_output.errors import is_retryable_provider_error
 from fervis.interfaces.common.admission import ConfiguredModelPolicy
 from fervis.questions import (
     AskRequest,
@@ -35,13 +36,7 @@ class GoldsetPreflightError(ValueError):
     pass
 
 
-_RETRYABLE_PROVIDER_ERRORS = {
-    "provider_runtime_failed",
-    "provider_connection_failed",
-    "provider_timeout",
-    "provider_rate_limited",
-    "provider_internal_error",
-}
+
 
 
 @dataclass(frozen=True)
@@ -219,6 +214,7 @@ def _run_case_once(
 ) -> _EvaluatedCaseRun:
     if suite.prepare_case is not None:
         _run_case_setup(suite, case)
+    case_principal = _prepared_case_principal(suite, case, principal)
     execution = _execute_case(
         case,
         questions=questions,
@@ -226,7 +222,7 @@ def _run_case_once(
         question_run_limits=question_run_limits,
         provider=provider,
         model_key=model_key,
-        principal=principal,
+        principal=case_principal,
         wait_seconds=wait_seconds,
         runtime_context=runtime_context,
     )
@@ -238,6 +234,7 @@ def _run_case_once(
     ):
         time.sleep(max(0.0, retry_sleep_seconds))
         attempt += 1
+        case_principal = _prepared_case_principal(suite, case, principal)
         execution = _execute_case(
             case,
             questions=questions,
@@ -245,7 +242,7 @@ def _run_case_once(
             question_run_limits=question_run_limits,
             provider=provider,
             model_key=model_key,
-            principal=principal,
+            principal=case_principal,
             wait_seconds=wait_seconds,
             runtime_context=runtime_context,
         )
@@ -540,7 +537,7 @@ def _positive_int(value: int, *, field_name: str) -> int:
 
 
 def _is_retryable_provider_failure(result: AskResult) -> bool:
-    return result.status == "FAILED" and result.error in _RETRYABLE_PROVIDER_ERRORS
+    return result.status == "FAILED" and is_retryable_provider_error(result.error)
 
 
 def _with_duration_assertion(
@@ -640,6 +637,32 @@ def _run_case_setup(suite: GoldsetSuite, case: GoldsetCase) -> None:
         ) from exc
 
 
+def _prepared_case_principal(
+    suite: GoldsetSuite, case: GoldsetCase, principal: QuestionPrincipal,
+) -> QuestionPrincipal:
+    if suite.prepare_principal is None:
+        return principal
+    try:
+        prepared = suite.prepare_principal(case, principal)
+    except Exception as exc:
+        raise GoldsetPreflightError(
+            f"goldset principal preparation failed for {case.case_id}: {exc}"
+        ) from exc
+    if not isinstance(prepared, QuestionPrincipal) or (
+        prepared.principal_id,
+        prepared.tenant_id,
+        prepared.read_context_ref,
+    ) != (
+        principal.principal_id,
+        principal.tenant_id,
+        principal.read_context_ref,
+    ):
+        raise GoldsetPreflightError(
+            "goldset principal preparation may only refresh delegated credentials"
+        )
+    return prepared
+
+
 def _ask_and_follow(
     question: str,
     *,
@@ -682,15 +705,17 @@ def _continue_and_follow(
     principal: QuestionPrincipal,
     wait_seconds: float,
 ) -> AskResult | None:
-    clarification_id = _first_clarification_id(previous)
-    if not clarification_id:
+    clarification = _first_clarification(previous)
+    if clarification is None:
         return None
+    clarification_id = str(clarification.get("id") or "").strip()
     result = questions.respond_to_clarification(
         ClarificationResponseRequest(
             question_id=previous.question_id,
             run_id=previous.run_id,
             clarification_id=clarification_id,
             response_text=answer,
+            selected_option_id=_matching_option_id(clarification, answer=answer),
             principal=principal,
             execution_mode=ExecutionMode.QUEUED,
         ),
@@ -722,13 +747,47 @@ def _follow_result(
     return result
 
 
-def _first_clarification_id(result: AskResult) -> str:
+def _first_clarification(result: AskResult) -> Mapping[str, object] | None:
     for item in result_data_clarifications(result.result_data):
         if isinstance(item, Mapping):
             clarification_id = str(item.get("id") or "").strip()
             if clarification_id:
-                return clarification_id
-    return ""
+                return item
+    return None
+
+
+def _matching_option_id(
+    clarification: Mapping[str, object],
+    *,
+    answer: str,
+) -> str:
+    exact_answer = answer.strip()
+    matches: list[str] = []
+    subjects = clarification.get("subjects")
+    if not isinstance(subjects, list):
+        return ""
+    for subject in subjects:
+        if not isinstance(subject, Mapping):
+            continue
+        options = subject.get("options")
+        if not isinstance(options, list):
+            continue
+        for option in options:
+            if not isinstance(option, Mapping):
+                continue
+            option_id = str(option.get("id") or "").strip()
+            if option_id and exact_answer in _option_response_values(option):
+                matches.append(option_id)
+    unique_matches = tuple(dict.fromkeys(matches))
+    return unique_matches[0] if len(unique_matches) == 1 else ""
+
+
+def _option_response_values(option: Mapping[str, object]) -> frozenset[str]:
+    return frozenset(
+        text
+        for field in ("id", "label", "value", "matchedLabel", "matchedValue")
+        if (text := str(option.get(field) or "").strip())
+    )
 
 
 def _write_ledger(path: Path, results: tuple[GoldsetCaseResult, ...]) -> None:

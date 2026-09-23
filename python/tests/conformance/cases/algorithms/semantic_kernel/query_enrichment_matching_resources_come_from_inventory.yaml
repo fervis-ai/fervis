@@ -1,0 +1,17 @@
+id: query_enrichment_matching_resources_come_from_inventory
+description: A matching resource is retained in the exhaustive recall inventory when the model omits the redundant copy.
+kind: algorithm
+algorithm: semantic.query_enrichment
+input:
+  resource_names: [Event, Operator, Region]
+  recall_buckets:
+    - {bucket_ref: "fact_1:recall:population", kind: population, meaning: event occurrences, requirement_refs: ["fact_1:set:s1"]}
+  reference_tasks: []
+  payload:
+    recall_bucket_matches:
+      - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [Event], matching_resource_names: [Event, Operator]}
+    input_resource_search_terms: []
+expect:
+  result_contains:
+    recall_bucket_matches:
+      - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [Event, Operator], matching_resource_names: [Event, Operator]}

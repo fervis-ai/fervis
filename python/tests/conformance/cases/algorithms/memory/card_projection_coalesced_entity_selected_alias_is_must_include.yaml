@@ -5,7 +5,6 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
-  current_question: Westlands
   max_cards: 6
   conversation_context:
     factArtifacts:
@@ -13,17 +12,6 @@ input:
         outcome: answered
         sourceQuestion: Who is Staff One?
         sourceAnswer: Staff One answer.
-        provenance:
-          question_contract:
-            question_inputs: []
-            answer_requests:
-              - id: fact_1
-                answer_fact: Who is Staff One?
-                answer_outputs:
-                  - id: answer_1
-                    description: answer
-                    role: ANSWER_VALUE
-                used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
@@ -35,17 +23,6 @@ input:
         outcome: answered
         sourceQuestion: Which products did Staff One sell?
         sourceAnswer: Staff One answer.
-        provenance:
-          question_contract:
-            question_inputs: []
-            answer_requests:
-              - id: fact_1
-                answer_fact: Which products did Staff One sell?
-                answer_outputs:
-                  - id: answer_1
-                    description: answer
-                    role: ANSWER_VALUE
-                used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
@@ -60,16 +37,6 @@ input:
         provenance:
           conversation_resolution_activation:
             activated_memory_ids: [turn_selected.entity.staff_1]
-          question_contract:
-            question_inputs: []
-            answer_requests:
-              - id: fact_1
-                answer_fact: money we made yesterday
-                answer_outputs:
-                  - id: answer_1
-                    description: total sales amount
-                    role: ANSWER_VALUE
-                used_question_inputs: []
         addresses:
           - address: value.total
             kind: value

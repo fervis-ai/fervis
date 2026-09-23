@@ -1,0 +1,165 @@
+id: collection_input_is_one_typed_operand
+description: Separately supplied alternatives form one collection operand, one qualification
+  use, and one grouping domain.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts:
+  - How many observations belong to member A or member B? Return one count per member.
+  frame_payload:
+    decision_basis: The result counts qualifying observations once for each supplied
+      member alternative.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+      - return_request_basis: Return each member identity and observation count.
+        relational_shape_basis: The requested relational shape is ordinary.
+        request:
+          relational_shape: ordinary
+          result_grain_basis: The requested result grain is one_result_per_group.
+          result:
+            kind: one_result_per_group
+            grouping_meanings:
+            - group_ref: g1
+              grouping_basis: One qualifying row contributes member identity to this
+                group.
+              meaning: member identity
+              origin:
+                kind: question
+              grouping_kind: related_entity_identity
+            grouped_observation_rows:
+              instance_kind: observations
+              origin:
+                kind: question
+            projection:
+              projection_basis: Return the group key and explicitly requested values.
+              returned_grouping_keys: all
+              explicitly_requested_values:
+              - value_ref: v1
+                value_kind_basis: The answer states the observation count value.
+                value_kind: value
+                meaning: observation count
+                origin:
+                  kind: question
+            result_order:
+              ordering_request_basis: The question requests no ordering.
+              ordering:
+                kind: no_ordering_requested
+              selection:
+                kind: all_results
+      supplied_values:
+        selection_limits: []
+        operands:
+        - meaning: the alternative members included in the result
+          denotation_basis: Each supplied member name refers to one particular member.
+          answer_request_numbers: [1]
+          entity_reference:
+            instance_kind: member
+            value:
+              kind: identity_alternatives
+              identity_values:
+              - kind: literal
+                value: member A
+              - kind: literal
+                value: member B
+              origin:
+                kind: question
+      question_input_inventory_check:
+        all_input_like_phrases_declared: true
+  payload:
+    decision_basis: The result counts qualifying observations once for each supplied
+      member alternative.
+    outcome:
+      kind: question_contract
+      answer_requests:
+      - requested_fact_ref: fact_1
+        origin:
+          source: question_context
+          meaning: observation count per supplied member
+          resolved_input_ref: null
+        candidate_set:
+          instance_kind: observations
+          instance_interpretation: resource_population
+        set_graph:
+          identity_input_relations:
+            i1:
+              association:
+                id: a1
+                origin:
+                  source: question_context
+                  meaning: observations belonging to members
+                  resolved_input_ref: null
+              set:
+                id: s2
+                instance_kind: member
+                origin:
+                  source: question_context
+                  meaning: member
+                  resolved_input_ref: null
+              related_sets: []
+          requested_output_relations: {}
+          other_related_sets: []
+        qualification:
+          kind: input_comparison
+          input:
+            kind: input_ref
+            input_ref: i1
+            operand_meaning: the alternative members included in the result
+            instance_kind: member
+          operator: in
+          fact:
+            kind: fact
+            identity_path:
+              kind: related_instance
+              association_ref: a1
+            origin:
+              source: question_context
+              meaning: member identity
+              resolved_input_ref: null
+        grouping:
+        - id: g1
+          grouping_basis: Each observation is grouped by the exact member instance
+            related to it.
+          kind: related_instance_identity
+          set_ref: s2
+        ordering: []
+        selection: null
+        distinct_by: []
+        outputs:
+          result_key_outputs:
+          - expression:
+              kind: group_ref
+              ref: g1
+          requested_value_outputs:
+          - output_ref: v1
+            expression:
+              kind: aggregate
+              function: count
+              argument:
+                kind: set_ref
+                set_ref: s1
+              distinct_argument: false
+expect:
+  result_contains:
+    input_refs:
+    - i1
+    inputs:
+    - input_ref: i1
+      operand:
+      - member A
+      - member B
+      value_kind: collection
+    requested_facts:
+    - id: fact_1
+      result_grain: groups
+      grouping_refs:
+      - fact_1:fact:f1
+      input_use_refs:
+      - i1
+      input_uses:
+      - input_ref: i1
+        operand_meaning: the alternative members included in the result
+      identity_input_refs:
+      - i1
+      population_atoms:
+      - fact_1:expression:e1

@@ -63,7 +63,7 @@ def classify_answer_result(
         outcome=AnswerResult(
             result_projection=answer.result_projection,
             relations=engine_output.relations,
-            scalars=_rendered_scalars(answer, engine_output=engine_output),
+            scalars=_projected_scalars(answer, engine_output=engine_output),
             proof_refs=_proof_refs(
                 engine_output.relations,
                 scalar_proofs=_rendered_scalar_proofs(
@@ -230,18 +230,18 @@ def _empty_relation_kind(
     return empty_relation_kind_for_output_relation(answer.operations, relation_id)
 
 
-def _rendered_scalars(
+def _projected_scalars(
     answer: AnswerProgram,
     *,
     engine_output: RelationEngineOutput,
 ) -> dict[str, RuntimeValue]:
     scalars = dict(engine_output.scalars or {})
-    rendered: dict[str, RuntimeValue] = {}
+    projected: dict[str, RuntimeValue] = {}
     for scalar_output in answer.result_projection.scalar_outputs:
         scalar_id = scalar_output.scalar_id
         if scalar_id in scalars:
-            rendered[str(scalar_output.id)] = scalars[scalar_id]
-    return rendered
+            projected[scalar_id] = scalars[scalar_id]
+    return projected
 
 
 def _rendered_scalar_proofs(

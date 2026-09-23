@@ -5,24 +5,13 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
-  current_question: How much did she make?
   conversation_context:
     factArtifacts:
       - artifactId: turn_1
         outcome: answered
         sourceQuestion: Who is Staff One?
         sourceAnswer: Staff One answer.
-        provenance:
-          question_contract:
-            question_inputs: []
-            answer_requests:
-              - id: fact_1
-                answer_fact: Who is Staff One?
-                answer_outputs:
-                  - id: answer_1
-                    description: answer
-                    role: ANSWER_VALUE
-                used_question_inputs: []
+        provenance: {}
         addresses:
           - address: entity.staff_1
             kind: entity
@@ -34,17 +23,7 @@ input:
         outcome: answered
         sourceQuestion: Which products did Staff One sell?
         sourceAnswer: Staff One answer.
-        provenance:
-          question_contract:
-            question_inputs: []
-            answer_requests:
-              - id: fact_1
-                answer_fact: Which products did Staff One sell?
-                answer_outputs:
-                  - id: answer_1
-                    description: answer
-                    role: ANSWER_VALUE
-                used_question_inputs: []
+        provenance: {}
         addresses:
           - address: entity.staff_1
             kind: entity
@@ -55,7 +34,6 @@ input:
 expect:
   result_contains:
     cards:
-      - kind: prior_answer_request
       - kind: entity_identity
         memory_id: turn_2.entity.staff_1
     private_cards:

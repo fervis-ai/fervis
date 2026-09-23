@@ -1,0 +1,58 @@
+{
+  "decision_basis": "The question asks for the count of sales matching one supplied sale ID. The sale is the candidate instance and the supplied ID selects it.",
+  "outcome": {
+    "kind": "question_meaning",
+    "answer_requests": [
+      {
+        "result_kind": "scalar",
+        "qualifying_row_kind": {
+          "meaning": "sale",
+          "origin": {
+            "kind": "question"
+          }
+        },
+        "grouping_meanings": [],
+          "return_request_basis": "Return the number of sales with the supplied sale ID.",
+        "returned_result": {
+          "kind": "values"
+        },
+        "answer_values": [
+          {
+            "value_ref": "v1",
+            "value_kind_basis": "The answer states the sales count value.",
+            "value_kind": "value",
+            "meaning": "number of sales",
+            "origin": {
+              "kind": "question"
+            }
+          }
+        ],
+        "returned_value_refs": [
+          "v1"
+        ],
+        "ordering_value_refs": [],
+        "selection": {
+          "kind": "all_results"
+        },
+        "relational_shape": "ordinary"
+      }
+    ],
+    "supplied_values": [
+      {
+        "meaning": "sale ID 11111111-1111-4111-8111-111111111111",
+        "denotation_basis": "the sale ID stated in the question",
+        "entity_reference": {
+          "instance_kind": "sale",
+          "value": {
+            "operands": [
+              "11111111-1111-4111-8111-111111111111"
+            ],
+            "origin": {
+              "kind": "question"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

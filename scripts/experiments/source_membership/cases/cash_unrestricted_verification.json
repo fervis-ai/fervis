@@ -1,0 +1,14 @@
+{
+  "expected_choice_reviews": [
+    {
+      "surface_ref": "list_cash_deposit_list.query.is_verified",
+      "choice": "true",
+            "baseline_decision": "INCLUDE"
+    },
+    {
+      "surface_ref": "list_cash_deposit_list.query.is_verified",
+      "choice": "false",
+            "baseline_decision": "INCLUDE"
+    }
+  ]
+}

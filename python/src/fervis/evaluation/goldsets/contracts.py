@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from fervis.questions import AskResult
+from fervis.questions import AskResult, QuestionPrincipal
 
 
 @dataclass(frozen=True)
@@ -100,6 +100,7 @@ class GoldsetSuite:
     match_answer: Callable[[GoldsetCase, AskResult], GoldsetMatch]
     prepare_case: Callable[[GoldsetCase], None] | None = None
     preflight: Callable[[], None] | None = None
+    prepare_principal: Callable[[GoldsetCase, QuestionPrincipal], QuestionPrincipal] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cases", tuple(self.cases))

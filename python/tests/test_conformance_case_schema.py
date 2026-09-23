@@ -11,7 +11,6 @@ from tests.testkit.case_loader import SCHEMA_PATH
 @pytest.mark.parametrize(
     ("algorithm", "input_payload"),
     (
-        ("answer_program.compile", {"fixture": "catalog_default"}),
         ("answer_program.invoke", {"scenario": "same_binding_fresh_evidence"}),
         (
             "questions.lifecycle",

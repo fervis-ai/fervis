@@ -6,7 +6,7 @@ from __future__ import annotations
 class EventType:
     MODEL_TURN_COMPLETED = "model_turn.completed"
     MODEL_TURN_FAILED = "model_turn.failed"
-    FACT_PLAN_EXECUTION = "fact_plan_execution"
+    PROGRAM_EXECUTION = "program_execution"
     RESPONSE_RENDERING = "response_rendering"
 
 

@@ -1,0 +1,13 @@
+id: union_requires_guarantee_on_every_branch
+description: A union guarantees one requested fact only when every alternative guarantees it.
+kind: algorithm
+algorithm: semantic.kernel
+input:
+  mode: union_semantic_guarantees
+  requested_fact_id: fact_1
+  atom_ref: completed
+  subject_set_ref: s1
+  input_guarantees: [true, false]
+expect:
+  result_contains:
+    guaranteed_fact_refs: []

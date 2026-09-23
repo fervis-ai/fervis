@@ -28,7 +28,10 @@ from .common import (
     parse_python_source,
     plan_then_apply,
 )
-from .source import insert_after_node, insert_before_node, insert_import_line
+from .source import (
+    insert_after_node, insert_before_node, insert_import_line,
+    replace_node_source,
+)
 
 
 FLASK_IMPORT = "from fervis import configured_fervis"
@@ -470,6 +473,29 @@ def _ensure_config_fervis_import(text: str, *, path: str) -> str | BlockedPatch:
     import_problem = _fervis_import_problem(tree, path=path)
     if import_problem is not None:
         return import_problem
+    legacy = [
+        node for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "fervis.flask"
+        and any(alias.name == "configured_fervis" for alias in node.names)
+    ]
+    if legacy:
+        if len(legacy) != 1 or len(legacy[0].names) != 1 or legacy[0].names[0].asname:
+            return BlockedPatch(
+                path, "Retired Fervis Flask import is aliased or mixed; edit it manually."
+            )
+        node = legacy[0]
+        if has_import(tree, "fervis", "configured_fervis"):
+            lines = text.splitlines(keepends=True)
+            if node.lineno != node.end_lineno or lines[node.lineno - 1][
+                node.end_col_offset or 0:
+            ].strip():
+                return BlockedPatch(
+                    path, "Retired Fervis Flask import has attached text; edit it manually."
+                )
+            del lines[node.lineno - 1]
+            return "".join(lines)
+        return replace_node_source(text, node, FLASK_IMPORT)
     if has_import(tree, "fervis", "configured_fervis"):
         return text
     return insert_import_line(text, FLASK_IMPORT)

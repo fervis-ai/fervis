@@ -4,3 +4,10 @@ class AnswerProgramContractError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+class UnsupportedAnswerProgramSchema(AnswerProgramContractError):
+    """Readable historical evidence does not imply an executable old contract."""
+
+    def __init__(self) -> None:
+        super().__init__("incompatible_program_schema", "unsupported answer-program schema revision")

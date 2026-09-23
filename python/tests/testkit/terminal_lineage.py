@@ -107,7 +107,6 @@ def make_terminal_answer_writer(recorder: LineageRecorderPort) -> TerminalAnswer
                         run_id=run_id,
                         produced_by_step_id=f"{step_prefix}:contract",
                         fact_key="fact_1",
-                        answer_expression_family="scalar_aggregate",
                     ),
                 ),
                 fact_results=(

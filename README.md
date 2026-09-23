@@ -43,6 +43,24 @@ fervis doctor
 organization name, API description, and timezone used for relative dates.
 Run `fervis runtime ask` only after `fervis doctor` passes.
 
+Saved answers remain readable when a compiled-program revision becomes obsolete.
+Rerunning a saved program in an unsupported format returns
+`rerun_base_not_reusable`; submit the question again to compile a program
+under the current contracts.
+
+Declared response schemas are used when available. For selected GET routes
+without response fields, Fervis can inspect JSON objects, arrays of objects,
+JSON scalar values and arrays of scalar values
+under the current caller's read authority. A selected read with required
+arguments can be inspected when each address maps to an original, typed input
+used by the requested fact. The compiled read must use the same address, and
+saved-program replay re-inspects it from validated bindings. Inspection has its
+own lineage step. It does not infer candidate
+keys, relationships, or closed enums from sampled values. Saved programs inspect
+current structure again before execution; observed rows are not cached answers.
+An observed scalar becomes a `value` row field (or a distinct `value_N` field
+when nested parent fields use that name). Mixed object/scalar arrays are rejected.
+
 ## Models
 
 Configure allowed providers and model keys in `config/fervis.json`. API keys
@@ -111,6 +129,11 @@ fervis goldset run --ledger-file .goldset-runs/orders.jsonl
 Suites may define `preflight` on `GoldsetSuite` for setup checks that must pass
 before any model call runs, such as host API reachability or oracle database
 connectivity.
+When the host API needs a delegated credential as well as a principal ID, a
+suite may define `prepare_principal(case, principal)` to refresh that credential
+before each independent run. The callback must preserve the principal ID,
+tenant and read context; configure credential capture in the host auth contract
+so goldset reads use the same authorization path as deployed requests.
 
 ## Development
 

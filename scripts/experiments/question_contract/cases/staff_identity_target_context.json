@@ -1,0 +1,81 @@
+{
+  "question_context_texts": [
+    "How many sales did the staff with staff_id: 51515151-0000-0000-0002-000000000001 sell today?"
+  ],
+  "frame_payload": {
+    "decision_basis": "The question asks for a single scalar fact: the number of sales sold today by one specific staff member identified by staff_id 51515151-0000-0000-0002-000000000001. The candidate population is sales attributable to that staff member; the concrete identifier and the time scope 'today' constrain that population.",
+    "outcome": {
+      "kind": "question_meaning",
+      "answer_requests": [
+        {
+          "result_kind": "scalar",
+          "qualifying_row_kind": {
+            "meaning": "sales sold by the staff member identified by staff_id 51515151-0000-0000-0002-000000000001 today",
+            "origin": {
+              "kind": "question"
+            }
+          },
+          "grouping_meanings": [],
+          "return_request_basis": "Return the count of sales in the qualified set",
+          "returned_result": {
+            "kind": "values"
+          },
+          "answer_values": [
+            {
+              "value_ref": "v1",
+              "value_kind_basis": "The answer states the sales count value.",
+              "value_kind": "value",
+              "meaning": "number of sales sold",
+              "origin": {
+                "kind": "question"
+              }
+            }
+          ],
+          "returned_value_refs": [
+            "v1"
+          ],
+          "ordering_value_refs": [],
+          "selection": {
+            "kind": "all_results"
+          },
+          "relational_shape": "ordinary"
+        }
+      ],
+      "supplied_values": [
+        {
+          "meaning": "staff_id 51515151-0000-0000-0002-000000000001",
+          "denotation_basis": "The staff member explicitly identified in the question",
+          "entity_reference": {
+            "instance_kind": "staff",
+            "value": {
+              "operands": [
+                "51515151-0000-0000-0002-000000000001"
+              ],
+              "origin": {
+                "kind": "question"
+              }
+            }
+          }
+        },
+        {
+          "meaning": "today",
+          "denotation_basis": "The time scope explicitly stated in the question",
+          "non_entity_value": {
+            "value": {
+              "operands": [
+                "today"
+              ],
+              "value_type": {
+                "kind": "temporal_scope"
+              },
+              "origin": {
+                "kind": "question"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "reference_identifier_set": "distinct_from_candidate"
+}

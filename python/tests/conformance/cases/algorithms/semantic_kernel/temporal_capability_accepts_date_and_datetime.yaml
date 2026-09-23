@@ -1,0 +1,10 @@
+id: temporal_capability_accepts_date_and_datetime
+description: A temporal operator accepts declared date and datetime fields and rejects unrelated fields.
+kind: algorithm
+algorithm: semantic.field_capability
+input:
+  capability: temporal
+  source_types: [date, datetime, string, integer]
+expect:
+  result_contains:
+    compatible_source_types: [date, datetime]

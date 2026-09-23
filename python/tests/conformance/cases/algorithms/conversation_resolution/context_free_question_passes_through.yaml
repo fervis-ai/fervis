@@ -10,10 +10,11 @@ input:
     outcome:
       kind: resolved
       resolution_basis: Current meaning and retained prior meaning form the resolved question.
-      contextualized_question: How many stores do we have?
       clauses:
         - current_clause_text: How many stores do we have?
           occurrence: 1
+          request_shape_basis: The current clause states the complete factual request.
+          request_shape_source: current_clause_supplies_request
           resolved_text: How many stores do we have?
           retained_frame_parts: []
           values: []

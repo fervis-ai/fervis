@@ -1,0 +1,120 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Represent each shown IDENTITY_REFERENCE as its\ninput_ref in an input_comparison with one Identifier fact for its denoted set.\nWhen that set differs from the candidate set, declare their association and\nobserve the Identifier fact through that association.",
+      "new": "Represent each shown IDENTITY_REFERENCE as its input_ref in an input_comparison with one Identifier fact. Write identity_path_basis before identity_path. identity_path_basis states whether the input identifies the row where this condition is evaluated or an entity related to that row. identity_path is current_row for the first case and association with the exact declared association_ref for the second.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/$defs/identifier_fact_expression",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "fact"
+            ]
+          },
+          "identity_path_basis": {
+            "type": "string",
+            "minLength": 1
+          },
+          "identity_path": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "current_row"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "origin": {
+            "$ref": "#/$defs/source_origin"
+          }
+        },
+        "required": [
+          "kind",
+          "identity_path_basis",
+          "identity_path",
+          "origin"
+        ]
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/$defs/subject_identifier_fact_expression",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "fact"
+            ]
+          },
+          "identity_path_basis": {
+            "type": "string",
+            "minLength": 1
+          },
+          "identity_path": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "current_row"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "association"
+                    ]
+                  },
+                  "association_ref": {
+                    "type": "string",
+                    "pattern": "^a[1-9][0-9]*$"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "association_ref"
+                ]
+              }
+            ]
+          },
+          "origin": {
+            "$ref": "#/$defs/source_origin"
+          }
+        },
+        "required": [
+          "kind",
+          "identity_path_basis",
+          "identity_path",
+          "origin"
+        ]
+      }
+    }
+  ]
+}

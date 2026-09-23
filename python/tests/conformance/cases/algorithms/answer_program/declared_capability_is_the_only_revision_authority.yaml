@@ -1,0 +1,26 @@
+id: declared_capability_is_the_only_revision_authority
+kind: algorithm
+algorithm: answer_program.apply_capability
+description: A declared capability creates one immutable typed revision; an undeclared edit is rejected without effects.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/capability}
+  bindings:
+    - parameter_id: question.store_ids
+      value: {kind: identity_set, entity_kind: store, key_id: primary_key, key_component_id: store_id, values: [store_1, store_2]}
+      provenance: {kind: question_input}
+  application:
+    capability_id: filter_by_sale_channel
+    binding:
+      parameter_id: semantic.sale_channels
+      value: {kind: string_set, values: [STORE]}
+      provenance: {kind: semantic_choice, refs: [semantic-control:sales.channel]}
+expect:
+  result_contains:
+    status: revised
+    application_round_trips: true
+    bindings:
+      question.store_ids: [store_1, store_2]
+      semantic.sale_channels: [STORE]
+    reads: 0
+    model_calls: 0

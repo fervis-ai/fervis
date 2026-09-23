@@ -5,24 +5,12 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
-  current_question: Tell me about the last product's sales this month.
   conversation_context:
     factArtifacts:
       - artifactId: turn_products
         outcome: answered
         sourceQuestion: What are the top selling products this week?
         sourceAnswer: The top selling products this week are Alpha, Beta, and Cinder.
-        provenance:
-          question_contract:
-            question_inputs: []
-            answer_requests:
-              - id: fact_1
-                answer_fact: top selling products this week
-                answer_outputs:
-                  - id: answer_1
-                    description: product name
-                    role: ANSWER_VALUE
-                used_question_inputs: []
         addresses:
           - address: relation.answer_rows
             kind: relation

@@ -3,20 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 from typing_extensions import assert_never
 
 from fervis.lookup.relation_catalog.model import RelationCatalog
 from fervis.lookup.plan_execution.errors import VerificationError
 from fervis.lookup.answer_program.relations import (
     EndpointParamBinding,
-    PopulationChoiceControllerKind,
     Relation,
-    RelationSourcePopulationChoice,
-    RelationSourceReviewScopeDecision,
     SourceKind,
 )
-from fervis.lookup.fact_plan.row_sources import (
+from fervis.lookup.relation_catalog.row_sources import (
     RowSource,
     RowSourceCatalog,
     RowSourceKind,
@@ -33,6 +30,7 @@ from fervis.lookup.answer_program.values import (
     LiteralType,
     ParameterRef,
 )
+from fervis.lookup.relation_catalog.model import requires_caller_supplied_input
 from fervis.lookup.answer_program.contracts import (
     AnswerProgramContractError,
     BindingSet,
@@ -54,23 +52,29 @@ class ResolvedEndpointArg:
 
 
 @dataclass(frozen=True)
-class ResolvedPopulationChoice:
-    relation_id: str
-    controller_kind: PopulationChoiceControllerKind
-    controller_id: str
-    field_id: str
-    requested_fact_ids: tuple[str, ...]
-    semantic_control_ref: str
-    included_values: tuple[str, ...]
-    excluded_values: tuple[str, ...]
-    proof_refs: tuple[str, ...] = ()
-    review_scope_decisions: tuple[RelationSourceReviewScopeDecision, ...] = ()
-
-
-@dataclass(frozen=True)
 class InstantiatedProgramInputs:
     endpoint_args: tuple[ResolvedEndpointArg, ...] = ()
-    population_choices: tuple[ResolvedPopulationChoice, ...] = ()
+
+    @property
+    def values_by_relation(self) -> dict[str, dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for arg in self.endpoint_args:
+            grouped.setdefault(arg.relation_id,{})[arg.param_ref]=arg.value
+        return grouped
+
+    @property
+    def proofs_by_relation(self) -> dict[str, tuple[str, ...]]:
+        grouped: dict[str, list[str]] = {}
+        for arg in self.endpoint_args:
+            grouped.setdefault(arg.relation_id,[]).extend(arg.proof_refs)
+        return {key:tuple(dict.fromkeys(refs)) for key,refs in grouped.items()}
+
+    @property
+    def proofs_by_parameter(self) -> dict[str, dict[str, tuple[str, ...]]]:
+        grouped: dict[str, dict[str, tuple[str, ...]]] = {}
+        for arg in self.endpoint_args:
+            grouped.setdefault(arg.relation_id,{})[arg.param_ref]=arg.proof_refs
+        return grouped
 
 
 def instantiate_program_expressions(
@@ -88,7 +92,6 @@ def instantiate_program_expressions(
     )
 
     endpoint_args: list[ResolvedEndpointArg] = []
-    population_choices: list[ResolvedPopulationChoice] = []
     endpoint_arg_targets: set[tuple[str, str]] = set()
 
     _append_relation_source_endpoint_args(
@@ -99,96 +102,7 @@ def instantiate_program_expressions(
         bindings=bindings,
         parameters=parameters,
     )
-    _append_relation_source_population_choices(
-        population_choices,
-        relations=relations,
-        bindings=bindings,
-        parameters=parameters,
-    )
-    return InstantiatedProgramInputs(
-        endpoint_args=tuple(endpoint_args),
-        population_choices=tuple(population_choices),
-    )
-
-
-def _append_relation_source_population_choices(
-    population_choices: list[ResolvedPopulationChoice],
-    *,
-    relations: tuple[Relation, ...],
-    bindings: BindingSet,
-    parameters: tuple[ParameterDeclaration, ...],
-) -> None:
-    for relation in relations:
-        for choice in relation.source.population_choices:
-            compiled = _compiled_population_choice(
-                relation_id=relation.id,
-                choice=choice,
-                bindings=bindings,
-                parameters=parameters,
-            )
-            if compiled is not None:
-                population_choices.append(compiled)
-
-
-def _compiled_population_choice(
-    *,
-    relation_id: str,
-    choice: RelationSourcePopulationChoice,
-    bindings: BindingSet,
-    parameters: tuple[ParameterDeclaration, ...],
-) -> ResolvedPopulationChoice | None:
-    resolved = _resolve_omittable_expression(
-        choice.selection_expr,
-        bindings=bindings,
-        parameters=parameters,
-    )
-    if resolved is None:
-        return None
-    included_values = cast(tuple[str, ...], resolved.value)
-    excluded_values = tuple(
-        value for value in choice.allowed_values if value not in set(included_values)
-    )
-    semantic_control_ref = _population_choice_semantic_control_ref(
-        choice,
-        parameters=parameters,
-    )
-    return ResolvedPopulationChoice(
-        relation_id=relation_id,
-        controller_kind=choice.controller_kind,
-        controller_id=choice.controller_id,
-        field_id=choice.field_id,
-        requested_fact_ids=choice.requested_fact_ids,
-        semantic_control_ref=semantic_control_ref,
-        included_values=included_values,
-        excluded_values=excluded_values,
-        proof_refs=_dedupe_refs((*choice.proof_refs, *resolved.proof_refs)),
-        review_scope_decisions=choice.review_scope_decisions,
-    )
-
-
-def _population_choice_semantic_control_ref(
-    choice: RelationSourcePopulationChoice,
-    *,
-    parameters: tuple[ParameterDeclaration, ...],
-) -> str:
-    expression = choice.selection_expr
-    declaration = next(
-        (
-            parameter
-            for parameter in parameters
-            if parameter.id == expression.parameter_id
-        ),
-        None,
-    )
-    if declaration is None:
-        raise VerificationError(
-            f"population choice references unknown parameter {expression.parameter_id}"
-        )
-    if not declaration.semantic_control_ref:
-        raise VerificationError(
-            "population choice parameter requires semantic-control identity"
-        )
-    return declaration.semantic_control_ref
+    return InstantiatedProgramInputs(endpoint_args=tuple(endpoint_args))
 
 
 def _append_relation_source_endpoint_args(
@@ -223,6 +137,11 @@ def _append_relation_source_endpoint_args(
                 raise VerificationError(
                     f"relation {relation.id} references unknown source param"
                 ) from exc
+            from fervis.lookup.answer_program.expressions import expression_references
+            if expression_references(binding.value_expr).fields:
+                if not relation.source.argument_relation_id:
+                    raise VerificationError("row-valued request argument requires an argument relation")
+                continue
             resolved = _resolve_endpoint_binding(
                 binding,
                 row_source=row_source,
@@ -231,20 +150,28 @@ def _append_relation_source_endpoint_args(
                 parameters=parameters,
             )
             if resolved is None:
-                if param.required and param.default is None:
+                if requires_caller_supplied_input(param):
                     raise VerificationError(
                         f"relation {relation.id} requires source param {param.id}"
                     )
                 continue
-            values = (
-                resolved.value
-                if isinstance(resolved.value, tuple)
-                else (resolved.value,)
+            from fervis.lookup.relation_catalog.parameter_values import (
+                catalog_parameter_wire_value, parse_catalog_parameter_value,
             )
-            if param.choices and any(value not in param.choices for value in values):
-                raise VerificationError(
-                    f"relation {relation.id} param binding has unknown choice"
-                )
+            from fervis.lookup.plan_execution.declared_values import parse_declared_value
+            collection = param.type in {RowSourceValueType.ARRAY, RowSourceValueType.LIST}
+            values = (resolved.value,) if collection or not isinstance(resolved.value, tuple) else resolved.value
+            parsed_values = []
+            try:
+                for value in values:
+                    if isinstance(value, str) and param.type in {RowSourceValueType.INTEGER, RowSourceValueType.NUMBER, RowSourceValueType.FLOAT, RowSourceValueType.DOUBLE}:
+                        value = parse_declared_value(value, param.type.value)
+                    wire = (tuple(catalog_parameter_wire_value(item) for item in value)
+                            if collection and isinstance(value, tuple) else catalog_parameter_wire_value(value, type_name=param.type.value))
+                    parsed_values.append(parse_catalog_parameter_value(wire, type_name=param.type.value, choices=param.choices))
+            except (ValueError, TypeError) as exc:
+                raise VerificationError(f"relation {relation.id} param binding has incompatible value type or unknown choice") from exc
+            argument_value = (parsed_values[0] if collection or not isinstance(resolved.value, tuple) else tuple(parsed_values))
             _append_endpoint_arg(
                 endpoint_args,
                 endpoint_arg_targets=endpoint_arg_targets,
@@ -252,7 +179,7 @@ def _append_relation_source_endpoint_args(
                     relation_id=relation.id,
                     read_id=row_source.read_id,
                     param_ref=param.param_ref,
-                    value=resolved.value,
+                    value=argument_value,
                     proof_refs=(
                         *binding.proof_refs,
                         *resolved.proof_refs,

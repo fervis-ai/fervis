@@ -96,7 +96,8 @@ def _summary(view: LineageTimelineView) -> dict[str, int]:
         "model_call_count": sum(len(step.model_calls) for step in steps),
         "source_read_count": sum(len(step.source_reads) for step in steps),
         "answer_output_count": sum(len(step.answer_outputs) for step in steps),
-        "runtime_error_count": sum(len(step.runtime_errors) for step in steps),
+        "runtime_error_count": sum(len(run.runtime_errors) for run in runs)
+        + sum(len(step.runtime_errors) for step in steps),
     }
 
 
@@ -109,6 +110,9 @@ def _index(
     model_calls: list[dict[str, object]] = []
     for question in view.questions:
         for run in question.runs:
+            runtime_errors.extend(
+                {"question_id": question.question_id, "run_id": run.run_id,
+                 **_runtime_error_json(error)} for error in run.runtime_errors)
             for step in run.steps:
                 path = {
                     "question_id": question.question_id,
@@ -193,6 +197,7 @@ def _run_json(
             "kind": run.kind,
             "trigger_kind": run.trigger_kind,
             "result_kind": run.result_kind,
+            "runtime_errors": tuple(_runtime_error_json(error) for error in run.runtime_errors),
             "base_run_id": run.base_run_id,
             "program_derivation": view_json(run.program_derivation),
             "activated_memory_ids": run.activated_memory_ids,
@@ -348,6 +353,8 @@ def _proof_json(
                     for arg in proof.endpoint_args
                 ),
                 "computation_summaries": proof.computation_summaries,
+                "required_source_read_ids": proof.required_source_read_ids,
+                "execute_step_id": proof.execute_step_id,
                 "source_read_ids": tuple(
                     source_read.source_read_id for source_read in proof.source_reads
                 ),

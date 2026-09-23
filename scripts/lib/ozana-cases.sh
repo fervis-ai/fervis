@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# The established regressions and the complete relational release matrix.
+ozana_regression_cases=(
+  completed_sales_count_explicit_date
+  clarification_missing_factual_question
+  clarification_missing_staff_entity
+  clarification_missing_date_range
+  area_stores_count
+  cash_deposit_total_month
+  compensation_top_location_month
+  compensation_top_paid_staff_month
+  compensation_top_staff_month
+  payments_deposits_01
+  sales_store_count_this_month
+  sales_store_top_this_month
+  shift_count_today
+  staff_top_today
+  memory_location_sales_count_followup_replaces_location
+  memory_temporal_sales_count_followup_replaces_day
+  memory_subject_change_locations_to_stores_count
+  staff_id_sales_count_today
+  staff_id_pair_sales_count_today
+  memory_repeated_named_target_reuses_canonical_identity
+)
+
+ozana_release_cases=(
+  "${ozana_regression_cases[@]}"
+  sales_completed_in_person_march_2026
+  sales_completed_chronological_march_2026
+  sales_largest_in_person_march_2026
+  sales_earliest_in_person_march_2026
+  sales_first_two_in_person_march_2026
+  sales_top_three_in_person_march_2026
+  sales_count_by_location_march_2026
+  sales_revenue_by_day_march_2026
+  sales_top_revenue_location_march_2026
+  sales_top_revenue_week_march_2026
+  sales_top_two_revenue_locations_march_2026
+  sales_bottom_two_revenue_days_march_2026
+  sales_revenue_ten_percent_march_2026
+  sales_revenue_minus_500_march_2026
+  sales_completed_count_explicit_march_2026
+  sales_in_person_count_explicit_march_2026
+  sales_in_person_over_5000_count_march_2026
+  sales_in_person_under_1000_list_march_2026
+  named_staff_top_5_biggest_sales
+  xh_followup_staff_first_two_shift_locations
+  sales_daily_best_day_this_month
+  sales_total_revenue_ten_percent
+  sales_audit_includes_deleted_march_2026
+  sales_canceled_count_march_2026
+)

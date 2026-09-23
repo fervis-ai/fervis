@@ -41,7 +41,7 @@ export function answerEvidenceInsights(
   lineageRun: LineageRun
 ): readonly EvidenceInsight[] {
   const insights: EvidenceInsight[] = [];
-  if (run.resultData?.kind === "answer") {
+  if (run.resultData?.kind === "answer" || run.resultData?.kind === "partial") {
     insights.push(
       ...run.resultData.outputs.slice(0, 3).map((output) => ({
         label: titleWords(output.key),

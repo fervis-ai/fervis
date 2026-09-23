@@ -1,0 +1,54 @@
+{
+  "decision_basis": "The result is the workers whose March task observations cover every active category.",
+  "outcome": {
+    "kind": "question_meaning",
+    "answer_requests": [
+      {
+        "result_kind": "qualifying_instances",
+        "qualifying_row_kind": {
+          "meaning": "workers",
+          "origin": {
+            "kind": "question"
+          }
+        },
+        "grouping_meanings": [],
+        "returned_candidate_identity": {
+          "meaning": "qualifying workers",
+          "origin": {
+            "kind": "question"
+          }
+        },
+        "return_request_basis": "Return the qualifying worker identities.",
+        "returned_result": {
+          "kind": "identities"
+        },
+        "answer_values": [],
+        "returned_value_refs": [],
+        "ordering_value_refs": [],
+        "selection": {
+          "kind": "all_results"
+        },
+        "relational_shape": "every_required_member_has_observation"
+      }
+    ],
+    "supplied_values": [
+      {
+        "meaning": "the observation period",
+        "denotation_basis": "March 2026 is a period applied to task observations.",
+        "non_entity_value": {
+          "value": {
+            "operands": [
+              "March 2026"
+            ],
+            "value_type": {
+              "kind": "temporal_scope"
+            },
+            "origin": {
+              "kind": "question"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

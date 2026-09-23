@@ -42,7 +42,7 @@ describe("LiveZone", () => {
         run={runningRunAt({
           decisions: [],
           semantic: {
-            groundingResults: [],
+            resourceRecalls: [],
             knownInputs: [
               {
                 description: "store",
@@ -66,6 +66,7 @@ describe("LiveZone", () => {
               }
             ],
             resolverCandidates: [],
+            identitySelections: [],
             interpretedInputs: [],
             conversationClauses: []
           },
@@ -81,24 +82,22 @@ describe("LiveZone", () => {
     expect(screen.getByText("Known inputs: 1: ABC Mall · 2: this month")).toBeInTheDocument();
   });
 
-  it("groups grounded and interpreted inputs in the running state", () => {
+  it("shows resolver candidates and interpreted inputs in the running state", () => {
     render(
       <LiveZone
         run={runningRunAt({
           decisions: [],
           semantic: {
-            groundingResults: [
+            resourceRecalls: [],
+            resolverCandidates: [
               {
+                basis: "The route can resolve the named location.",
                 inputId: "fact_1_entity_1",
-                inputText: "ABC Mall",
-                entityKind: "",
-                matchedField: "location_id",
-                matchedLabel: "ABC Mall",
-                matchedValue: "60606060-0000-0000-0001-000000000001",
                 resolverLabel: "List Location List",
                 resolverReadId: "list_location_list"
               }
             ],
+            identitySelections: [],
             interpretedInputs: [
               {
                 detail: "month",
@@ -111,7 +110,6 @@ describe("LiveZone", () => {
             ],
             knownInputs: [],
             requestedFacts: [],
-            resolverCandidates: [],
             conversationClauses: []
           },
           stepId: "step_grounding",
@@ -120,14 +118,10 @@ describe("LiveZone", () => {
       />
     );
 
+    expect(screen.getByText("Resolver candidate: List Location List: The route can resolve the named location.")).toBeInTheDocument();
     expect(screen.getByText("Inputs:")).toBeInTheDocument();
     expect(
       screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "\"ABC Mall\": location_id: 60606060-0000-0000-0001-000000000001 via List Location List"
-      )
     ).toBeInTheDocument();
   });
 

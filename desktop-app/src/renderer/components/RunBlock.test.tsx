@@ -57,3 +57,17 @@ describe("RunBlock", () => {
     expect(screen.getByText(/Continue Prior Request/)).toBeInTheDocument();
   });
 });
+
+it("renders a decoded factual limitation without requiring an answer record", async () => {
+  const { decodeRun } = await import("../../fervis-api/decoder");
+  const { default: results } = await import("../../../../python/tests/contracts/fixtures/public_terminal_results.json");
+  const decoded = decodeRun({ ...completedRunFixture, answer: null, resultData: results.impossible });
+  if (!decoded.ok) throw new Error(decoded.error.message);
+  render(<RunBlock apiClient={null} onActionError={vi.fn()} onClarificationState={vi.fn()} onToggle={vi.fn()} open run={decoded.value} />);
+  expect(screen.getByText("The requested observation is unavailable.", { selector: ".answer-prose" })).toBeInTheDocument();
+});
+
+it("preserves equal values from distinct requested outputs in public prose", () => {
+  render(<RunBlock apiClient={null} onActionError={vi.fn()} onClarificationState={vi.fn()} onToggle={vi.fn()} open run={{ ...completedRunFixture, answer: "3\n3" }} />);
+  expect(screen.getByText("3 3", { selector: ".answer-prose" })).toBeInTheDocument();
+});

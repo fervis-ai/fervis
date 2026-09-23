@@ -1,4 +1,4 @@
-"""Typed fact-plan outcomes and runtime result outcomes."""
+"""Typed lookup and runtime result outcomes."""
 
 from __future__ import annotations
 

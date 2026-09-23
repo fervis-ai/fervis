@@ -3,18 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TypeAlias
 
-from fervis.lookup.question_inputs import (
-    KnownInputKind,
-    LiteralInputRole,
-)
 from fervis.lookup.canonical_data import EntityKeyComponentValue, EntityKeyValue
 from fervis.memory.conversation_context import (
-    ConversationAnswerShape,
+    ConversationCallableParameter,
     ConversationContextFrame,
     ConversationContextSource,
-    ConversationFrameParameter,
     ConversationFramePart,
     ConversationFramePartKind,
     ConversationMemoryCardProjection,
@@ -23,10 +18,9 @@ from fervis.lookup.clarification.context import (
     ActiveClarification,
     active_clarification_from_source,
 )
-from fervis.memory.prior_requests import PriorEntityIdentityBinding
-
 from .model import (
     ContextAnchorSource,
+    CurrentSpanSource,
     ConversationFrameCall,
     ConversationResolution,
     FramePartSource,
@@ -34,13 +28,6 @@ from .model import (
     ResolvedConversationClause,
     ResolvedConversationValue,
 )
-
-if TYPE_CHECKING:
-    from fervis.lookup.question_contract.model import (
-        RequestedFactKnownInput,
-        RequestedFactLiteralInput,
-        RequestedFactRowSetReferenceInput,
-    )
 
 
 @dataclass(frozen=True)
@@ -57,32 +44,18 @@ class ResolvedCanonicalIdentity:
 
 
 @dataclass(frozen=True)
-class ResolvedIdentityInput:
-    input_ref: str
-    value_source_text: str
-    resolved_value_text: str
-    role: LiteralInputRole
-    occurrence: int
-    field_label_text: str
-    value_meaning_hint: str
-    canonical_identity: ResolvedCanonicalIdentity
-
-
-@dataclass(frozen=True)
 class ResolvedLiteralQuestionInput:
     input_ref: str
     value_source_text: str
     resolved_value_text: str
-    role: LiteralInputRole
+    value_type: str = ""
     occurrence: int = 1
-    field_label_text: str = ""
-    value_meaning_hint: str = ""
     evidence_refs: tuple[str, ...] = ()
     canonical_identity: ResolvedCanonicalIdentity | None = None
 
     @property
-    def kind(self) -> KnownInputKind:
-        return KnownInputKind.LITERAL
+    def kind(self) -> str:
+        return "literal"
 
     def __post_init__(self) -> None:
         if not all((self.input_ref, self.value_source_text, self.resolved_value_text)):
@@ -92,47 +65,21 @@ class ResolvedLiteralQuestionInput:
 
     def to_prompt_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
-            "kind": self.kind.value,
+            "kind": self.kind,
             "input_ref": self.input_ref,
             "value_source_text": self.value_source_text,
             "resolved_value_text": self.resolved_value_text,
-            "role": self.role.value,
+            "value_type": self.value_type,
             "occurrence": self.occurrence,
         }
-        if self.field_label_text:
-            payload["field_label_text"] = self.field_label_text
-        if self.value_meaning_hint:
-            payload["value_meaning_hint"] = self.value_meaning_hint
         return payload
-
-    def accepts(self, known: RequestedFactLiteralInput) -> bool:
-        return (
-            known.kind is self.kind
-            and known.text == self.value_source_text
-            and known.resolved_input_ref == self.input_ref
-            and known.resolved_value_text == self.resolved_value_text
-            and known.role is self.role
-            and known.occurrence == self.occurrence
-            and known.field_label_text == self.field_label_text
-            and known.value_meaning_hint == self.value_meaning_hint
-        )
 
     def context_texts(self) -> tuple[str, ...]:
         return (self.value_source_text, self.resolved_value_text)
 
-    def identity_input(self) -> ResolvedIdentityInput | None:
-        if self.canonical_identity is None:
-            return None
-        return ResolvedIdentityInput(
-            input_ref=self.input_ref,
-            value_source_text=self.value_source_text,
-            resolved_value_text=self.resolved_value_text,
-            role=self.role,
-            occurrence=self.occurrence,
-            field_label_text=self.field_label_text,
-            value_meaning_hint=self.value_meaning_hint,
-            canonical_identity=self.canonical_identity,
-        )
+    @property
+    def operand_text(self) -> str:
+        return self.resolved_value_text
 
     def row_set_memory_references(self) -> tuple[str, ...]:
         return ()
@@ -146,8 +93,8 @@ class ResolvedRowSetQuestionInput:
     occurrence: int = 1
 
     @property
-    def kind(self) -> KnownInputKind:
-        return KnownInputKind.ROW_SET_REFERENCE
+    def kind(self) -> str:
+        return "row_set_reference"
 
     def __post_init__(self) -> None:
         if not self.input_ref or not self.reference_text or not self.memory_ids:
@@ -157,25 +104,18 @@ class ResolvedRowSetQuestionInput:
 
     def to_prompt_payload(self) -> dict[str, object]:
         return {
-            "kind": self.kind.value,
+            "kind": self.kind,
             "input_ref": self.input_ref,
             "reference_text": self.reference_text,
             "occurrence": self.occurrence,
         }
 
-    def accepts(self, known: RequestedFactRowSetReferenceInput) -> bool:
-        return (
-            known.kind is self.kind
-            and known.text == self.reference_text
-            and known.resolved_input_ref == self.input_ref
-            and known.occurrence == self.occurrence
-        )
-
     def context_texts(self) -> tuple[str, ...]:
         return (self.reference_text,)
 
-    def identity_input(self) -> ResolvedIdentityInput | None:
-        return None
+    @property
+    def operand_text(self) -> str:
+        return self.reference_text
 
     def row_set_memory_references(self) -> tuple[str, ...]:
         return self.memory_ids
@@ -192,8 +132,7 @@ class CompiledResolvedValue:
     resolved_text: str
     source_kinds: tuple[str, ...]
     sources: tuple[ResolutionSource, ...]
-    field_label_text: str = ""
-    value_meaning_hint: str = ""
+    value_type: str = ""
     canonical_identity: ResolvedCanonicalIdentity | None = None
 
     def to_prompt_payload(self) -> dict[str, object]:
@@ -210,15 +149,12 @@ class CompiledResolvedValue:
 class CompiledRetainedFramePart:
     kind: ConversationFramePartKind
     text: str
-    answer_shape: ConversationAnswerShape | None = None
 
     def to_prompt_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "kind": self.kind.value,
             "text": self.text,
         }
-        if self.answer_shape is not None:
-            payload["answer_shape"] = self.answer_shape.to_model_dict()
         return payload
 
 
@@ -232,6 +168,7 @@ class CompiledResolvedClause:
     def to_prompt_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "current_clause_text": self.current_clause_text,
+            "resolved_request": self.resolved_text,
             "resolved_values": [
                 value.to_prompt_payload() for value in self.values if value.source_kinds
             ],
@@ -295,36 +232,8 @@ class CompiledConversationResolution:
             )
         )
 
-    def accepts_question_input(self, known: RequestedFactKnownInput) -> bool:
-        from fervis.lookup.question_contract.model import (
-            RequestedFactLiteralInput,
-            RequestedFactRowSetReferenceInput,
-        )
-
-        match known:
-            case RequestedFactLiteralInput():
-                for item in self.inputs:
-                    match item:
-                        case ResolvedLiteralQuestionInput() if item.accepts(known):
-                            return True
-                        case _:
-                            continue
-                return False
-            case RequestedFactRowSetReferenceInput():
-                for item in self.inputs:
-                    match item:
-                        case ResolvedRowSetQuestionInput() if item.accepts(known):
-                            return True
-                        case _:
-                            continue
-                return False
-
-    def identity_inputs(self) -> tuple[ResolvedIdentityInput, ...]:
-        return tuple(
-            identity
-            for item in self.inputs
-            if (identity := item.identity_input()) is not None
-        )
+    def question_contract_input_text_by_ref(self) -> dict[str, str]:
+        return {item.input_ref: item.operand_text for item in self.inputs}
 
     @property
     def clarification_lineage_refs(self) -> tuple[str, ...]:
@@ -335,7 +244,8 @@ class CompiledConversationResolution:
     @property
     def uses_prior_context(self) -> bool:
         return (
-            self.frame_call is not None
+            self.active_clarification is not None
+            or self.frame_call is not None
             or any(clause.retained_frame_parts for clause in self.clauses)
             or any(
                 source.uses_prior_context()
@@ -402,27 +312,27 @@ def _active_clarification(
     used_source_ids = {
         source.source_id
         for clause in resolution.clauses
-        for value in clause.values
-        for source in value.sources
+        for source in clause.attribution_sources
         if isinstance(source, ContextAnchorSource)
     }
     active_sources = tuple(
         source
         for source in context_sources
-        if source.kind == "active_clarification"
-        and source.source_id in used_source_ids
+        if source.kind == "active_clarification" and source.source_id in used_source_ids
     )
     if not active_sources:
         return None
     if len(active_sources) != 1:
-        raise ValueError("conversation resolution selected multiple clarification chains")
+        raise ValueError(
+            "conversation resolution selected multiple clarification chains"
+        )
     return active_clarification_from_source(active_sources[0])
 
 
 def _compile_clause(
     clause: ResolvedConversationClause,
     *,
-    parameters_by_value_id: dict[str, ConversationFrameParameter],
+    parameters_by_value_id: dict[str, ConversationCallableParameter],
     memory_projection: ConversationMemoryCardProjection,
 ) -> CompiledResolvedClause:
     return CompiledResolvedClause(
@@ -451,7 +361,6 @@ def _compile_retained_frame_part(
     *,
     memory_projection: ConversationMemoryCardProjection,
 ) -> CompiledRetainedFramePart:
-    frame = _frame(retained.frame_id, memory_projection=memory_projection)
     part = _frame_part(
         retained.frame_id,
         retained.part_id,
@@ -460,11 +369,6 @@ def _compile_retained_frame_part(
     return CompiledRetainedFramePart(
         kind=part.kind,
         text=part.text,
-        answer_shape=(
-            frame.answer_shape
-            if part.kind is ConversationFramePartKind.ANSWER_OUTPUT
-            else None
-        ),
     )
 
 
@@ -472,8 +376,8 @@ def _resolved_value_parameters(
     resolution: ConversationResolution,
     *,
     memory_projection: ConversationMemoryCardProjection,
-) -> dict[str, ConversationFrameParameter]:
-    parameters: dict[str, ConversationFrameParameter] = {}
+) -> dict[str, ConversationCallableParameter]:
+    parameters: dict[str, ConversationCallableParameter] = {}
     for clause in resolution.clauses:
         for value in clause.values:
             reference = value.frame_parameter
@@ -496,7 +400,7 @@ def _resolved_value_parameters(
 def _compile_value(
     value: ResolvedConversationValue,
     *,
-    parameter: ConversationFrameParameter | None,
+    parameter: ConversationCallableParameter | None,
     memory_projection: ConversationMemoryCardProjection,
 ) -> CompiledResolvedValue:
     return CompiledResolvedValue(
@@ -504,37 +408,10 @@ def _compile_value(
         resolved_text=value.resolved_text,
         source_kinds=_value_source_kinds(
             value,
-            parameter_kind=parameter.kind if parameter is not None else None,
             memory_projection=memory_projection,
         ),
         sources=value.sources,
-        field_label_text=(parameter.field_label_text if parameter is not None else ""),
-        value_meaning_hint=(
-            parameter.value_meaning_hint if parameter is not None else ""
-        ),
-        canonical_identity=_parameter_canonical_identity(parameter),
-    )
-
-
-def _parameter_canonical_identity(
-    parameter: ConversationFrameParameter | None,
-) -> ResolvedCanonicalIdentity | None:
-    if parameter is None or not isinstance(
-        parameter.binding,
-        PriorEntityIdentityBinding,
-    ):
-        return None
-    return ResolvedCanonicalIdentity(
-        key=EntityKeyValue(
-            entity_kind=parameter.binding.entity_kind,
-            key_id=parameter.binding.key_id,
-            components=tuple(
-                EntityKeyComponentValue(component_id=component_id, value=value)
-                for component_id, value in parameter.binding.canonical_values.items()
-            ),
-        ),
-        authority_refs=parameter.binding.source_lineage,
-        lineage_refs=parameter.binding.source_lineage,
+        value_type=parameter.value_type if parameter is not None else "",
     )
 
 
@@ -548,9 +425,7 @@ def _compile_input(
             input_ref=_input_ref(value.value_id),
             value_source_text=value.resolved_text,
             resolved_value_text=value.resolved_text,
-            role=LiteralInputRole.REFERENCE_VALUE,
-            field_label_text=value.field_label_text,
-            value_meaning_hint=value.value_meaning_hint,
+            value_type="identity",
             evidence_refs=value.canonical_identity.lineage_refs,
             canonical_identity=value.canonical_identity,
         )
@@ -562,9 +437,8 @@ def _compile_input(
         )
     )
     input_kinds = set(value.source_kinds) & {
-        ConversationFramePartKind.ENTITY_IDENTITY.value,
-        ConversationFramePartKind.TIME_SCOPE.value,
-        ConversationFramePartKind.LIMIT.value,
+        "entity_identity",
+        "time_scope",
     }
     row_set_memory_ids = tuple(
         memory_id
@@ -572,7 +446,7 @@ def _compile_input(
         if _memory_kind(memory_id, memory_projection=memory_projection) == "row_set"
     )
     canonical_identity = _canonical_identity(
-        ConversationFramePartKind.ENTITY_IDENTITY,
+        "entity_identity",
         memory_ids=row_set_memory_ids,
         memory_projection=memory_projection,
     )
@@ -581,13 +455,7 @@ def _compile_input(
             input_ref=_input_ref(value.value_id),
             value_source_text=value.resolved_text,
             resolved_value_text=value.resolved_text,
-            role=LiteralInputRole.REFERENCE_VALUE,
-            value_meaning_hint=_value_meaning_hint(
-                ConversationFramePartKind.ENTITY_IDENTITY,
-                declared_hint=value.value_meaning_hint,
-                memory_ids=row_set_memory_ids,
-                memory_projection=memory_projection,
-            ),
+            value_type="identity",
             evidence_refs=row_set_memory_ids,
             canonical_identity=canonical_identity,
         )
@@ -599,26 +467,27 @@ def _compile_input(
             reference_text=value.resolved_text,
             memory_ids=row_set_memory_ids,
         )
-    if not input_kinds:
+    if not input_kinds and not value.value_type:
         return None
-    if len(input_kinds) != 1:
+    if len(input_kinds) > 1:
         raise ValueError("resolved value has conflicting input meanings")
-    part_kind = ConversationFramePartKind(next(iter(input_kinds)))
+    source_kind = next(iter(input_kinds), "")
+    literal_text = value.resolved_text
+    occurrence = 1
+    if value.value_type in {"named", "string"} and len(value.sources) == 1 and isinstance(value.sources[0], CurrentSpanSource):
+        # A cited current span supplies literal data; resolved_text is the
+        # model's semantic rendering and may include descriptive scaffolding.
+        literal_text = value.sources[0].text
+        occurrence = value.sources[0].occurrence
     return ResolvedLiteralQuestionInput(
         input_ref=_input_ref(value.value_id),
-        value_source_text=value.resolved_text,
-        resolved_value_text=value.resolved_text,
-        role=_literal_role(part_kind),
-        field_label_text=value.field_label_text,
-        value_meaning_hint=_value_meaning_hint(
-            part_kind,
-            declared_hint=value.value_meaning_hint,
-            memory_ids=memory_ids,
-            memory_projection=memory_projection,
-        ),
+        value_source_text=literal_text,
+        resolved_value_text=literal_text,
+        occurrence=occurrence,
+        value_type=value.value_type or _memory_value_type(source_kind),
         evidence_refs=memory_ids,
         canonical_identity=_canonical_identity(
-            part_kind,
+            source_kind,
             memory_ids=memory_ids,
             memory_projection=memory_projection,
         ),
@@ -628,7 +497,6 @@ def _compile_input(
 def _value_source_kinds(
     value: ResolvedConversationValue,
     *,
-    parameter_kind: ConversationFramePartKind | None,
     memory_projection: ConversationMemoryCardProjection,
 ) -> tuple[str, ...]:
     return tuple(
@@ -649,7 +517,6 @@ def _value_source_kinds(
                     for source in value.sources
                     for frame_id, part_id in source.frame_part_references()
                 ),
-                parameter_kind.value if parameter_kind is not None else "",
             )
             if kind
         )
@@ -694,56 +561,20 @@ def _memory_kind(
     return str(memory_projection.private_card(memory_id).get("kind") or "").strip()
 
 
-def _literal_role(kind: ConversationFramePartKind) -> LiteralInputRole:
-    roles = {
-        ConversationFramePartKind.ENTITY_IDENTITY: LiteralInputRole.REFERENCE_VALUE,
-        ConversationFramePartKind.TIME_SCOPE: LiteralInputRole.TIME_VALUE,
-        ConversationFramePartKind.LIMIT: LiteralInputRole.RESULT_LIMIT,
-    }
-    return roles[kind]
-
-
-def _value_meaning_hint(
-    kind: ConversationFramePartKind,
-    *,
-    declared_hint: str,
-    memory_ids: tuple[str, ...],
-    memory_projection: ConversationMemoryCardProjection,
-) -> str:
-    if declared_hint:
-        return declared_hint
-    if kind is ConversationFramePartKind.TIME_SCOPE:
-        return "time scope"
-    if kind is ConversationFramePartKind.LIMIT:
-        return "result limit"
-    entity_kinds = tuple(
-        dict.fromkeys(
-            entity_kind
-            for memory_id in memory_ids
-            if (
-                entity_kind := _private_entity_kind(
-                    memory_projection.private_card(memory_id)
-                )
-            )
-        )
-    )
-    return f"{entity_kinds[0]} identity" if len(entity_kinds) == 1 else ""
-
-
-def _private_entity_kind(private_card: dict[str, object]) -> str:
-    entity_key = private_card.get("entity_key")
-    if not isinstance(entity_key, dict):
-        return ""
-    return str(entity_key.get("entity_kind") or "").strip()
+def _memory_value_type(source_kind: str) -> str:
+    return {
+        "entity_identity": "identity",
+        "time_scope": "time",
+    }.get(source_kind, "literal")
 
 
 def _canonical_identity(
-    kind: ConversationFramePartKind,
+    kind: str,
     *,
     memory_ids: tuple[str, ...],
     memory_projection: ConversationMemoryCardProjection,
 ) -> ResolvedCanonicalIdentity | None:
-    if kind is not ConversationFramePartKind.ENTITY_IDENTITY:
+    if kind != "entity_identity":
         return None
     candidates: list[ResolvedCanonicalIdentity] = []
     for memory_id in memory_ids:

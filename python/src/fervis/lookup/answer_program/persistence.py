@@ -15,7 +15,7 @@ from fervis.lineage.recorder import (
     ProgramRevisionBundleWrite,
     ProgramRevisionWrite,
 )
-from fervis.lookup.answer_program.codec import (
+from fervis.lookup.contract_codec import (
     answer_program_id,
     binding_patch_id,
     canonical_answer_program_json,
@@ -98,6 +98,14 @@ class PriorProgramInvocationReader(Protocol):
         self,
         *,
         run_id: str,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None: ...
+
+    def load_prior_invocation(
+        self,
+        *,
+        invocation_id: str,
         conversation_id: str,
         tenant_id: str,
     ) -> StoredProgramInvocation | None: ...

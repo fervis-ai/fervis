@@ -1,0 +1,140 @@
+id: coverage_separates_required_member_and_observation_conditions
+description: Coverage assigns required-member and observation predicates to their own row domains.
+kind: algorithm
+algorithm: semantic.question_contract
+input:
+  question_context_texts:
+  - Which workers completed a task in every active category during March 2026?
+  frame_payload:
+    decision_basis: The result is the workers whose March task observations cover every active category.
+    outcome:
+      kind: question_meaning
+      answer_requests:
+      - return_request_basis: Return the qualifying worker identities.
+        relational_shape_basis: The requested relational shape is every_required_member_has_observation.
+        request:
+          relational_shape: every_required_member_has_observation
+          result_grain_basis: The requested result grain is one_result_per_qualifying_row.
+          result:
+            kind: one_result_per_qualifying_row
+            coverage_candidates:
+              instance_kind: workers
+              origin:
+                kind: question
+            projection:
+              projection_basis: Return the qualifying candidate identity.
+              candidate_identity: returned
+              explicitly_requested_values: []
+            result_order:
+              ordering_request_basis: The question requests no ordering.
+              ordering:
+                kind: no_ordering_requested
+              selection:
+                kind: all_results
+      supplied_values:
+        selection_limits: []
+        operands:
+        - meaning: the observation period
+          denotation_basis: March 2026 is a period applied to task observations.
+          answer_request_numbers: [1]
+          non_entity_value:
+            kind: temporal_scope
+            value:
+              operands:
+              - March 2026
+              origin:
+                kind: question
+      question_input_inventory_check:
+        all_input_like_phrases_declared: true
+  payload:
+    decision_basis: The result is the workers whose March task observations cover every active category.
+    outcome:
+      kind: question_contract
+      answer_requests:
+      - requested_fact_ref: fact_1
+        origin:
+          source: question_context
+          meaning: workers covering every active category
+          resolved_input_ref: null
+        candidate_set:
+          instance_kind: workers
+          instance_interpretation: resource_population
+        set_graph:
+          identity_input_relations: {}
+          requested_output_relations: {}
+          other_related_sets:
+          - association:
+              id: a1
+              origin:
+                source: question_context
+                meaning: worker task observation
+                resolved_input_ref: null
+            set:
+              id: s3
+              instance_kind: task observations
+              origin:
+                source: question_context
+                meaning: task observations
+                resolved_input_ref: null
+            related_sets:
+            - association:
+                id: a2
+                origin:
+                  source: question_context
+                  meaning: observation category
+                  resolved_input_ref: null
+              set:
+                id: s2
+                instance_kind: categories
+                origin:
+                  source: question_context
+                  meaning: categories
+                  resolved_input_ref: null
+              related_sets: []
+        qualification:
+          kind: coverage
+          candidate_condition: null
+          required_member_set_ref: s2
+          required_member_condition:
+            kind: fact
+            origin:
+              source: question_context
+              meaning: category is active
+              resolved_input_ref: null
+          observation:
+            set_ref: s3
+            condition:
+              kind: within
+              value:
+                kind: fact
+                origin:
+                  source: question_context
+                  meaning: task date
+                  resolved_input_ref: null
+              scope:
+                kind: input_ref
+                input_ref: i1
+        grouping: []
+        ordering: []
+        selection: null
+        distinct_by: []
+        outputs:
+          result_key_outputs:
+          - expression:
+              kind: set_ref
+              set_ref: s1
+          requested_value_outputs: []
+expect:
+  result_contains:
+    requested_facts:
+    - id: fact_1
+      result_grain: subject_rows
+      population_atoms:
+      - fact_1:expression:e2
+      scoped_boolean_requirements:
+      - atom: fact_1:fact:f1
+        use_site: coverage_required_member
+        owner_expression_ref: fact_1:expression:e2
+      - atom: fact_1:expression:e1
+        use_site: coverage_condition
+        owner_expression_ref: fact_1:expression:e2

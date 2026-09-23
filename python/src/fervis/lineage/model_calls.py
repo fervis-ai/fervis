@@ -138,7 +138,9 @@ def _usage_writes(
                 provider_usage_key=usage_key,
                 cost_micros=cost_micros,
                 currency=currency,
-                price_basis_json=dict(price_basis),
+                price_basis_json={**price_basis, **({UsageKey.CACHED_INPUT_TOKENS:
+                    _int(capture.usage[UsageKey.CACHED_INPUT_TOKENS], UsageKey.CACHED_INPUT_TOKENS)}
+                    if usage_kind == ModelUsageKind.INPUT_TOKENS and capture.usage.get(UsageKey.CACHED_INPUT_TOKENS) else {})},
             )
         )
     return tuple(rows)

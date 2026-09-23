@@ -38,6 +38,8 @@ class ResolvedValueOutput(ProviderOutput):
 class ResolvedClauseOutput(ProviderOutput):
     current_clause_text: str
     occurrence: int
+    request_shape_basis: str
+    request_shape_source: str
     resolved_text: str
     retained_frame_parts: tuple[FramePartSourceOutput, ...]
     values: tuple[ResolvedValueOutput, ...]
@@ -78,7 +80,6 @@ class UnresolvedOutcomeOutput(ProviderOutput):
 class ResolvedOutcomeOutput(ProviderOutput):
     kind: str
     resolution_basis: str
-    contextualized_question: str
     clauses: tuple[ResolvedClauseOutput, ...]
 
 

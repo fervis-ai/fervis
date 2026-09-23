@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from fervis.host_api.contracts.pagination import PaginationContract
+
+from fervis.host_api.contracts.population import ParameterPopulation
+
 from dataclasses import dataclass
 from fervis.types.enums import StrEnum
 from typing import Any
@@ -114,8 +118,18 @@ class CatalogParam:
     choices: tuple[str, ...] = ()
     choice_labels: dict[str, str] | None = None
     default: Any = None
+    default_is_known: bool = True
     entity_target: EntityKeyComponentTarget | None = None
     semantics: str = ""
+    population: ParameterPopulation | None = None
+
+
+def requires_caller_supplied_input(param: object) -> bool:
+    """Return whether one declared parameter needs a caller-provided value."""
+
+    return bool(
+        getattr(param, "required", False) and getattr(param, "default", None) is None
+    )
 
 
 @dataclass(frozen=True)
@@ -193,9 +207,15 @@ class EndpointRead:
     facts: tuple[CatalogFact, ...] = ()
     response_envelope: ResponseEnvelopeMetadata = ResponseEnvelopeMetadata()
     pagination: PaginationMetadata | None = PaginationMetadata()
+    complete_single_response: bool = False
+    pagination_binding: PaginationContract | None = None
     access: tuple[str, ...] = ()
     catalog_endpoint: CatalogEndpointMetadata | None = None
     source_metadata: dict[str, Any] | None = None
+
+    @property
+    def description(self) -> str:
+        return str((self.source_metadata or {}).get("description") or "")
 
     @property
     def fields_by_path(self) -> dict[str, CatalogField]:

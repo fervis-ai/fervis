@@ -3,7 +3,7 @@ description: Identity and output bindings remain distinct fields on a relation.
 migrates:
   - api/tests/fervis/lookup/plan_execution/test_relations.py::test_identity_binding_and_output_binding_are_distinct
 kind: algorithm
-algorithm: planning.relation_contract
+algorithm: answer_program.relation
 input:
   mode: relation
   relation:

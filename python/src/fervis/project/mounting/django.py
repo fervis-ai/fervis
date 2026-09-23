@@ -307,6 +307,12 @@ def django_urls_contains_hooks(tree: ast.Module) -> bool:
     if mount is None:
         return False
     fervis_call, wrapper_call = mount
+    target = _urlpattern_mount_target(tree, path="urls.py")
+    if isinstance(target, BlockedPatch):
+        return False
+    patterns = target.list_assignment.value
+    if not isinstance(patterns, ast.List) or not patterns.elts or patterns.elts[0] is not fervis_call:
+        return False
     call_lines = [fervis_call.lineno]
     if wrapper_call is not None:
         call_lines.append(wrapper_call.lineno)
@@ -441,7 +447,8 @@ def _append_urlpattern(
     node: ast.List,
     relative_path: str,
 ) -> str | BlockedPatch:
-    if _contains_urlpattern_call(tree):
+    existing = _fervis_urlpattern_mount(tree)
+    if existing is not None and node.elts and node.elts[0] is existing[0]:
         return text
     if ast.get_source_segment(text, node) is None:
         return BlockedPatch(relative_path, "Could not locate urlpatterns source.")
@@ -464,11 +471,19 @@ def _append_urlpattern(
     closing_index = (node.end_lineno or node.lineno) - 1
     closing_line = lines[closing_index]
     closing_indent = closing_line[: len(closing_line) - len(closing_line.lstrip())]
+    if existing is not None:
+        mount_call = existing[0]
+        if mount_call.lineno != mount_call.end_lineno:
+            return BlockedPatch(relative_path, "Existing Fervis URL mount must be one line to reorder safely.")
+        mount_index = mount_call.lineno - 1
+        if lines[mount_index].strip() != DJANGO_URL_MOUNT:
+            return BlockedPatch(relative_path, "Existing Fervis URL mount has adjacent content; reorder manually.")
+        del lines[mount_index]
     return "".join(
         [
-            *lines[:closing_index],
+            *lines[:node.lineno],
             f"{closing_indent}    {DJANGO_URL_MOUNT}{newline}",
-            *lines[closing_index:],
+            *lines[node.lineno:],
         ]
     )
 

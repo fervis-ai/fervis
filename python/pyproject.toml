@@ -28,11 +28,15 @@ dependencies = [
   "alembic>=1.18,<2",
   "anthropic>=0.78,<1",
   "cryptography>=44,<49",
+  "duckdb==1.5.5",
   "httpx>=0.28,<1",
   "jsonschema>=4.23,<5",
+  "numpy>=1.26,<3",
   "openai[realtime]>=1.59,<2",
+  "pytz>=2025.2",
   "requests>=2.32,<3",
   "SQLAlchemy>=2.0,<3",
+  "sqlglot==30.18.0",
   "tomli>=2,<3",
   "typing-extensions>=4.12,<5",
 ]
@@ -90,15 +94,9 @@ include = [
   "/README.md",
   "/LICENSE",
 ]
-exclude = [
-  "/src/fervis/evaluation/goldsets",
-]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fervis"]
-exclude = [
-  "/src/fervis/evaluation/goldsets",
-]
 
 [tool.hatch.build]
 artifacts = [

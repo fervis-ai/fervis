@@ -3,7 +3,7 @@ description: Relation source read id and identity field roles define relation gr
 migrates:
   - api/tests/fervis/lookup/plan_execution/test_relations.py::test_relation_declares_row_source_and_identity_grain
 kind: algorithm
-algorithm: planning.relation_contract
+algorithm: answer_program.relation
 input:
   mode: relation
   relation:

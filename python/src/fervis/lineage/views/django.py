@@ -377,9 +377,9 @@ def _requested_fact_row(item: models.RequestedFact) -> RequestedFactRow:
         produced_by_step_id=item.produced_by_step_id,
         fact_key=item.fact_key,
         description=item.description,
-        answer_expression_family=item.answer_expression_family,
+        requested_fact_fingerprint=item.requested_fact_fingerprint,
         requested_fact_json=item.requested_fact_json,
-        answer_requests_json=item.answer_requests_json,
+        inputs_json=item.inputs_json,
     )
 
 

@@ -179,67 +179,29 @@ def test_fervis_catalog_returns_configured_flask_route_only_endpoints(
     )
 
     envelope = json.loads(stdout.getvalue())
-    assert exit_code == 2
-    assert envelope["status"] == "blocked"
-    assert envelope["payload"]["status"] == "blocked"
-    assert envelope["next_actions"] == [
+    assert exit_code == 0
+    assert envelope["payload"]["status"] == "passed"
+    assert envelope["next_actions"] == []
+    (source,) = envelope["payload"]["sources"]
+    assert source["name"] == "commerce"
+    assert source["endpoint_count"] == 1
+    assert source["endpoints"] == [
         {
-            "kind": "add_schema_metadata",
-            "endpoint": "list_orders",
-            "description": (
-                "Expose this endpoint's response/query contract through a "
-                "supported Flask surface: OpenAPI/Swagger, Marshmallow metadata, "
-                "JSON:API resource/schema metadata, or Flask-AppBuilder metadata. "
-                "For plain Flask routes, follow "
-                "github.com/fervis-ai/fervis/python/flask/AGENTS.md."
-            ),
-        }
-    ]
-    assert envelope["payload"]["sources"] == [
-        {
-            "name": "commerce",
-            "kind": "flask_app",
-            "configured": {
-                "app": "app:app",
-                "app_args": [],
-                "app_kwargs": {},
-                "path_prefixes": ["/api/"],
-                "blueprints": [],
+            "name": "list_orders",
+            "method": "GET",
+            "path": "/api/orders/",
+            "query_params": [],
+            "path_params": [],
+            "response_fields": [],
+            "quality": "runtime_inspection",
+            "eligible": True,
+            "blocked_reason": None,
+            "next_actions": [],
+            "capabilities": {
+                "read": True,
+                "filter": False,
+                "aggregate_candidate": False,
             },
-            "endpoint_count": 1,
-            "endpoints": [
-                {
-                    "name": "list_orders",
-                    "method": "GET",
-                    "path": "/api/orders/",
-                    "query_params": [],
-                    "path_params": [],
-                    "response_fields": [],
-                    "quality": "route_only",
-                    "eligible": False,
-                    "blocked_reason": "response_schema_missing",
-                    "next_actions": [
-                        {
-                            "kind": "add_schema_metadata",
-                            "endpoint": "list_orders",
-                            "description": (
-                                "Expose this endpoint's response/query contract "
-                                "through a supported Flask surface: "
-                                "OpenAPI/Swagger, Marshmallow metadata, "
-                                "JSON:API resource/schema metadata, or "
-                                "Flask-AppBuilder metadata. For plain "
-                                "Flask routes, follow "
-                                "github.com/fervis-ai/fervis/python/flask/AGENTS.md."
-                            ),
-                        }
-                    ],
-                    "capabilities": {
-                        "read": False,
-                        "filter": False,
-                        "aggregate_candidate": False,
-                    },
-                }
-            ],
         }
     ]
 

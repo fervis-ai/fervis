@@ -655,3 +655,26 @@ def _persisted_run(adapter, question_id: str, run_id: str) -> dict[str, object]:
 
 def _stable_run_fields(run: dict[str, object]) -> dict[str, object]:
     return {key: run.get(key) for key in _DESKTOP_RUN_FIELDS}
+
+
+def test_obsolete_rerun_contract_is_rejected_without_submitting_work(adapter, monkeypatch):
+    from fervis.questions.contracts import RerunQuestionRequest, QuestionLifecycleError
+    from fervis.lookup.answer_program.errors import AnswerProgramContractError
+
+    adapter.lookup.complete_with_terminal(answer="42")
+    original = _ask(adapter, execution_mode=ExecutionMode.INLINE)
+    result = adapter.questions.ask(original)
+    assert result.status == 'COMPLETED'
+
+    def obsolete(**kwargs):
+        raise AnswerProgramContractError('invalid_answer_program', 'Unsupported stored schema')
+
+    monkeypatch.setattr(adapter.questions.runs, 'load_answered_program_invocation', obsolete)
+    with pytest.raises(QuestionLifecycleError) as caught:
+        adapter.questions.rerun_question(RerunQuestionRequest(
+            question_id=result.question_id, base_run_id=result.run_id,
+            principal=original.principal,
+        ))
+    assert caught.value.code == 'rerun_base_not_reusable'
+    assert adapter.lookup.call_count() == 1
+    assert adapter.probe.run_count('conversation_1') == 1

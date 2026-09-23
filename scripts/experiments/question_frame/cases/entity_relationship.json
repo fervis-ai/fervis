@@ -1,0 +1,43 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "that ambiguity. Write instance_kind, then value. The value contains the copied\noperand and its origin.",
+      "new": "that ambiguity. Write instance_kind, row_identity_basis, row_identity_role, then value. row_identity_basis states whether the supplied entity is the qualifying row or a different entity related to it. qualifying_row_identity means the reference identifies one of the rows named by candidate_kind. related_entity_identity means the reference identifies a different entity related to each qualifying row. The value contains the copied operand and its origin.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_frame",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/supplied_values/items/oneOf/0/properties/entity_reference/properties/row_identity_basis",
+      "value": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    {
+      "tool_name": "submit_question_frame",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/supplied_values/items/oneOf/0/properties/entity_reference/properties/row_identity_role",
+      "value": {
+        "enum": [
+          "qualifying_row_identity",
+          "related_entity_identity"
+        ]
+      }
+    },
+    {
+      "tool_name": "submit_question_frame",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/supplied_values/items/oneOf/0/properties/entity_reference/required/1",
+      "value": "row_identity_basis"
+    },
+    {
+      "tool_name": "submit_question_frame",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/supplied_values/items/oneOf/0/properties/entity_reference/required/2",
+      "value": "row_identity_role"
+    }
+  ]
+}

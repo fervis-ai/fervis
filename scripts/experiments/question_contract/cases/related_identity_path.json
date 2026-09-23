@@ -1,0 +1,34 @@
+{
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/$defs/answer_request_fact_1/properties/set_graph/properties/related_sets/minItems",
+      "value": 1
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/$defs/subject_identifier_fact_expression/properties/identity_path",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "association"
+            ]
+          },
+          "association_ref": {
+            "type": "string",
+            "pattern": "^a[1-9][0-9]*$"
+          }
+        },
+        "required": [
+          "kind",
+          "association_ref"
+        ]
+      }
+    }
+  ]
+}

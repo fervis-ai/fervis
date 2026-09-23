@@ -1,34 +1,16 @@
 id: grounded_choice_value_compiles_to_choice_param
-description: A grounded literal choice value compiles to the endpoint choice argument.
-migrates:
-  - api/tests/fervis/lookup/fact_planning/test_values.py::test_grounded_choice_value_compiles_to_choice_param
+description: A typed scalar accepted by a declared choice parameter remains the selected wire value.
 kind: algorithm
-algorithm: planning.value_uses
+algorithm: source_binding.parameter_alternatives
 input:
-  catalog:
-    reads:
-      - id: records
-        endpoint_name: list_records
-        params:
-          - ref: records.query.selector
-            name: selector
-            source: query
-            type: choice
-            choices: [COMPLETED, CANCELLED]
-  relations:
-    - id: records_rows
-      source:
-        kind: api_read
-        read_id: records
-        param_bindings:
-          - param_id: selector
-            value_id: state
-  values:
-    - id: state
-      kind: literal
-      literal_type: string
-      value: COMPLETED
+  projected_parameter_constraints:
+    - target_id: state
+      type: choice
+      choices: [OPEN, CLOSED]
+      projection: WHOLE_VALUE
+      values:
+        - {id: state_value, kind: string, value: CLOSED}
 expect:
   result_contains:
-    endpoint_args:
-      - value: COMPLETED
+    binding_sets:
+      - state: {value: CLOSED}

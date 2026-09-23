@@ -1,0 +1,79 @@
+{
+  "question_context_texts": [
+    "Which staff has been paid the most this month?"
+  ],
+  "frame_payload": {
+    "decision_basis": "The question asks for the staff member or members with the greatest total paid amount within the current month.",
+    "outcome": {
+      "kind": "question_meaning",
+      "answer_requests": [
+        {
+          "result_kind": "grouped_results",
+          "qualifying_row_kind": {
+            "meaning": "payment made to staff",
+            "origin": {
+              "kind": "question"
+            }
+          },
+          "grouping_meanings": [
+            {
+              "meaning": "staff",
+              "origin": {
+                "kind": "question"
+              },
+              "grouping_kind": "related_entity_identity"
+            }
+          ],
+          "return_request_basis": "which staff has been paid the most this month",
+          "returned_result": {
+            "kind": "identities"
+          },
+          "answer_values": [
+            {
+              "value_ref": "v1",
+              "value_kind_basis": "The answer states the total paid amount value.",
+              "value_kind": "value",
+              "meaning": "total paid amount this month",
+              "origin": {
+                "kind": "question"
+              }
+            }
+          ],
+          "returned_value_refs": [],
+          "ordering_value_refs": [
+            "v1"
+          ],
+          "selection": {
+            "kind": "first_rank_with_ties"
+          },
+          "relational_shape": "ordinary"
+        }
+      ],
+      "supplied_values": [
+        {
+          "meaning": "this month",
+          "denotation_basis": "the month referred to by the question",
+          "non_entity_value": {
+            "value": {
+              "operands": [
+                "this month"
+              ],
+              "value_type": {
+                "kind": "temporal_scope"
+              },
+              "origin": {
+                "kind": "question"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expected_request_count": 1,
+  "expected_result_grain": "groups",
+  "expected_selection": "first_rank_with_ties",
+  "expected_aggregate_functions": [
+    "sum"
+  ]
+}

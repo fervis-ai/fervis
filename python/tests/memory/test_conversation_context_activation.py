@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from fervis.memory.prior_requests import (
-    PriorRequestMemory,
-    PriorRequestOutput,
-)
 from fervis.memory.artifacts import FactOutcome, build_fact_artifact
 from fervis.memory.conversation_context import (
     ConversationMemoryActivation,
@@ -26,20 +22,13 @@ def test_prior_request_activation_uses_the_typed_projection() -> None:
         memory_id=memory_id,
         kind="prior_answer_request",
         display=artifact.source_question,
-    )
-    prior_request = PriorRequestMemory(
-        memory_id=memory_id,
-        artifact_id=artifact.artifact_id,
-        request_id="fact_1",
-        answer_fact="sales count",
-        answer_shape=None,
-        output_frames=(
-            PriorRequestOutput(
-                output_id="answer_1",
-                description="sales count",
-                role="ROW_COUNT",
-            ),
-        ),
+        details={
+            "semantic_frame": {
+                "parts": [
+                    {"part_id": "subject", "kind": "subject", "text": "sales"}
+                ]
+            }
+        },
     )
     projection = ConversationMemoryCardProjection(
         cards=(card,),
@@ -48,15 +37,13 @@ def test_prior_request_activation_uses_the_typed_projection() -> None:
                 card=card,
                 kind=ConversationMemoryActivationKind.PRIOR_REQUEST,
                 artifact_id=artifact.artifact_id,
-                prior_request=prior_request,
             ),
         ),
-        prior_requests=(prior_request,),
         private_cards={
             memory_id: {
                 "kind": "prior_answer_request",
                 "artifact_id": artifact.artifact_id,
-                "request_shape": {"answer_fact_template": "stale serialized shape"},
+                "semantic_frame": {"parts": []},
             }
         },
     )
@@ -70,16 +57,9 @@ def test_prior_request_activation_uses_the_typed_projection() -> None:
     assert activated.by_memory_id[memory_id] == {
         "kind": "prior_answer_request",
         "source_question": "How many sales did we make?",
-        "request_shape": {
-            "answer_fact_template": "sales count",
-            "answer_outputs": (
-                {
-                    "output_id": "answer_1",
-                    "description": "sales count",
-                    "role": "ROW_COUNT",
-                },
-            ),
-            "slots": (),
-            "semantic_parts": (),
+        "semantic_frame": {
+            "parts": [
+                {"part_id": "subject", "kind": "subject", "text": "sales"}
+            ]
         },
     }

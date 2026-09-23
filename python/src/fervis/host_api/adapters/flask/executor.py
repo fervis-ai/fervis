@@ -34,6 +34,7 @@ def execute_get_endpoint(
     page_policy: dict[str, Any] | None = None,
     principal_override: FlaskPrincipalOverride | None = None,
     transport_overlay: ReadTransportOverlay | None = None,
+    origin: str | None = None,
 ) -> EndpointExecutionResult:
     with project_import_context(project_root):
         contract = _endpoint_contract(
@@ -73,6 +74,7 @@ def execute_get_endpoint(
                 principal=principal,
                 headers=prepared.headers or {},
                 cookies=prepared.cookies or {},
+                origin=origin,
             ),
         )
 

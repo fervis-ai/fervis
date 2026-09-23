@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.relation_catalog import CatalogValidationError, parse_relation_catalog
+from fervis.lookup.relation_catalog import (
+    CatalogValidationError,
+    parse_relation_catalog,
+)
 from fervis.lookup.relation_catalog.selection import relation_catalog_for_read_ids
-from fervis.lookup.fact_planning.required_inputs import required_inputs
-from fervis.lookup.fact_plan.row_sources import (
+from fervis.lookup.relation_catalog.row_sources import (
     build_row_source_catalog,
+    required_row_source_inputs,
     row_source_prompt_payload,
     row_sources_for_read_id,
 )
@@ -51,11 +54,14 @@ def run_relation_catalog_case(payload: dict[str, Any]) -> list[str]:
     prompt_api_sources = [
         item for item in prompt_sources if item.get("kind") == "api_read"
     ]
-    required = required_inputs(row_sources)
+    required = required_row_source_inputs(row_sources)
     api_source_ids = {item.id for item in api_sources}
     result = {
+        "source_id": source.id,
         "read_id": source.read_id,
-        "endpoint_name": catalog.read(source.read_id).endpoint_name,
+        "endpoint_name": (
+            catalog.read(source.read_id).endpoint_name if source.read_id else ""
+        ),
         "row_path_id": source.row_path_id,
         "fields": {
             field.id: {
@@ -216,6 +222,9 @@ def run_relation_catalog_case(payload: dict[str, Any]) -> list[str]:
 
 
 def _source_for_expected(row_sources: Any, expected: dict[str, Any]) -> Any:
+    source_id = str(expected.get("source_id") or "")
+    if source_id:
+        return row_sources.source(source_id)
     read_id = str(expected["read_id"])
     row_path_id = str(expected.get("row_path_id") or "root")
     for source in row_sources_for_read_id(read_id, row_sources=row_sources):

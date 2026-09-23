@@ -255,6 +255,23 @@ class DjangoQuestionLifecyclePort:
         )
         return _stored_program_invocation(record) if record is not None else None
 
+    def load_prior_invocation(
+        self,
+        *,
+        invocation_id: str,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None:
+        record = (
+            _answered_program_invocations(tenant_id=tenant_id)
+            .filter(
+                invocation_id=invocation_id,
+                run__question__conversation_id=conversation_id,
+            )
+            .first()
+        )
+        return _stored_program_invocation(record) if record is not None else None
+
     def load_program_invocation_for_execution(
         self,
         *,
@@ -722,12 +739,12 @@ def _question(access: AuthorizedQuestionAccess) -> Question | None:
     return rows.first()
 
 
-def _answered_program_invocations(*, run_id: str, tenant_id: str):
-    return ProgramInvocation.objects.select_related("program").filter(
-        run_id=run_id,
+def _answered_program_invocations(*, tenant_id: str, run_id: str | None = None):
+    rows = ProgramInvocation.objects.select_related("program").filter(
         run__question__conversation__tenant_id=tenant_id,
         run__run_result__result_kind=RunResultKind.ANSWERED.value,
     )
+    return rows.filter(run_id=run_id) if run_id is not None else rows
 
 
 def _stored_program_invocation(

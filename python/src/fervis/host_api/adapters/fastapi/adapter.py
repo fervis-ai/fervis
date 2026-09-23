@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
 from typing import Any
+from fervis.host_api.contracts.request_origin import origin_from_request_url
 
 from fervis.host_api.adapters.http import (
     execute_http_read,
@@ -107,13 +108,19 @@ class FastAPIHostApiAdapter:
                 runtime.close()
 
     def capture_read_context(self, request: Any) -> ReadContextRef:
+        origin = (
+            origin_from_request_url(str(request.url))
+            if getattr(request, "url", None) is not None
+            else None
+        )
         user = getattr(getattr(request, "state", None), "user", None)
         if user is None:
-            return ReadContextRef(scheme="anonymous")
+            return ReadContextRef(scheme="anonymous", origin=origin)
         id_attr = _principal_id_attr(self.auth_schema) or "id"
         return ReadContextRef(
             scheme="fastapi_principal",
             key=str(getattr(user, id_attr, user)),
+            origin=origin,
         )
 
     def capture_delegated_credential(
@@ -159,6 +166,7 @@ class FastAPIHostApiAdapter:
                 None if invocation.page_policy is None else dict(invocation.page_policy)
             ),
             dependency_override=dependency_override,
+            origin=authority.read_context_ref.origin,
             transport_overlay=credential_overlay_from_auth_schema(
                 schema=self.auth_schema,
                 credential=authority.delegated_credential,

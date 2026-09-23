@@ -1,46 +1,16 @@
 id: duplicate_grounded_time_values_compile_once
-description: Duplicate grounded values for the same endpoint param compile to one endpoint argument.
-migrates:
-  - api/tests/fervis/lookup/fact_planning/test_values.py::test_duplicate_grounded_time_values_compile_to_one_endpoint_param
+description: Equivalent resolved values for one parameter compile once and retain both proofs.
 kind: algorithm
-algorithm: planning.value_uses
+algorithm: source_binding.parameter_alternatives
 input:
-  catalog:
-    reads:
-      - id: records
-        endpoint_name: list_records
-        params:
-          - ref: records.query.start_date
-            name: start_date
-            source: query
-            type: date
-  relations:
-    - id: records_rows
-      source:
-        kind: api_read
-        read_id: records
-        param_bindings:
-          - param_id: start_date
-            value_id: jan_1_revenue
-            value_component: start
-          - param_id: start_date
-            value_id: jan_1_average_ticket
-            value_component: start
-  values:
-    - id: jan_1_revenue
-      kind: time
-      expression: January 1
-      resolved_start: "2030-01-01"
-      resolved_end: "2030-01-01"
-      granularity: day
-    - id: jan_1_average_ticket
-      kind: time
-      expression: January 1
-      resolved_start: "2030-01-01"
-      resolved_end: "2030-01-01"
-      granularity: day
+  projected_parameter_constraints:
+    - target_id: start_date
+      type: date
+      projection: TEMPORAL_START
+      values:
+        - {id: first_use, kind: time, expression: January 1, resolved_start: "2030-01-01", resolved_end: "2030-01-01", granularity: day, proof_refs: [use:first]}
+        - {id: second_use, kind: time, expression: January 1, resolved_start: "2030-01-01", resolved_end: "2030-01-01", granularity: day, proof_refs: [use:second]}
 expect:
   result_contains:
-    endpoint_args:
-      - param_ref: records.query.start_date
-        value: "2030-01-01"
+    binding_sets:
+      - start_date: {value: "2030-01-01", proof_refs: [use:first, use:second]}

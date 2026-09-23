@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from fervis.lookup.canonical_data import RuntimeValue
+from fervis.lookup.identity_types import observed_reference_values_from_payload
 
 from fervis.lookup.clarification.model import (
     CatalogInputTarget,
@@ -20,7 +21,6 @@ from fervis.lookup.clarification.model import (
     ConversationInterpretationCandidate,
     ConversationInterpretationEvidence,
     ConversationResolutionContinuation,
-    FactPlanningCatalogInputContinuation,
     GroundingContinuation,
     QuestionContractContinuation,
     SourceBindingCatalogInputContinuation,
@@ -111,19 +111,13 @@ def _continuation_payload(
         return {
             "kind": "grounding",
             "knownInputId": continuation.known_input_id,
+            **({"referenceOperand":continuation.reference_operand} if continuation.reference_operand else {}),
             "acceptsFreeText": continuation.accepts_free_text,
         }
     if isinstance(continuation, SourceBindingCatalogInputContinuation):
         return {
             "kind": "source_binding_catalog_input",
             "requestedFactId": continuation.requested_fact_id,
-            "target": _catalog_target_payload(continuation.target),
-        }
-    if isinstance(continuation, FactPlanningCatalogInputContinuation):
-        return {
-            "kind": "fact_planning_catalog_input",
-            "requestedFactId": continuation.requested_fact_id,
-            "planningRequirementId": continuation.planning_requirement_id,
             "target": _catalog_target_payload(continuation.target),
         }
     raise TypeError("unsupported clarification continuation")
@@ -163,22 +157,18 @@ def _continuation_from_payload(
             expected_value_kind=_required_text(payload, "expectedValueKind"),
         )
     if kind == "grounding":
+        operand=payload.get("referenceOperand", "")
+        if not isinstance(operand,str):
+            raise ValueError("Reference operand must be text")
         return GroundingContinuation(
             known_input_id=_required_text(payload, "knownInputId"),
+            reference_operand=operand,
             accepts_free_text=_boolean(payload.get("acceptsFreeText")),
         )
     target = _catalog_target_from_payload(_required_mapping(payload, "target"))
     if kind == "source_binding_catalog_input":
         return SourceBindingCatalogInputContinuation(
             requested_fact_id=_required_text(payload, "requestedFactId"),
-            target=target,
-        )
-    if kind == "fact_planning_catalog_input":
-        return FactPlanningCatalogInputContinuation(
-            requested_fact_id=_required_text(payload, "requestedFactId"),
-            planning_requirement_id=_required_text(
-                payload, "planningRequirementId"
-            ),
             target=target,
         )
     raise ValueError(f"unsupported clarification continuation: {kind}")
@@ -245,6 +235,11 @@ def _option_payload(option: ClarificationOption) -> dict[str, RuntimeValue]:
             }
             for component in option.key.components
         ]
+    if option.observed_properties:
+        payload["observedSourceRef"] = option.observed_source_ref
+        payload["observedProperties"] = [
+            item.to_payload() for item in option.observed_properties
+        ]
     if option.matched_label:
         payload["matchedLabel"] = option.matched_label
     if option.matched_field:
@@ -264,6 +259,10 @@ def _option_from_payload(payload: Mapping[str, object]) -> ClarificationOption:
         label=_text(payload.get("label")),
         value=_text(payload.get("value")),
         key=_option_key_from_payload(payload),
+        observed_source_ref=_text(payload.get("observedSourceRef")),
+        observed_properties=observed_reference_values_from_payload(
+            payload.get("observedProperties")
+        ),
         matched_label=_text(payload.get("matchedLabel")),
         matched_field=_text(payload.get("matchedField")),
         matched_value=_text(payload.get("matchedValue")),

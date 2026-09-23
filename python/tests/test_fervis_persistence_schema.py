@@ -133,7 +133,7 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
 def test_head_revision_fingerprint_matches_current_metadata() -> None:
     assert (
         schema.metadata_fingerprint()
-        == "4c4c314a09147c1e3ba61f56476b6b7a0d516b155d6e1c3c779ddafff3041d5e"
+        == "8aa3684b85ef1af4e4f0e30992dee0e360cbb565ba39bddc703a22b94804f42d"
     )
     schema.assert_head_schema_fingerprint_is_current()
 

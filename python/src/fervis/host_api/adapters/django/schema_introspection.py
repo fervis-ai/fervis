@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from inspect import getattr_static
 from types import GenericAlias, NoneType, UnionType
 from typing import TypeAlias, Union, get_args, get_origin, get_type_hints
 
@@ -23,7 +23,7 @@ from fervis.host_api.contracts import (
     ParameterContract,
     ResponseFieldContract,
 )
-from fervis.host_api.contracts.values import ContractValue
+from fervis.host_api.contracts.values import ContractValue, serialize_parameter_default
 
 
 @dataclass(frozen=True)
@@ -306,6 +306,7 @@ def _inspect_serializer(
         output_path = f"{prefix}.{output_name}" if prefix else output_name
         nested = _nested_serializer(serializer_field)
         if nested is not None:
+            nested_model = _serializer_model(nested.__class__)
             related_model = _related_model_for_serializer_field(
                 model,
                 output_name=output_name,
@@ -321,6 +322,7 @@ def _inspect_serializer(
                     name=output_name,
                     type=field_type,
                     path=output_path,
+                    nullable=_response_nullable(serializer_field),
                 )
             )
             nested_schema = _inspect_serializer(
@@ -328,9 +330,9 @@ def _inspect_serializer(
                 fields,
                 bindings,
                 prefix=output_path,
-                model_context=related_model,
+                model_context=nested_model or related_model,
                 relation_model=(
-                    related_model
+                    nested_model or related_model
                     if isinstance(serializer_field, serializers.ListSerializer)
                     else relation_model
                 ),
@@ -365,6 +367,16 @@ def _inspect_serializer(
         source_path = _serializer_field_source(output_name, serializer_field)
         owner_model, model_field = _resolve_model_field(model, source_path=source_path)
         if owner_model is None or model_field is None:
+            continue
+        if (
+            isinstance(model_field, models.ForeignKey)
+            and source_path.split(".")[-1] == model_field.name
+            and not isinstance(serializer_field, serializers.PrimaryKeyRelatedField)
+        ):
+            # A field reading the related object can serialize its display text,
+            # slug, or URL. Only DRF's primary-key field certifies that this
+            # object-valued access returns the target key. Explicit key paths
+            # and foreign-key attnames already address the scalar itself.
             continue
         owner_model, model_field = _nested_key_binding(
             owner_model,
@@ -416,6 +428,14 @@ def _nested_key_binding(
     return owner_model, model_field
 
 
+def _response_nullable(field: serializers.Field) -> bool:
+    # DRF omits missing optional fields; absence cannot prove a closed value domain.
+    return bool(field.allow_null) or (
+        not field.required
+        and (field.default is serializers.empty or field.default is None or callable(field.default))
+    )
+
+
 def _response_field(
     name: str,
     field: serializers.Field,
@@ -428,6 +448,7 @@ def _response_field(
         path=path,
         description=str(getattr(field, "help_text", "") or ""),
         choices=_choices(field),
+        nullable=_response_nullable(field),
     )
 
 
@@ -643,7 +664,8 @@ def query_params_from_serializer(
                 description=str(getattr(field, "help_text", "") or ""),
                 choices=_choices(field),
                 choice_labels=_choice_labels(field),
-                default=_json_safe_default(getattr(field, "default", None)),
+                default=_json_safe_default(field.default, choice_tokens=bool(_choices(field))),
+                default_is_known=field.default is serializers.empty or not callable(field.default),
                 source="query",
                 entity_target=_query_param_entity_target(
                     name,
@@ -660,8 +682,11 @@ def path_param_entity_target(
     model: type | None,
     *,
     param_name: str,
+    declared_field: models.Field | None = None,
 ) -> EntityKeyComponentTargetContract | None:
-    identity = _path_param_identity(model, param_name=param_name)
+    identity = _path_param_identity(
+        model, param_name=param_name, declared_field=declared_field
+    )
     if identity is None:
         return None
     target_model, target_field = identity
@@ -676,8 +701,11 @@ def path_param_candidate_key_authority(
     model: type | None,
     *,
     param_name: str,
+    declared_field: models.Field | None = None,
 ) -> CandidateKeyAuthorityContract | None:
-    identity = _path_param_identity(model, param_name=param_name)
+    identity = _path_param_identity(
+        model, param_name=param_name, declared_field=declared_field
+    )
     if identity is None:
         return None
     target_model, target_field = identity
@@ -697,7 +725,13 @@ def _path_param_identity(
     model: type | None,
     *,
     param_name: str,
+    declared_field: models.Field | None = None,
 ) -> tuple[type, models.Field] | None:
+    if declared_field is not None:
+        identity = _model_field_identity(declared_field)
+        if identity is None:
+            raise ValueError("declared path parameter field is not an identity key")
+        return identity
     if not isinstance(model, type):
         return None
     meta = getattr(model, "_meta", None)
@@ -800,7 +834,28 @@ def _field_type(field: serializers.Field) -> str:
         method_type = _serializer_method_field_type(field)
         if method_type:
             return method_type
+    if type(field) is serializers.ReadOnlyField:
+        property_type = _readonly_property_type(field)
+        if property_type:
+            return property_type
     return _FIELD_TYPE_MAP.get(field.__class__.__name__, "any")
+
+
+def _readonly_property_type(field: serializers.ReadOnlyField) -> str:
+    model = _serializer_model(type(field.parent))
+    if model is None or field.source == "*":
+        return ""
+    source = _serializer_field_source(str(field.field_name or ""), field)
+    if "." in source:
+        path, source = source.rsplit(".", 1)
+        _, relation = _resolve_model_field(model, source_path=path)
+        model = _related_model(relation) if relation is not None else None
+        if model is None:
+            return ""
+    descriptor = getattr_static(model, source, None)
+    if not isinstance(descriptor, property) or descriptor.fget is None:
+        return ""
+    return _python_type_name(_return_annotation(descriptor.fget))
 
 
 def _serializer_method_field_type(field: serializers.SerializerMethodField) -> str:
@@ -868,14 +923,13 @@ def _choice_labels(field: serializers.Field) -> dict[str, str]:
 
 def _json_safe_default(
     value: ContractValue | Callable[[], ContractValue],
+    *, choice_tokens: bool = False,
 ) -> ContractValue:
     if value is serializers.empty:
         return None
     if callable(value):
         return None
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
+    return serialize_parameter_default(value, choice_tokens=choice_tokens)
 
 
 def _query_param_entity_target(
@@ -1090,15 +1144,7 @@ def _related_model(field: models.Field | None) -> type | None:
 
 
 def _model_identity_type(model: type) -> str:
-    object_name = str(
-        getattr(getattr(model, "_meta", None), "object_name", "")
-        or getattr(model, "__name__", "")
-    )
-    return "_".join(_camel_words(object_name).split()) or str(
-        getattr(getattr(model, "_meta", None), "model_name", "") or ""
-    )
-
-
-def _camel_words(value: str) -> str:
-    parts = re.findall(r"[A-Z]+(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|\d+", str(value or ""))
-    return " ".join(part.lower() for part in parts if part)
+    meta = getattr(model, "_meta", None)
+    if not isinstance(meta, Options):
+        raise ValueError("model identity requires Django model metadata")
+    return str(meta.label_lower)

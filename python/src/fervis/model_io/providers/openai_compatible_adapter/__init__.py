@@ -27,7 +27,7 @@ from fervis.model_io.providers.session_runtime import ProviderSessionRuntime
 from .loop_adapter import OpenAICompatibleLoopRuntime
 
 
-def _config_for_spec(spec: ProviderSpec) -> ChatProviderConfig:
+def provider_config_for_spec(spec: ProviderSpec) -> ChatProviderConfig:
     return ChatProviderConfig(
         provider_name=spec.name,
         model_name=spec.default_model,
@@ -37,12 +37,13 @@ def _config_for_spec(spec: ProviderSpec) -> ChatProviderConfig:
         default_base_url=spec.default_base_url,
         temperature=spec.temperature,
         max_output_tokens_parameter=spec.max_output_tokens_parameter,
+        reasoning_effort=spec.reasoning_effort,
     )
 
 
 OPENAI_COMPATIBLE_PROVIDER_CONFIGS = (
     *(
-        _config_for_spec(spec)
+        provider_config_for_spec(spec)
         for spec in supported_provider_specs().values()
         if spec.transport == OPENAI_CHAT_COMPLETIONS
     ),

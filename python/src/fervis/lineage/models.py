@@ -635,9 +635,9 @@ class RequestedFact(models.Model):
     )
     fact_key = models.CharField(max_length=128)
     description = models.TextField(blank=True, default="")
-    answer_expression_family = models.CharField(max_length=64)
+    requested_fact_fingerprint = models.CharField(max_length=64)
     requested_fact_json = models.JSONField(default=dict, blank=True)
-    answer_requests_json = models.JSONField(default=dict, blank=True)
+    inputs_json = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

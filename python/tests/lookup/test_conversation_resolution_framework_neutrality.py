@@ -32,7 +32,6 @@ def test_fervis_core_conversation_resolution_uses_synthetic_framework_memory_not
 
     projection = project_conversation_memory_cards(
         {"factArtifacts": [artifact.to_dict()]},
-        current_question="How about those records?",
     )
 
     assert projection.cards

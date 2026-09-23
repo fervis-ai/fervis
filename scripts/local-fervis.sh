@@ -14,8 +14,8 @@ if [[ -z "$project_root" || ! -d "$project_root" ]]; then
   exit 2
 fi
 
-fervis_load_env_file "$project_root/.env"
 fervis_load_env_file "$repo_root/.env"
+fervis_load_env_file "$project_root/.env"
 
 database_url="${FERVIS_LOCAL_DATABASE_URL:-${DATABASE_URL:-}}"
 if [[ -n "$database_url" ]]; then

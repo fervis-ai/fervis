@@ -1,0 +1,24 @@
+id: query_enrichment_matches_semantic_requirements
+description: Query Enrichment inventories semantically proximate resources before reviewing matches and identity terms.
+kind: algorithm
+algorithm: semantic.query_enrichment
+input:
+  resource_names: [Event, Operator, Region]
+  recall_buckets:
+    - {bucket_ref: "fact_1:recall:population", kind: population, meaning: event occurrences, requirement_refs: ["fact_1:set:s1"]}
+    - {bucket_ref: "fact_1:recall:output_1", kind: output, meaning: operator identity, requirement_refs: ["fact_1:set:s1", "fact_1:fact:f1"]}
+  reference_tasks:
+    - {input_use_ref: "fact_1:input_use:e1:1", input_ref: i1, input_text: Ada, operand_meaning: the operator being counted, reference_fact_ref: "fact_1:fact:f1", expected_set_ref: "fact_1:set:s2"}
+  payload:
+    recall_bucket_matches:
+      - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [Event, Operator], matching_resource_names: [Event]}
+      - {bucket_ref: "fact_1:recall:output_1", exhaustive_resource_names: [Operator, Event], matching_resource_names: [Operator, Event]}
+    input_resource_search_terms:
+      - {input_use_ref: "fact_1:input_use:e1:1", catalog_search_terms: [Operator]}
+expect:
+  result_contains:
+    recall_bucket_matches:
+      - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [Event, Operator], matching_resource_names: [Event]}
+      - {bucket_ref: "fact_1:recall:output_1", exhaustive_resource_names: [Operator, Event], matching_resource_names: [Operator, Event]}
+    input_resource_search_terms:
+      - {input_use_ref: "fact_1:input_use:e1:1", catalog_search_terms: [Operator]}

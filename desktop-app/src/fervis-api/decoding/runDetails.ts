@@ -52,6 +52,16 @@ export function decodeStepSemantic(raw: unknown): StepSemantic {
         };
       }
     ),
+    resourceRecalls: expectArray(
+      object.resourceRecalls,
+      "step.semantic.resourceRecalls"
+    ).map((item) => {
+      const recall = expectObject(item, "semantic resource recall");
+      return {
+        inputUseRef: expectString(recall.inputUseRef, "inputUseRef"),
+        resourceName: expectString(recall.resourceName, "resourceName")
+      };
+    }),
     resolverCandidates: expectArray(
       object.resolverCandidates,
       "step.semantic.resolverCandidates"
@@ -64,20 +74,23 @@ export function decodeStepSemantic(raw: unknown): StepSemantic {
         basis: expectString(candidate.basis, "basis")
       };
     }),
-    groundingResults: expectArray(
-      object.groundingResults,
-      "step.semantic.groundingResults"
+    identitySelections: expectArray(
+      object.identitySelections,
+      "step.semantic.identitySelections"
     ).map((item) => {
-      const result = expectObject(item, "semantic grounding result");
+      const selection = expectObject(item, "semantic identity selection");
       return {
-        inputId: expectString(result.inputId, "inputId"),
-        inputText: expectString(result.inputText, "inputText"),
-        resolverReadId: expectString(result.resolverReadId, "resolverReadId"),
-        resolverLabel: expectString(result.resolverLabel, "resolverLabel"),
-        entityKind: expectString(result.entityKind, "entityKind"),
-        matchedField: expectString(result.matchedField, "matchedField"),
-        matchedValue: expectString(result.matchedValue, "matchedValue"),
-        matchedLabel: expectString(result.matchedLabel, "matchedLabel")
+        inputId: expectString(selection.inputId, "inputId"),
+        canonicalOptionId: expectString(
+          selection.canonicalOptionId,
+          "canonicalOptionId"
+        ),
+        resolverRouteId: expectString(
+          selection.resolverRouteId,
+          "resolverRouteId"
+        ),
+        basis: expectString(selection.basis, "basis"),
+        outcome: expectString(selection.outcome, "outcome")
       };
     }),
     interpretedInputs: expectArray(

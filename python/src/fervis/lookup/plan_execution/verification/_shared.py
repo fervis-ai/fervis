@@ -1,4 +1,4 @@
-"""Shared imports for fact-plan verification internals."""
+"""Shared imports for answer-program verification internals."""
 
 # ruff: noqa: F401
 
@@ -25,20 +25,7 @@ from fervis.lookup.answer_program.expression_instantiation import (
     instantiate_program_expressions,
 )
 from fervis.lookup.answer_program.model import AnswerProgram
-from fervis.lookup.fact_plan.fact_plan import (
-    BlockedFact,
-    BlockedFactBasis,
-    BlockedFactField,
-    FactPlan,
-    MissingCatalogChoiceInput,
-    MissingCatalogRequiredInput,
-    PlanClarification,
-    PlanImpossible,
-)
 from .operation_invariants import verify_operation
-from fervis.lookup.fact_planning.grounded_params import (
-    unique_grounded_param_ids_by_row_source,
-)
 from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationFunction,
@@ -64,11 +51,7 @@ from fervis.lookup.answer_program.relations import (
     RelationSource,
     SourceKind,
 )
-from fervis.lookup.fact_planning.required_inputs import (
-    clarifiable_required_inputs,
-    grounded_required_input_ids,
-)
-from fervis.lookup.fact_plan.row_sources import (
+from fervis.lookup.relation_catalog.row_sources import (
     RowSource,
     RowSourceCatalog,
     RowSourceKind,
@@ -79,7 +62,6 @@ from fervis.lookup.fact_plan.row_sources import (
     row_source_field_evidence_ref,
     row_source_for_relation,
 )
-from fervis.lookup.fact_planning.value_validation import verify_value_contract
 from fervis.lookup.answer_program.values import (
     FactValue,
     LiteralType,

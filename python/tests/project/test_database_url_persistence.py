@@ -54,7 +54,11 @@ def test_database_url_migration_upgrades_revision_one_database(
     }
 
     assert migration.status is MigrationStatus.APPLIED
-    assert migration.pending_revisions == ["fervis.0002", "fervis.0003"]
+    assert migration.pending_revisions == [
+        "fervis.0002",
+        "fervis.0003",
+        "fervis.0004",
+    ]
     assert {"idempotency_authority_ref", "idempotency_scope"} <= columns
     assert all(check.passed for check in backend.inspect())
 
@@ -81,10 +85,39 @@ def test_database_url_migration_upgrades_revision_two_database(
     }
 
     assert migration.status is MigrationStatus.APPLIED
-    assert migration.pending_revisions == ["fervis.0003"]
+    assert migration.pending_revisions == ["fervis.0003", "fervis.0004"]
     assert "trigger_clarification_response_id" in columns
     assert columns["trigger_clarification_response_id"]["nullable"] is False
     assert columns["trigger_clarification_response_id"]["default"] is None
+    assert all(check.passed for check in backend.inspect())
+
+
+def test_database_url_migration_upgrades_revision_three_requested_facts(
+    tmp_path,
+    monkeypatch,
+):
+    database_path = tmp_path / "fervis.sqlite3"
+    database_url = f"sqlite:///{database_path}"
+    engine = create_sqlite_engine(database_url)
+    with engine.begin() as connection:
+        command.upgrade(
+            alembic_config(connection),
+            "0003_clarification_successor_runs",
+        )
+    monkeypatch.setenv("FERVIS_DATABASE_URL", database_url)
+    backend = DatabaseUrlPersistenceBackend(config=DatabaseUrlPersistence())
+
+    migration = backend.migrate()
+    columns = {
+        item["name"]
+        for item in inspect(engine).get_columns("fervis_requested_fact")
+    }
+
+    assert migration.status is MigrationStatus.APPLIED
+    assert migration.pending_revisions == ["fervis.0004"]
+    assert {"requested_fact_fingerprint", "requested_fact_json", "inputs_json"} <= columns
+    assert "answer_expression_family" not in columns
+    assert "answer_requests_json" not in columns
     assert all(check.passed for check in backend.inspect())
 
 
@@ -157,7 +190,7 @@ def test_revision_two_preserves_clarification_lineage(tmp_path, monkeypatch):
                 "produced_by_step_id": "step-1",
                 "fact_key": "fact-1",
                 "description": "warehouse",
-                "answer_expression_family": "direct",
+                "answer_expression_family": "scalar_value",
                 "requested_fact_json": {},
                 "answer_requests_json": [],
                 "created_at": now,

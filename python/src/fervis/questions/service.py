@@ -27,7 +27,8 @@ from fervis.run_work.events import (
     run_terminal_event,
 )
 from fervis.run_work.service import RunWorkService
-from fervis.lookup.answer_program.codec import answer_program_id
+from fervis.lookup.contract_codec import answer_program_id
+from fervis.lookup.answer_program.errors import AnswerProgramContractError
 from fervis.lookup.answer_program.inputs import apply_binding_patch
 from fervis.lookup.answer_program.revisions import apply_capability
 from fervis.lookup.answer_program.persistence import (
@@ -396,10 +397,16 @@ class QuestionService:
             result = self._ask_result_from_queued_run(existing)
             self._emit_result_events(result, events=events)
             return result
-        stored_base = self.runs.load_answered_program_invocation(
-            run_id=request.base_run_id,
-            access=question,
-        )
+        try:
+            stored_base = self.runs.load_answered_program_invocation(
+                run_id=request.base_run_id,
+                access=question,
+            )
+        except AnswerProgramContractError as exc:
+            raise QuestionLifecycleError(
+                "rerun_base_not_reusable",
+                "the stored program is incompatible; submit the question again to compile a current program",
+            ) from exc
         if stored_base is None:
             raise QuestionLifecycleError(
                 "rerun_base_not_reusable",

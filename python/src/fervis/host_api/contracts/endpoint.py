@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
+from fervis.host_api.contracts.population import ParameterPopulation
+
 from dataclasses import dataclass, field
 from fervis.types.enums import StrEnum
 from uuid import NAMESPACE_URL, uuid5
@@ -15,6 +17,11 @@ from fervis.host_api.contracts.values import ContractValue
 
 def _public_values(values: Iterable[ContractValue]) -> list[ContractValue]:
     return list(values)
+
+
+class ParameterSemantics(StrEnum):
+    OPAQUE_QUERY_PARAM = "opaque_query_param"
+    RESPONSE_SHAPE = "response_shape"
 
 
 class FrameworkKind(StrEnum):
@@ -105,9 +112,11 @@ class ParameterContract:
     choices: tuple[str, ...] = ()
     choice_labels: dict[str, str] = field(default_factory=dict)
     default: ContractValue = None
+    default_is_known: bool = True
     source: str = "query"
     entity_target: EntityKeyComponentTargetContract | None = None
     semantics: str = ""
+    population: ParameterPopulation | None = None
 
     def to_public_dict(self) -> dict[str, ContractValue]:
         payload: dict[str, ContractValue] = {
@@ -121,10 +130,14 @@ class ParameterContract:
             payload["choices"] = list(self.choices)
         if self.choice_labels:
             payload["choiceLabels"] = dict(self.choice_labels)
+        if not self.default_is_known:
+            payload["defaultIsKnown"] = False
         if self.default is not None:
             payload["default"] = self.default
         if self.entity_target is not None:
             payload["entityTarget"] = self.entity_target.to_public_dict()
+        if self.population is not None:
+            payload["population"] = self.population.to_public_dict()
         if self.semantics:
             payload["semantics"] = self.semantics
         return payload
@@ -138,6 +151,7 @@ class ResponseFieldContract:
     description: str = ""
     choices: tuple[str, ...] = ()
     requires: dict[str, ContractValue] = field(default_factory=dict)
+    nullable: bool | None = None
 
     def to_public_dict(self) -> dict[str, ContractValue]:
         payload: dict[str, ContractValue] = {
@@ -148,6 +162,8 @@ class ResponseFieldContract:
         }
         if self.choices:
             payload["choices"] = list(self.choices)
+        if self.nullable is not None:
+            payload["nullable"] = self.nullable
         if self.requires:
             payload["requires"] = dict(self.requires)
         return payload
@@ -451,9 +467,10 @@ class EndpointContract:
     admin_access: bool = True
     public_access: bool = False
     pagination: PaginationContract | None = None
+    complete_single_response: bool = False
     query_schema_source: str = "missing"
     response_schema_source: str = "missing"
-    response_cardinality: str = "one"
+    response_cardinality: str = "unknown"
     tags: tuple[str, ...] = field(default_factory=tuple)
     resource_names: tuple[str, ...] = field(default_factory=tuple)
     candidate_keys: tuple[CandidateKeyContract, ...] = field(default_factory=tuple)
@@ -466,6 +483,8 @@ class EndpointContract:
     catalog_endpoint: CatalogEndpointContract | None = None
 
     def __post_init__(self) -> None:
+        if self.complete_single_response and self.pagination is not None:
+            raise ValueError("complete single response conflicts with pagination")
         key_identities = tuple(
             (key.entity_kind, key.key_id) for key in self.candidate_keys
         )
@@ -499,7 +518,8 @@ class EndpointContract:
                 raise ValueError("endpoint entity reference references unknown field")
 
     def supports_lookup_read(self) -> bool:
-        return bool(self.response_fields)
+        """Read capability is independent of declared response representation."""
+        return self.method.upper() == "GET"
 
     def to_public_dict(
         self,
@@ -522,10 +542,9 @@ class EndpointContract:
                 "public": self.public_access,
             },
             "pagination": (
-                None
-                if self.pagination is None
-                else self.pagination.to_public_dict()
+                None if self.pagination is None else self.pagination.to_public_dict()
             ),
+            "completeSingleResponse": self.complete_single_response,
             "schemaSources": {
                 "query": self.query_schema_source,
                 "response": self.response_schema_source,

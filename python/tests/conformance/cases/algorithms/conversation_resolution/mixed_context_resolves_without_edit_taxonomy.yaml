@@ -3,7 +3,7 @@ description: One value may combine current wording and a prior semantic anchor w
 kind: algorithm
 algorithm: conversation_resolution.parse
 input:
-  current_question: What about Mombasa on that day?
+  current_question: How many sales did we make in Mombasa on that day?
   context_sources:
     - source_id: prior_question
       kind: prior_user_question
@@ -14,14 +14,15 @@ input:
         - {anchor_id: prior_monday, text: Monday, occurrence: 1, kind: time_scope, label: prior day}
   payload:
     kind: conversation_resolution
-    current_question_text: What about Mombasa on that day?
+    current_question_text: How many sales did we make in Mombasa on that day?
     outcome:
       kind: resolved
       resolution_basis: Current meaning and retained prior meaning form the resolved question.
-      contextualized_question: How many sales did we make in Mombasa on Monday?
       clauses:
-        - current_clause_text: What about Mombasa on that day?
+        - current_clause_text: How many sales did we make in Mombasa on that day?
           occurrence: 1
+          request_shape_basis: The current clause states the complete factual request; prior evidence resolves only the referenced day.
+          request_shape_source: current_clause_supplies_request
           resolved_text: How many sales did we make in Mombasa on Monday?
           retained_frame_parts: []
           values:

@@ -10,7 +10,7 @@ from fervis.lookup.orchestration.program_service import (
     AnswerProgramService,
     StoredProgramRunRequest,
 )
-from fervis.lookup.orchestration.result import delivery_result_data
+from fervis.questions.result_data import delivery_result_data
 from fervis.questions.ports import (
     LookupExecutionResult,
     ProgramExecutionRequest,

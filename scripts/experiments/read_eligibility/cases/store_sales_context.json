@@ -1,0 +1,8 @@
+{
+  "requested_fact_ref": "fact_1",
+  "expected_read_decisions": {
+    "list_location_list": "RETAIN",
+    "list_sale_list": "RETAIN",
+    "list_online_sale_summary": "DROP"
+  }
+}

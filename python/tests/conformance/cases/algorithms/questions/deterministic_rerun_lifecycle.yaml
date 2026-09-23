@@ -16,7 +16,7 @@ input:
     program_invocations:
       - run_id: run_base
         kind: compiled_question
-        program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/invocation}
+        program_kind: patchable
         bindings: &bindings
           - parameter_id: question.store_ids
             value: {kind: identity_set, entity_kind: store, key_id: primary_key, key_component_id: store_id, values: [store_1]}

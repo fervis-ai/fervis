@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC
 
 from fervis.lookup.turn_prompts.builder import TurnPromptBuilder
+from fervis.lookup.turn_prompts.builder import system_prompt_for
 from fervis.lookup.turn_prompts.context import TurnPromptContext
 from fervis.lookup.turn_prompts.invocation import (
     ModelTurnInvocation,
@@ -22,6 +23,9 @@ class TurnPromptBase(ABC):
     turn_name: str
     turn_task: str
     include_current_question: bool = True
+
+    def system_prompt(self, context: TurnPromptContext) -> str:
+        return system_prompt_for(context.host)
 
     def prompt_sections(
         self,

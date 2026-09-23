@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 import importlib.util
@@ -51,6 +52,8 @@ PYTHON_SRC = REPO_ROOT / "python" / "src"
 REPO_PYTHON = REPO_ROOT / "python" / ".venv" / "bin" / "python"
 if REPO_PYTHON.exists() and Path(sys.executable).resolve() != REPO_PYTHON.resolve():
     os.execv(str(REPO_PYTHON), (str(REPO_PYTHON), *sys.argv))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(PYTHON_SRC) not in sys.path:
     sys.path.insert(0, str(PYTHON_SRC))
 
@@ -59,6 +62,10 @@ from fervis.model_io.backbone.factory import build_provider_backbone  # noqa: E4
 from fervis.model_io.structured_output.generation import (  # noqa: E402
     generate_one_of_tool_output,
 )
+from fervis.model_io.structured_output.schema import (  # noqa: E402
+    without_unreferenced_definitions,
+)
+from fervis.questions.contracts import DEFAULT_MAX_THINKING_TOKENS  # noqa: E402
 
 
 Assertion = Callable[[dict[str, Any], dict[str, Any]], list[str]]
@@ -74,6 +81,7 @@ class ExperimentBoundary:
     system_prompt: str
     prompt: str
     tool_specs: tuple[ToolSpec, ...]
+    assertion_context: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -82,6 +90,7 @@ class StabilityResult:
     arguments: dict[str, Any] | None
     errors: tuple[str, ...]
     arguments_hash: str = ""
+    usage: dict[str, Any] | None = None
 
     @property
     def passed(self) -> bool:
@@ -99,8 +108,14 @@ class _ModelPort:
 
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--index", required=True, type=Path)
-    parser.add_argument("--step", required=True, help="Persisted model-turn purpose")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--index", type=Path)
+    source.add_argument(
+        "--boundary-file",
+        type=Path,
+        help="Standalone prompt/tool boundary using the persisted-turn field shape",
+    )
+    parser.add_argument("--step", help="Persisted model-turn purpose")
     parser.add_argument("--sequence", type=int)
     parser.add_argument("--runs", type=int, default=10)
     parser.add_argument("--workers", type=int, default=1)
@@ -111,9 +126,18 @@ def _arguments() -> argparse.Namespace:
         help="Patch file to apply; repeat to layer one controlled change",
     )
     parser.add_argument("--assertion-file", type=Path)
+    parser.add_argument(
+        "--assertion-context",
+        type=Path,
+        help="JSON object containing only the assertion's expected outcomes",
+    )
     parser.add_argument("--provider")
     parser.add_argument("--model-key")
-    parser.add_argument("--max-thinking-tokens", type=int, default=0)
+    parser.add_argument(
+        "--max-thinking-tokens",
+        type=int,
+        default=DEFAULT_MAX_THINKING_TOKENS,
+    )
     parser.add_argument("--label")
     parser.add_argument("--output-jsonl", type=Path)
     parser.add_argument("--enforce-structured-stability", action="store_true")
@@ -125,14 +149,31 @@ def main() -> int:
     if args.runs < 1 or args.workers < 1:
         raise SystemExit("--runs and --workers must be positive")
     patch = _combined_patches(args.patch_file or [])
-    boundary = _load_boundary(
-        args.index,
-        purpose=args.step,
-        sequence=args.sequence,
-        patch=patch,
-        provider_override=args.provider,
-        model_key_override=args.model_key,
+    assertion_context = (
+        _json_object(args.assertion_context)
+        if args.assertion_context is not None
+        else {}
     )
+    if args.boundary_file is not None:
+        boundary = _load_standalone_boundary(
+            args.boundary_file,
+            patch=patch,
+            provider_override=args.provider,
+            model_key_override=args.model_key,
+            assertion_context=assertion_context,
+        )
+    else:
+        if not args.step:
+            raise SystemExit("--step is required with --index")
+        boundary = _load_boundary(
+            args.index,
+            purpose=args.step,
+            sequence=args.sequence,
+            patch=patch,
+            provider_override=args.provider,
+            model_key_override=args.model_key,
+            assertion_context=assertion_context,
+        )
     assertion = _load_assertion(args.assertion_file)
     label = args.label or boundary.purpose
     model_port = _ModelPort(
@@ -140,8 +181,13 @@ def main() -> int:
         model_key=boundary.model_key,
     )
     print_lock = Lock()
+    result_file_lock = Lock()
+    if args.output_jsonl:
+        _write_results(args.output_jsonl, [])
 
     def run(run_number: int) -> StabilityResult:
+        generated_arguments: dict[str, Any] | None = None
+        usage: dict[str, Any] | None = None
         try:
             output = generate_one_of_tool_output(
                 model_port=model_port,
@@ -151,12 +197,15 @@ def main() -> int:
                 max_thinking_tokens=args.max_thinking_tokens,
                 tool_specs=boundary.tool_specs,
             )
+            generated_arguments = output.arguments
+            usage = dict(output.output["usage"])
             context = {
                 "label": label,
                 "run_number": run_number,
                 "source_run_id": boundary.source_run_id,
                 "sequence": boundary.sequence,
                 "purpose": boundary.purpose,
+                **boundary.assertion_context,
             }
             errors = tuple(assertion(output.arguments, context))
             canonical = json.dumps(
@@ -169,8 +218,15 @@ def main() -> int:
                 arguments=output.arguments,
                 errors=errors,
                 arguments_hash=sha256(canonical.encode()).hexdigest(),
+                usage=usage,
             )
         except Exception as exc:  # provider/schema boundary is reported per run
+            failure_output = getattr(exc, "output", None)
+            if isinstance(failure_output, dict) and isinstance(failure_output.get("usage"), dict):
+                usage = dict(failure_output["usage"])
+            rejected_arguments = getattr(exc, "arguments", None)
+            if generated_arguments is None and isinstance(rejected_arguments, dict):
+                generated_arguments = rejected_arguments
             cause = f"; cause={exc.__cause__!r}" if exc.__cause__ is not None else ""
             error_code = str(getattr(exc, "error_code", "") or "")
             error_context = getattr(exc, "error_context", None)
@@ -182,18 +238,22 @@ def main() -> int:
             )
             return StabilityResult(
                 run_number=run_number,
-                arguments=None,
-                errors=(
-                    f"{type(exc).__name__}: {exc!r}{cause}{provider_details}",
-                ),
+                arguments=generated_arguments,
+                errors=(f"{type(exc).__name__}: {exc!r}{cause}{provider_details}",),
+                usage=usage,
             )
 
     results: list[StabilityResult] = []
     with ThreadPoolExecutor(max_workers=min(args.workers, args.runs)) as executor:
-        futures = {executor.submit(run, number): number for number in range(1, args.runs + 1)}
+        futures = {
+            executor.submit(run, number): number for number in range(1, args.runs + 1)
+        }
         for future in as_completed(futures):
             result = future.result()
             results.append(result)
+            if args.output_jsonl:
+                with result_file_lock:
+                    _append_result(args.output_jsonl, result)
             message = "PASS" if result.passed else "FAIL: " + "; ".join(result.errors)
             with print_lock:
                 print(
@@ -202,8 +262,6 @@ def main() -> int:
                 )
 
     ordered = sorted(results, key=lambda item: item.run_number)
-    if args.output_jsonl:
-        _write_results(args.output_jsonl, ordered)
     failures = sum(not item.passed for item in ordered)
     hashes = {item.arguments_hash for item in ordered if item.arguments_hash}
     stability_failure = args.enforce_structured_stability and len(hashes) > 1
@@ -217,13 +275,29 @@ def main() -> int:
     return 1 if failures or stability_failure else 0
 
 
-def _combined_patches(paths: list[Path]) -> dict[str, list[object]]:
-    combined: dict[str, list[object]] = {}
+def _combined_patches(paths: list[Path]) -> dict[str, object]:
+    combined: dict[str, object] = {}
     for path in paths:
         for key, value in _json_object(path).items():
+            if key == "assertion_context":
+                if not isinstance(value, dict):
+                    raise ValueError("patch assertion_context must be an object")
+                context = combined.setdefault(key, {})
+                if not isinstance(context, dict):
+                    raise ValueError("combined assertion_context is malformed")
+                repeated = context.keys() & value.keys()
+                if repeated:
+                    raise ValueError(
+                        "patch assertion_context repeats " + sorted(repeated)[0]
+                    )
+                context.update(value)
+                continue
             if not isinstance(value, list):
                 raise ValueError(f"patch section {key!r} must be an array")
-            combined.setdefault(key, []).extend(value)
+            items = combined.setdefault(key, [])
+            if not isinstance(items, list):
+                raise ValueError(f"combined patch section {key!r} is malformed")
+            items.extend(value)
     return combined
 
 
@@ -235,6 +309,7 @@ def _load_boundary(
     patch: dict[str, Any],
     provider_override: str | None,
     model_key_override: str | None,
+    assertion_context: dict[str, Any],
 ) -> ExperimentBoundary:
     index = _json_object(index_path)
     turns = [
@@ -260,12 +335,15 @@ def _load_boundary(
         surface="system prompt",
     )
     raw_specs = [dict(item) for item in turn.get("tool_specs", [])]
-    _apply_named_tool_patches(raw_specs, patch.get("tool_spec_patches", []), schema=False)
+    _apply_named_tool_patches(
+        raw_specs, patch.get("tool_spec_patches", []), schema=False
+    )
     _apply_named_tool_patches(raw_specs, patch.get("schema_patches", []), schema=True)
     _remove_named_schema_properties(
         raw_specs,
         patch.get("schema_property_removals", []),
     )
+    _apply_schema_transforms(raw_specs, patch.get("schema_transforms", []))
     tool_specs = tuple(_tool_spec(item) for item in raw_specs)
     if not tool_specs:
         raise ValueError("selected turn has no tool specs")
@@ -282,6 +360,61 @@ def _load_boundary(
         system_prompt=system_prompt,
         prompt=prompt,
         tool_specs=tool_specs,
+        assertion_context={
+            **assertion_context,
+            **dict(patch.get("assertion_context") or {}),
+        },
+    )
+
+
+def _load_standalone_boundary(
+    path: Path,
+    *,
+    patch: dict[str, Any],
+    provider_override: str | None,
+    model_key_override: str | None,
+    assertion_context: dict[str, Any],
+) -> ExperimentBoundary:
+    value = _json_object(path)
+    prompt = _replace_text(
+        str(value.get("prompt") or ""),
+        patch.get("prompt_replacements", []),
+        surface="prompt",
+    )
+    system_prompt = _replace_text(
+        str(value.get("system_prompt") or ""),
+        patch.get("system_prompt_replacements", []),
+        surface="system prompt",
+    )
+    raw_specs = [dict(item) for item in value.get("tool_specs", [])]
+    _apply_named_tool_patches(
+        raw_specs, patch.get("tool_spec_patches", []), schema=False
+    )
+    _apply_named_tool_patches(raw_specs, patch.get("schema_patches", []), schema=True)
+    _remove_named_schema_properties(
+        raw_specs, patch.get("schema_property_removals", [])
+    )
+    _apply_schema_transforms(raw_specs, patch.get("schema_transforms", []))
+    tool_specs = tuple(_tool_spec(item) for item in raw_specs)
+    provider = str(provider_override or value.get("provider") or "").strip()
+    model_key = str(model_key_override or value.get("model_key") or "").strip()
+    purpose = str(value.get("purpose") or "standalone_model_boundary").strip()
+    if not prompt or not tool_specs or not provider or not model_key:
+        raise ValueError("standalone boundary is incomplete")
+    return ExperimentBoundary(
+        source_run_id=str(value.get("source_run_id") or "standalone"),
+        sequence=int(value.get("sequence") or 0),
+        purpose=purpose,
+        provider=provider,
+        model_key=model_key,
+        system_prompt=system_prompt,
+        prompt=prompt,
+        tool_specs=tool_specs,
+        assertion_context={
+            **dict(value.get("assertion_context") or {}),
+            **assertion_context,
+            **dict(patch.get("assertion_context") or {}),
+        },
     )
 
 
@@ -300,6 +433,27 @@ def _replace_text(text: str, replacements: object, *, surface: str) -> str:
             )
         text = text.replace(old, new)
     return text
+
+
+def _apply_schema_transforms(
+    specs: list[dict[str, Any]],
+    transforms: object,
+) -> None:
+    specs_by_name = {str(spec.get("name") or ""): spec for spec in specs}
+    for item in transforms if isinstance(transforms, list) else []:
+        if not isinstance(item, dict):
+            raise ValueError("schema transform must be an object")
+        tool_name = str(item.get("tool_name") or "")
+        spec = specs_by_name.get(tool_name)
+        if spec is None:
+            raise ValueError(f"schema transform references unknown tool {tool_name!r}")
+        name = str(item.get("name") or "")
+        if name != "prune_unreferenced_definitions":
+            raise ValueError(f"unknown schema transform {name!r}")
+        input_schema = spec.get("input_schema")
+        if not isinstance(input_schema, dict):
+            raise ValueError(f"tool {tool_name!r} has no object input schema")
+        spec["input_schema"] = without_unreferenced_definitions(input_schema)
 
 
 def _apply_named_tool_patches(
@@ -338,11 +492,7 @@ def _remove_named_schema_properties(
             raise ValueError(
                 f"schema property removal references unknown tool {tool_name!r}"
             )
-        names = {
-            str(name)
-            for name in removal.get("property_names", [])
-            if str(name)
-        }
+        names = {str(name) for name in removal.get("property_names", []) if str(name)}
         if not names:
             raise ValueError("schema property removal requires property names")
         schema = spec.get("input_schema")
@@ -377,10 +527,19 @@ def _remove_schema_properties(
     return removed
 
 
-def _apply_json_patch(target: dict[str, Any] | list[Any], patch: dict[str, Any]) -> None:
+def _apply_json_patch(
+    target: dict[str, Any] | list[Any], patch: dict[str, Any]
+) -> None:
     operation = str(patch.get("op") or "")
     path = str(patch.get("path") or "")
-    if operation not in {"add", "replace", "remove", "move", "move_before"}:
+    if operation not in {
+        "add",
+        "copy",
+        "replace",
+        "remove",
+        "move",
+        "move_before",
+    }:
         raise ValueError(f"unsupported patch operation {operation!r}")
     if operation == "move_before":
         source_path = str(patch.get("from") or "")
@@ -389,6 +548,11 @@ def _apply_json_patch(target: dict[str, Any] | list[Any], patch: dict[str, Any])
     if operation == "move":
         source_path = str(patch.get("from") or "")
         value = _remove_json_pointer(target, source_path)
+        _add_json_pointer(target, path, value)
+        return
+    if operation == "copy":
+        source_path = str(patch.get("from") or "")
+        value = deepcopy(_json_pointer_value(target, source_path))
         _add_json_pointer(target, path, value)
         return
     parent, token = _json_pointer_parent(target, path)
@@ -446,6 +610,14 @@ def _remove_json_pointer(
     if token not in parent:
         raise ValueError(f"move source path does not exist: {path}")
     return parent.pop(token)
+
+
+def _json_pointer_value(
+    target: dict[str, Any] | list[Any],
+    path: str,
+) -> Any:
+    parent, token = _json_pointer_parent(target, path)
+    return parent[int(token)] if isinstance(parent, list) else parent[token]
 
 
 def _add_json_pointer(
@@ -518,20 +690,31 @@ def _write_results(path: Path, results: list[StabilityResult]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as handle:
         for result in results:
-            handle.write(
-                json.dumps(
-                    {
-                        "run_number": result.run_number,
-                        "passed": result.passed,
-                        "errors": list(result.errors),
-                        "arguments_hash": result.arguments_hash,
-                        "arguments": result.arguments,
-                    },
-                    sort_keys=True,
-                    default=str,
-                )
-                + "\n"
-            )
+            handle.write(_serialized_result(result))
+
+
+def _append_result(path: Path, result: StabilityResult) -> None:
+    with path.open("a") as handle:
+        handle.write(_serialized_result(result))
+        handle.flush()
+
+
+def _serialized_result(result: StabilityResult) -> str:
+    return (
+        json.dumps(
+            {
+                "run_number": result.run_number,
+                "passed": result.passed,
+                "errors": list(result.errors),
+                "arguments_hash": result.arguments_hash,
+                "arguments": result.arguments,
+                "usage": result.usage,
+            },
+            sort_keys=True,
+            default=str,
+        )
+        + "\n"
+    )
 
 
 if __name__ == "__main__":

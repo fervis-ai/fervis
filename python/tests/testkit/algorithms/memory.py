@@ -4,7 +4,6 @@ from typing import Any
 
 from fervis.memory.conversation_context import expand_activated_memory_cards
 from fervis.memory.addresses import fact_address_from_payload
-from fervis.memory.prior_requests import prior_requests_from_artifact
 from fervis.memory.artifacts import (
     build_fact_artifact,
     FactOutcome,
@@ -73,21 +72,94 @@ def run_memory_build_artifact_case(payload: dict[str, Any]) -> list[str]:
     )
 
 
-def run_memory_prior_answer_request_case(payload: dict[str, Any]) -> list[str]:
-    [artifact] = fact_artifacts_from_context(payload["input"]["conversation_context"])
-    return subset_mismatches(
-        actual={
-            "requests": [
-                {
-                    "id": item.request_id,
-                    "answer_fact": item.answer_fact,
-                    "output_frames": [
-                        frame.to_request_shape() for frame in item.output_frames
-                    ],
-                }
-                for item in prior_requests_from_artifact(artifact)
-            ]
+def run_memory_prior_answer_request_case(
+    payload: dict[str, Any],
+) -> list[str]:
+    from fervis.lineage.enums import ProgramInvocationKind
+    from fervis.lookup.answer_program import AnswerProgram, BindingSet
+    from fervis.lookup.contract_codec import answer_program_id
+    from fervis.lookup.answer_program.persistence import (
+        StoredProgramInvocation,
+        program_invocation,
+    )
+    from fervis.lookup.question_contract.model import (
+        Aggregate,
+        AggregateFunction,
+        AllResults,
+        ExpressionNode,
+        InstanceInterpretation,
+        RequestedFact,
+        RequestedOutput,
+        SetTerm,
+        Subject,
+    )
+    from fervis.lookup.semantic_types import SourceOrigin, SourceOriginKind
+    from fervis.memory.conversation_context.semantic_frames import prior_request_frames
+
+    request = payload["input"]
+    subject_origin = SourceOrigin(
+        SourceOriginKind.QUESTION_CONTEXT,
+        str(request["subject_meaning"]),
+    )
+    output_origin = SourceOrigin(
+        SourceOriginKind.QUESTION_CONTEXT,
+        str(request["output_meaning"]),
+    )
+    output_kind = str(request.get("output_kind") or "count")
+    expressions: tuple[ExpressionNode, ...]
+    if output_kind == "count":
+        expressions = (
+            Aggregate(
+                id="e1",
+                function=AggregateFunction.COUNT,
+                argument_ref="s1",
+                filter_ref=None,
+                distinct_argument=False,
+                origin=output_origin,
+            ),
+        )
+        output_ref = "e1"
+    elif output_kind == "set":
+        expressions = ()
+        output_ref = "s1"
+    else:
+        raise ValueError(f"unsupported prior-request output kind: {output_kind}")
+    fact = RequestedFact(
+        id="fact_1",
+        origin=output_origin,
+        sets=(SetTerm("s1", subject_origin),),
+        associations=(),
+        facts=(),
+        expressions=expressions,
+        subject=Subject("s1", InstanceInterpretation.RESOURCE_POPULATION),
+        qualification_ref=None,
+        grouping_refs=(),
+        outputs=(RequestedOutput("output_1", output_ref, output_origin),),
+        ordering=(),
+        selection=AllResults(),
+        distinct_by=(),
+    )
+    program = AnswerProgram(inputs=(), input_denotations=(), fact_template=(fact,))
+    invocation = program_invocation(
+        run_id="run_1",
+        program_id=answer_program_id(program),
+        bindings=BindingSet(),
+        kind=ProgramInvocationKind.COMPILED_QUESTION,
+    )
+    artifact = build_fact_artifact(
+        artifact_id="artifact_1",
+        outcome=FactOutcome.ANSWERED,
+        provenance={"runId": "run_1", "requestedFactKey": "fact_1"},
+        source_question=str(request["source_question"]),
+    )
+    [prior_request] = prior_request_frames(
+        (artifact,),
+        invocations_by_run_id={
+            "run_1": StoredProgramInvocation(invocation=invocation, program=program)
         },
+    )
+    return subset_mismatches(
+        actual={"frame": prior_request.frame.to_model_dict()},
         expected_subset=payload["expect"]["result_contains"],
     )
 
@@ -99,7 +171,6 @@ def run_conversation_memory_expand_activated_case(
     artifacts = fact_artifacts_from_context(input_payload["conversation_context"])
     projection = project_conversation_memory_cards(
         input_payload["conversation_context"],
-        current_question=str(input_payload["current_question"]),
     )
     activated = expand_activated_memory_cards(
         artifacts=artifacts,
@@ -120,7 +191,6 @@ def run_conversation_memory_card_projection_case(
     try:
         projection = project_conversation_memory_cards(
             conversation_context,
-            current_question=input_payload["current_question"],
             max_cards=int(input_payload.get("max_cards") or 12),
         )
     except ValueError as exc:
@@ -181,25 +251,6 @@ def run_conversation_memory_card_projection_case(
             )
         )
     return errors
-
-
-def run_conversation_memory_frame_equivalence_case(
-    payload: dict[str, Any],
-) -> list[str]:
-    control_frames = [
-        [frame.control_payload() for frame in projection.context_frames]
-        for conversation_context in payload["input"]["conversation_contexts"]
-        for projection in (
-            project_conversation_memory_cards(
-                dict(conversation_context),
-                current_question=str(payload["input"]["current_question"]),
-            ),
-        )
-    ]
-    return exact_mismatches(
-        actual={"control_frames": control_frames},
-        expected=payload["expect"]["result_equals"],
-    )
 
 
 def run_memory_lineage_memory_artifacts_case(payload: dict[str, Any]) -> list[str]:

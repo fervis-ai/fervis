@@ -27,7 +27,7 @@ input:
       spec:
         kind: filter
         input_relation: left
-        predicate: {left: active, operator: equals, right_scalar: is_active}
+        condition: {left: active, operator: equals, right_scalar: is_active}
     - id: joined
       output_relation: joined_rows
       spec:

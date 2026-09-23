@@ -1,0 +1,13 @@
+id: integer_literal_compares_with_decimal_value
+description: An exact whole-number operand compares with a decimal value without changing the decimal value's declared measure.
+kind: algorithm
+algorithm: semantic.kernel
+input:
+  mode: infer_operator
+  operator: gt
+  operands:
+    - {kind: decimal, measure: unitless}
+    - {kind: integer}
+expect:
+  result_contains:
+    result_type: {kind: boolean}

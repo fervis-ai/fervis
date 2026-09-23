@@ -1,1 +1,0 @@
-"""Coverage-check operation family."""

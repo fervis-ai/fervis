@@ -82,6 +82,11 @@ class ProviderObject:
     def has_field(self, field_name: str) -> bool:
         return field_name in self._payload
 
+    def field(self, field_name: str) -> object:
+        if field_name not in self._payload:
+            raise ValueError(f"provider object is missing field: {field_name}")
+        return self._payload[field_name]
+
     def parse_as(self, contract: type[_ProviderOutputT]) -> _ProviderOutputT:
         return contract.parse(self)
 

@@ -23,7 +23,7 @@ class HostRelationDataAccess:
     host_api_context: HostApiContext
     authority: ReadAuthority
 
-    def read(self, *, endpoint_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    def read(self, *, endpoint_name: str, args: dict[str, Any], pagination_binding=None) -> dict[str, Any]:
         contract = self.host_api_context.endpoint_contract(endpoint_name)
         if contract is None:
             raise ValueError(f"Unknown endpoint contract: {endpoint_name}")
@@ -43,7 +43,7 @@ class HostRelationDataAccess:
                 query_params[param.name] = value
             else:
                 raise ValueError(f"Unsupported endpoint parameter source: {param_ref}")
-        return self.host_api_context.execute_read(
+        result = self.host_api_context.execute_read(
             authority=self.authority,
             invocation=ReadInvocation(
                 endpoint_name=endpoint_name,
@@ -52,9 +52,15 @@ class HostRelationDataAccess:
                 page_policy={
                     "mode": (
                         "all_pages"
-                        if contract.pagination is not None
+                        if contract.pagination is not None or pagination_binding is not None
                         else "single_page"
-                    )
+                    ),
+                    **({"pagination_contract":pagination_binding.to_public_dict()} if pagination_binding is not None else {}),
                 },
             ),
         ).to_public_dict()
+
+        if pagination_binding is not None:
+            from fervis.lookup.source_reads.pagination import restore_bound_response_paths
+            result = restore_bound_response_paths(result, pagination_binding)
+        return result

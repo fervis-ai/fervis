@@ -2,13 +2,35 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from rest_framework import generics
 from rest_framework.mixins import ListModelMixin
 from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
 
 from fervis.host_api.contracts import PaginationContract, PaginationKind
 
 
+def complete_single_response(view_class: type, *, get_action: str | None) -> bool:
+    """Use only the DRF list implementation whose paginator is disabled."""
+    if (
+        not issubclass(view_class, ListModelMixin)
+        or getattr(view_class, "pagination_class", None) is not None
+        or view_class.list is not ListModelMixin.list
+    ):
+        return False
+    return get_action == "list" or (
+        issubclass(view_class, generics.ListAPIView)
+        and view_class.get is generics.ListAPIView.get
+    )
+
+
 def pagination_contract(view_class: type) -> PaginationContract | None:
+    declared = getattr(view_class, "fervis_pagination", None)
+    if declared is not None:
+        if not isinstance(declared, Mapping):
+            raise ValueError("fervis_pagination must be a pagination contract mapping")
+        return PaginationContract.from_public_dict(declared)
     try:
         if not issubclass(view_class, ListModelMixin):
             return None

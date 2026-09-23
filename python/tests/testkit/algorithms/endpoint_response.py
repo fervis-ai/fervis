@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.relation_catalog import RowCardinality
-from fervis.lookup.fact_plan.row_sources import RowSource, RowSourceKind
+from fervis.lookup.relation_catalog.row_sources import RowSource, RowSourceKind
 from fervis.lookup.source_reads.response import (
     EndpointResponseError,
     extract_row_source_rows,

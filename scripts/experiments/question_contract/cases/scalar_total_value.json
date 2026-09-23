@@ -1,0 +1,60 @@
+{
+  "decision_basis": "The question asks for one total value over observations in a supplied period.",
+  "outcome": {
+    "kind": "question_meaning",
+    "answer_requests": [
+      {
+        "result_kind": "scalar",
+        "qualifying_row_kind": {
+          "meaning": "shipment occurrences",
+          "origin": {
+            "kind": "question"
+          }
+        },
+        "grouping_meanings": [],
+        "return_request_basis": "Return the total shipment weight.",
+        "returned_result": {
+          "kind": "values"
+        },
+        "answer_values": [
+          {
+            "value_ref": "v1",
+            "value_kind_basis": "The answer states the total shipment weight value.",
+            "value_kind": "value",
+            "meaning": "total shipment weight",
+            "origin": {
+              "kind": "question"
+            }
+          }
+        ],
+        "returned_value_refs": [
+          "v1"
+        ],
+        "ordering_value_refs": [],
+        "selection": {
+          "kind": "all_results"
+        },
+        "relational_shape": "ordinary"
+      }
+    ],
+    "supplied_values": [
+      {
+        "meaning": "the reporting period",
+        "denotation_basis": "March 2026 bounds the shipment occurrences.",
+        "non_entity_value": {
+          "value": {
+            "operands": [
+              "March 2026"
+            ],
+            "value_type": {
+              "kind": "temporal_scope"
+            },
+            "origin": {
+              "kind": "question"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

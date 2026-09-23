@@ -1,0 +1,57 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "related_sets declares sets directly related to its parent set. Each item\ndeclares the association or associations and the one set reached through them.\nIts nested related_sets continues the graph from that newly declared set.",
+      "new": "related_sets declares sets directly related to its parent set. Each item declares the association or associations and the one set reached through them. A set reserved by a shown grouping copies group_ref; every other set writes origin. Its nested related_sets continues the graph from that newly declared set.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/$defs/association_graph_related_set/properties/set",
+      "value": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "enum": [
+                  "s2"
+                ]
+              },
+              "group_ref": {
+                "enum": [
+                  "g1"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "group_ref"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^s(?:[3-9]|[1-9][0-9]+)$"
+              },
+              "origin": {
+                "$ref": "#/$defs/source_origin"
+              }
+            },
+            "required": [
+              "id",
+              "origin"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

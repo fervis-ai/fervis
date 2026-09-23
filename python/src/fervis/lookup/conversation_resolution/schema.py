@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fervis.lookup.conversation_resolution.model import RequestShapeSource
+
 from fervis.memory.conversation_context import (
     ConversationContextFrame,
     ConversationContextSource,
@@ -14,13 +16,13 @@ from fervis.lookup.conversation_resolution.tools import (
 
 
 _VALUE_PART_KINDS = frozenset(
-    {
-        ConversationFramePartKind.ENTITY_IDENTITY,
-        ConversationFramePartKind.TIME_SCOPE,
-        ConversationFramePartKind.LIMIT,
-    }
+    {ConversationFramePartKind.INPUT}
 )
 _FIXED_SHAPE_PART_KINDS = frozenset(ConversationFramePartKind) - _VALUE_PART_KINDS
+
+_CURRENT_REQUEST_SHAPE = RequestShapeSource.CURRENT.value
+_CLARIFICATION_REQUEST_SHAPE = RequestShapeSource.ACTIVE_CLARIFICATION.value
+_PRIOR_REQUEST_SHAPE = RequestShapeSource.PRIOR_FRAME.value
 
 
 def build_conversation_resolution_tool_schemas(
@@ -58,7 +60,6 @@ def _resolved_outcome_schema(
         {
             "kind": {"type": "string", "enum": ["resolved"]},
             "resolution_basis": {"type": "string", "minLength": 1},
-            "contextualized_question": {"type": "string", "minLength": 1},
             "clauses": {
                 "type": "array",
                 "minItems": 1,
@@ -96,15 +97,57 @@ def _resolved_clause_schema(
     }
     if not _has_resolved_value_authority(context_sources, context_frames):
         values_schema["maxItems"] = 0
+    retained_frame_parts = _frame_part_references_schema(
+        context_frames,
+        allowed_kinds=_FIXED_SHAPE_PART_KINDS,
+    )
+    variants = [
+        _resolved_clause_variant(
+            request_shape_source=_CURRENT_REQUEST_SHAPE,
+            retained_frame_parts={**retained_frame_parts, "maxItems": 0},
+            values_schema=values_schema,
+        )
+    ]
+    if any(source.kind == "active_clarification" for source in context_sources):
+        variants.append(
+            _resolved_clause_variant(
+                request_shape_source=_CLARIFICATION_REQUEST_SHAPE,
+                retained_frame_parts={**retained_frame_parts, "maxItems": 0},
+                values_schema=values_schema,
+            )
+        )
+    if any(
+        part.kind in _FIXED_SHAPE_PART_KINDS
+        for frame in context_frames
+        for part in frame.parts
+    ):
+        variants.append(
+            _resolved_clause_variant(
+                request_shape_source=_PRIOR_REQUEST_SHAPE,
+                retained_frame_parts={**retained_frame_parts, "minItems": 1},
+                values_schema=values_schema,
+            )
+        )
+    return variants[0] if len(variants) == 1 else {"oneOf": variants}
+
+
+def _resolved_clause_variant(
+    *,
+    request_shape_source: str,
+    retained_frame_parts: dict[str, object],
+    values_schema: dict[str, object],
+) -> dict[str, object]:
     return output.ResolvedClauseOutput.schema(
         {
             "current_clause_text": {"type": "string", "minLength": 1},
             "occurrence": {"type": "integer", "minimum": 1},
+            "request_shape_basis": {"type": "string", "minLength": 1},
+            "request_shape_source": {
+                "type": "string",
+                "enum": [request_shape_source],
+            },
             "resolved_text": {"type": "string", "minLength": 1},
-            "retained_frame_parts": _frame_part_references_schema(
-                context_frames,
-                allowed_kinds=_FIXED_SHAPE_PART_KINDS,
-            ),
+            "retained_frame_parts": retained_frame_parts,
             "values": values_schema,
         }
     )
@@ -241,7 +284,9 @@ def _frame_parameter_branches(
     callable_signature = frame.callable
     if callable_signature is None:
         raise ValueError("frame is not callable")
-    parameter_ids = [parameter.parameter_id for parameter in callable_signature.parameters]
+    parameter_ids = [
+        parameter.parameter_id for parameter in callable_signature.parameters
+    ]
     return output.FrameParameterOutput.schema(
         {
             "kind": {"type": "string", "enum": ["parameter"]},

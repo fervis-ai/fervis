@@ -1,6 +1,31 @@
 from __future__ import annotations
 
-from ._support import *  # noqa: F401,F403
+from io import StringIO
+
+import pytest
+
+from fervis.interfaces.agent.actions import provide_clarification_action
+from fervis.interfaces.cli.contracts import (
+    FervisCliPorts,
+    FervisCommandKind,
+    FervisCommandResult,
+    FervisViewKind,
+)
+from fervis.interfaces.cli.dispatch import evaluate_fervis, run_fervis
+from fervis.interfaces.cli.rendering import render_fervis_result
+from tests.testkit.algorithms.lineage import fixture_lineage_query
+
+from ._support import (
+    _ObservabilityQuery,
+    _PromptCaptureQuery,
+    _QuestionService,
+    _agent_step,
+    _blocked_envelope,
+    _command_envelope,
+    _command_payload,
+    _lineage_dataset,
+    _ports,
+)
 
 
 def test_fervis_explain_default_agent_view_is_structured_and_compact() -> None:
@@ -287,9 +312,7 @@ def test_fervis_explain_agent_detail_modes_are_additive() -> None:
     )
     debug = _command_payload(
         render_fervis_result(
-            evaluate_fervis(
-                ("debug", "--question-id", "question_1"), ports=_ports()
-            )
+            evaluate_fervis(("debug", "--question-id", "question_1"), ports=_ports())
         ),
         command="debug",
     )

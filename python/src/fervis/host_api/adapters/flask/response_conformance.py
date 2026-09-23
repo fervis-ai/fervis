@@ -46,7 +46,8 @@ def check_flask_response_conformance(
             if not is_probeable_get_contract(contract):
                 results.append(_skipped_required_params(contract))
                 continue
-            status, body = transport.get(contract.path_template, {})
+            page = transport.get(contract.path_template, {})
+            status, body = page.status, page.body
             if status in {401, 403}:
                 results.append(_skipped_auth_required(contract, status=status))
                 continue

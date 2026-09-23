@@ -1,0 +1,45 @@
+id: direct_source_relation_is_a_complete_answer
+kind: algorithm
+algorithm: answer_program.invoke
+description: A qualifying source relation can be projected directly without an artificial relational transformation.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/direct_invocation}
+  catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
+  environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/invocation}
+  invocations:
+    - id: direct_rows
+      bindings:
+        - parameter_id: question.store_ids
+          value:
+            kind: identity_set
+            entity_kind: store
+            key_id: primary_key
+            key_component_id: store_id
+            values: [00000000-0000-0000-0001-000000000001]
+            known_input_id: store_ids
+            applies_to_requested_fact_ids: [fact_1]
+          provenance: {kind: question_input}
+        - parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [COMPLETED]}
+          provenance: {kind: semantic_choice}
+      evidence:
+        - request:
+            endpoint_name: list_sale_list
+            args: {sales.query.store_id: 00000000-0000-0000-0001-000000000001}
+          response:
+            status: 200
+            body:
+              results:
+                - {sale_id: 00000000-0000-0000-0002-000000000001, store_id: 00000000-0000-0000-0001-000000000001}
+                - {sale_id: 00000000-0000-0000-0002-000000000002, store_id: 00000000-0000-0000-0001-000000000001}
+expect:
+  result_contains:
+    invocations:
+      - id: direct_rows
+        status: completed
+        relations:
+          - id: sales_rows
+            rows:
+              - {sale_id: 00000000-0000-0000-0002-000000000001, store_id: 00000000-0000-0000-0001-000000000001}
+              - {sale_id: 00000000-0000-0000-0002-000000000002, store_id: 00000000-0000-0000-0001-000000000001}

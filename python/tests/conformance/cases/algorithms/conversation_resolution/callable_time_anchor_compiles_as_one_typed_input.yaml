@@ -1,0 +1,78 @@
+id: callable_time_anchor_compiles_as_one_typed_input
+description: A callable input's structural frame role does not conflict with its semantic time provenance.
+kind: algorithm
+algorithm: conversation_resolution.compile
+input:
+  current_question: What about Pivot Mall?
+  context_sources:
+    - source_id: prior_question
+      kind: prior_user_question
+      text: How many sales did we make at Acacia Mall today?
+      source_card_ids: [prior_card]
+      source_memory_ids: [prior_time]
+      meaning_anchors:
+        - {anchor_id: prior_time, text: today, kind: time_scope, label: time scope}
+  context_frames:
+    - frame_id: request:1
+      source_ids: [prior_question]
+      parts:
+        - {part_id: subject, kind: subject, text: sale occurrence}
+        - {part_id: qualification, kind: qualification, text: sales at Acacia Mall today}
+        - {part_id: output, kind: requested_output, text: number of sales}
+        - {part_id: selection, kind: selection, text: all qualifying results}
+        - {part_id: location, kind: input, text: Acacia Mall, source_ref: location, value_type: identity}
+        - {part_id: time, kind: input, text: today, source_ref: time, value_type: time}
+      callable:
+        base_invocation_id: pi_1
+        program_id: ap_1
+        requested_fact_ref: sales_count
+        requested_fact_fingerprint: fingerprint_1
+        parameters:
+          - {parameter_id: value.location, part_id: location, value_type: identity, input_ref: location, input_use_refs: [sales_count:input_use:location], current_text: Acacia Mall}
+          - {parameter_id: value.time, part_id: time, value_type: time, input_ref: time, input_use_refs: [sales_count:input_use:time], current_text: today}
+  memories:
+    - memory_id: prior_time
+      kind: time_scope
+  payload:
+    kind: conversation_resolution
+    current_question_text: What about Pivot Mall?
+    outcome:
+      kind: resolved
+      resolution_basis: The current location replaces the prior location while today remains.
+      clauses:
+        - current_clause_text: What about Pivot Mall?
+          occurrence: 1
+          request_shape_basis: The prior frame supplies the omitted request shape while the current clause changes its location.
+          request_shape_source: prior_frame_supplies_omitted_request_parts
+          resolved_text: How many sales did we make at Pivot Mall today?
+          retained_frame_parts:
+            - {kind: frame_part, frame_id: request:1, part_id: subject}
+            - {kind: frame_part, frame_id: request:1, part_id: qualification}
+            - {kind: frame_part, frame_id: request:1, part_id: output}
+            - {kind: frame_part, frame_id: request:1, part_id: selection}
+          values:
+            - value_id: current_location
+              resolved_text: Pivot Mall
+              frame_parameter:
+                kind: parameter
+                frame_id: request:1
+                parameter_id: value.location
+              sources:
+                - {kind: current_span, text: Pivot Mall, occurrence: 1}
+            - value_id: retained_time
+              resolved_text: today
+              frame_parameter:
+                kind: parameter
+                frame_id: request:1
+                parameter_id: value.time
+              sources:
+                - {kind: context_anchor, source_id: prior_question, anchor_id: prior_time}
+expect:
+  result_contains:
+    frame_call:
+      kind: call
+      frame_id: request:1
+      arguments:
+        - {kind: resolved_value, parameter_id: value.location, value_id: current_location}
+        - {kind: resolved_value, parameter_id: value.time, value_id: retained_time}
+    uses_prior_context: true

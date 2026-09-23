@@ -11,9 +11,9 @@ def test_model_call_schema_artifact_preserves_submitted_property_order() -> None
     schema = {
         "type": "object",
         "properties": {
-            "answer_requests_count": {"type": "integer"},
-            "answer_requests": {"type": "array"},
-            "question_inputs": {"type": "array"},
+            "first": {"type": "integer"},
+            "second": {"type": "array"},
+            "third": {"type": "array"},
         },
     }
     audit = model_call_audit_write(
@@ -45,7 +45,7 @@ def test_model_call_schema_artifact_preserves_submitted_property_order() -> None
     properties = json.loads(artifact.content)["properties"]
 
     assert list(properties) == [
-        "answer_requests_count",
-        "answer_requests",
-        "question_inputs",
+        "first",
+        "second",
+        "third",
     ]

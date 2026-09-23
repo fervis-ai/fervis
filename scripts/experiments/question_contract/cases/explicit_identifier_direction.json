@@ -1,0 +1,57 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Represent each shown IDENTITY_REFERENCE as its\ninput_ref in an input_comparison with one Identifier fact for its denoted set.\nWhen that set differs from the candidate set, declare their association and\nobserve the Identifier fact through that association.",
+      "new": "Represent each shown IDENTITY_REFERENCE as its input_ref in an input_comparison with one Identifier fact. observed_for_ref copies the declared set or association where that identity value is observed. identified_set_ref copies the declared set whose exact instance the value identifies. When those sets differ, set_graph declares their relationship.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/$defs/identifier_fact_expression/properties/identified_set_ref",
+      "value": {
+        "type": "string",
+        "pattern": "^s[1-9][0-9]*$"
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/$defs/identifier_fact_expression/required",
+      "value": [
+        "kind",
+        "observed_for_ref",
+        "identified_set_ref",
+        "origin"
+      ]
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/$defs/subject_identifier_fact_expression/properties/identified_set_ref",
+      "value": {
+        "type": "string",
+        "pattern": "^s[1-9][0-9]*$"
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/$defs/subject_identifier_fact_expression/required",
+      "value": [
+        "kind",
+        "observed_for_ref",
+        "identified_set_ref",
+        "origin"
+      ]
+    }
+  ],
+  "schema_transforms": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "name": "prune_unreferenced_definitions"
+    }
+  ]
+}

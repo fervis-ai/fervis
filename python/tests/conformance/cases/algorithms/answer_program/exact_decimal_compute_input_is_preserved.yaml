@@ -1,23 +1,22 @@
 id: exact_decimal_compute_input_is_preserved
+description: Exact decimal operands reach deterministic computation without binary-float rounding.
 kind: algorithm
-algorithm: answer_program.invoke
-description: An exact decimal constant reaches deterministic computation without binary-float rounding.
+algorithm: execution.relation_engine
 input:
-  schema_revision: 1
-  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/compute_versioned_constant}
-  catalog: {reads: []}
-  environment: {authority_ref: authority:current}
-  invocations:
-    - id: exact_decimal
-      bindings: []
-      evidence: []
+  relations: []
+  operations:
+    - id: scaled
+      output_relation: ""
+      spec:
+        kind: compute
+        expression:
+          operator: multiply
+          left:
+            value: {input_ref: amount, value: "1.234567890123456789012345"}
+          right:
+            value: {input_ref: rate, value: "0.1"}
+        output_scalar: scaled
 expect:
   result_contains:
-    invocations:
-      - id: exact_decimal
-        status: completed
-        fact_result:
-          outcome:
-            scalars:
-              answer_1: '0.1234567890123456789012345'
-        requests: []
+    scalar_text:
+      scaled: "0.1234567890123456789012345"

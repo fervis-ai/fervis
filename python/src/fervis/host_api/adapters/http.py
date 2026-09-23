@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from fervis.host_api.contracts.response_page import ResponsePage
 from typing import Any
 from urllib.parse import urljoin
 
@@ -28,7 +29,7 @@ from fervis.host_api.credentials import (
     credential_policy_from_auth_schema,
     overlay_from_header_credential,
 )
-from .response_body import response_body
+from .response_body import response_page
 
 
 @dataclass(frozen=True)
@@ -118,7 +119,7 @@ def _get_page(
     query_params: dict[str, Any],
     prepared,
     timeout_seconds: int,
-) -> tuple[int, Any]:
+) -> ResponsePage:
     response = _get(
         _join_url(base_url, url),
         params={**query_params, **dict(prepared.transport_query_params or {})},
@@ -126,7 +127,7 @@ def _get_page(
         cookies=dict(prepared.cookies or {}),
         timeout=timeout_seconds,
     )
-    return response.status_code, response_body(response)
+    return response_page(response)
 
 
 def _request_overlay(

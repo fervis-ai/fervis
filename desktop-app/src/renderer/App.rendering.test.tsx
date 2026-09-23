@@ -46,7 +46,9 @@ describe("Ledger app rendering", () => {
         { timeout: 2500 }
       )
     ).toBeInTheDocument();
-    expect(screen.getAllByText(/sales at ABC Mall this month/i)[0]).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/the question asks for the number of sales/i)[0]
+    ).toBeInTheDocument();
     expect(screen.getByText("Total Count")).toBeInTheDocument();
     expect(screen.getByText("Fact used")).toBeInTheDocument();
     expect(screen.getByText("Read source data")).toBeInTheDocument();
@@ -55,11 +57,8 @@ describe("Ledger app rendering", () => {
     expect(
       screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "\"ABC Mall\": Location (location_id: 60606060-0000-0000-0001-000000000001 via List Location List)"
-      )
-    ).toBeInTheDocument();
+    expect(screen.getByText("Resolver candidate")).toBeInTheDocument();
+    expect(screen.getByText(/List Location List:/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("More"));
     expect(screen.getByText("Decision")).toBeInTheDocument();
@@ -147,7 +146,7 @@ describe("Ledger app rendering", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "\"ABC Mall\": Location (location_id: 60606060-0000-0000-0001-000000000001 via List Location List)"
+        "Resolver candidate: List Location List: The resolver can search location records by lookup text and return a canonical location identity."
       )
     ).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();

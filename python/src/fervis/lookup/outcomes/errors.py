@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from fervis.types.enums import StrEnum
+from fervis.lookup.identity_types import ReferenceResolutionFailure
 
 from fervis.lookup.outcomes.model import (
     UndefinedOperationRef,
@@ -13,6 +14,7 @@ from fervis.lookup.outcomes.model import (
 
 class ExecutionIssueKind(StrEnum):
     EXECUTION_FAILURE = "execution_failure"
+    REFERENCE_RESOLUTION = "reference_resolution"
     INCOMPLETE_EVIDENCE = "incomplete_evidence"
     VALIDATION_ERROR = "validation_error"
     PROVIDER_ERROR = "provider_error"
@@ -25,6 +27,19 @@ class ExecutionIssue:
     message: str
     relation_id: str = ""
     proof_refs: tuple[str, ...] = ()
+    reference: ReferenceResolutionFailure | None = None
+
+
+class UnresolvedReferenceError(Exception):
+    def __init__(self, failure, *, relation_id, proof_refs=()):
+        super().__init__(failure.reason.value)
+        self.failure=failure
+        self.relation_id=relation_id
+        self.proof_refs=proof_refs
+
+    def issue(self):
+        return ExecutionIssue(ExecutionIssueKind.REFERENCE_RESOLUTION, "reference resolution needs clarification",
+            relation_id=self.relation_id,proof_refs=self.proof_refs,reference=self.failure)
 
 
 class IncompleteEvidenceError(Exception):

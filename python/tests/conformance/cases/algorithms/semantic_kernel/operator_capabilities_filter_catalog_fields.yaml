@@ -1,0 +1,10 @@
+id: operator_capabilities_filter_catalog_fields
+description: Operator-derived capabilities retain only physically compatible catalog fields.
+kind: algorithm
+algorithm: semantic.field_capability
+input:
+  capability: number
+  source_types: [integer, decimal, string, date, boolean, object]
+expect:
+  result_contains:
+    compatible_source_types: [integer, decimal]

@@ -5,7 +5,6 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.expand_activated
 input:
-  current_question: What about Jane Doe?
   conversation_context:
     factArtifacts:
       - artifactId: turn_1

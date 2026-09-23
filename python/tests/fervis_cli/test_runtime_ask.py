@@ -1,6 +1,30 @@
 from __future__ import annotations
 
-from ._support import *  # noqa: F401,F403
+from io import StringIO
+import threading
+import time
+
+from fervis.interfaces.agent.actions import (
+    inspect_question_action,
+    provide_clarification_action,
+)
+from fervis.interfaces.cli.contracts import FervisCommandKind
+from fervis.interfaces.cli.dispatch import evaluate_fervis, run_fervis
+from fervis.interfaces.cli.runtime_ask import RuntimeAskEventStream
+from fervis.questions import AskRequestLimits, AskResult
+
+from ._support import (
+    _BlockingEventedQuestionService,
+    _ExplodingLineageQuery,
+    _FailingQuestionRunFollower,
+    _FailingQuestionService,
+    _QuestionRunFollower,
+    _QuestionService,
+    _TimedOutQuestionRunFollower,
+    _ValidationFailingQuestionService,
+    _jsonl_events,
+    _ports,
+)
 
 
 def test_fervis_runtime_ask_calls_question_run_service() -> None:
@@ -583,7 +607,7 @@ def test_fervis_runtime_ask_uses_one_public_execution_path() -> None:
     assert exit_code == 0
     assert ports.questions.requests[0].execution_mode.value == "queued"
     assert str(ports.questions.requests[0].max_budget_usd) == "0.5"
-    assert ports.questions.requests[0].max_thinking_tokens == 64
+    assert ports.questions.requests[0].max_thinking_tokens == 16384
 
 
 def test_fervis_runtime_ask_rejects_invalid_limits() -> None:

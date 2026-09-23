@@ -16,8 +16,6 @@ from fervis.lookup.clarification.model import (
     ConversationResolutionResponse,
     ConversationInterpretationCandidate,
     ConversationInterpretationEvidence,
-    FactPlanningCatalogInputContinuation,
-    FactPlanningCatalogInputResponse,
     GroundingContinuation,
     GroundingIdentityResponse,
     QuestionContractContinuation,
@@ -26,6 +24,7 @@ from fervis.lookup.clarification.model import (
     SourceBindingCatalogInputResponse,
 )
 from fervis.lookup.canonical_data import entity_key_from_payload, entity_key_to_payload
+from fervis.lookup.identity_types import observed_reference_values_from_payload
 from fervis.lookup.clarification.render import render_clarification_question
 
 
@@ -64,6 +63,7 @@ def clarification_response_payload(
             "clarificationId": response.clarification_id,
             "requestedFactId": response.requested_fact_id,
             "knownInputId": response.known_input_id,
+            **({"referenceOperand":response.reference_operand} if response.reference_operand else {}),
             "option": _option_payload(response.option),
         }
     if isinstance(response, SourceBindingCatalogInputResponse):
@@ -72,16 +72,6 @@ def clarification_response_payload(
             "responseId": response.response_id,
             "clarificationId": response.clarification_id,
             "requestedFactId": response.requested_fact_id,
-            "target": vars(response.target),
-            "value": response.value,
-        }
-    if isinstance(response, FactPlanningCatalogInputResponse):
-        return {
-            "kind": "fact_planning_catalog_input",
-            "responseId": response.response_id,
-            "clarificationId": response.clarification_id,
-            "requestedFactId": response.requested_fact_id,
-            "planningRequirementId": response.planning_requirement_id,
             "target": vars(response.target),
             "value": response.value,
         }
@@ -120,6 +110,7 @@ def clarification_response_from_payload(
             clarification_id=_required_text(payload, "clarificationId"),
             requested_fact_id=_required_text(payload, "requestedFactId"),
             known_input_id=_required_text(payload, "knownInputId"),
+            reference_operand=_optional_text(payload, "referenceOperand"),
             option=_option_from_payload(_mapping(payload, "option")),
         )
     if kind == "source_binding_catalog_input":
@@ -127,15 +118,6 @@ def clarification_response_from_payload(
             response_id=_required_text(payload, "responseId"),
             clarification_id=_required_text(payload, "clarificationId"),
             requested_fact_id=_required_text(payload, "requestedFactId"),
-            target=_target_from_payload(_mapping(payload, "target")),
-            value=_required_text(payload, "value"),
-        )
-    if kind == "fact_planning_catalog_input":
-        return FactPlanningCatalogInputResponse(
-            response_id=_required_text(payload, "responseId"),
-            clarification_id=_required_text(payload, "clarificationId"),
-            requested_fact_id=_required_text(payload, "requestedFactId"),
-            planning_requirement_id=_required_text(payload, "planningRequirementId"),
             target=_target_from_payload(_mapping(payload, "target")),
             value=_required_text(payload, "value"),
         )
@@ -234,6 +216,10 @@ def _option_from_payload(payload: Mapping[str, object]) -> ClarificationOption:
             if payload.get("key") is not None
             else None
         ),
+        observed_source_ref=_optional_text(payload, "observedSourceRef"),
+        observed_properties=observed_reference_values_from_payload(
+            payload.get("observedProperties")
+        ),
         matched_label=_optional_text(payload, "matched_label"),
         matched_field=_optional_text(payload, "matched_field"),
         matched_value=_optional_text(payload, "matched_value"),
@@ -243,7 +229,7 @@ def _option_from_payload(payload: Mapping[str, object]) -> ClarificationOption:
 
 
 def _option_payload(option: ClarificationOption) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "id": option.id,
         "label": option.label,
         "value": option.value,
@@ -254,6 +240,12 @@ def _option_payload(option: ClarificationOption) -> dict[str, object]:
         "resolver_read_id": option.resolver_read_id,
         "resolver_label": option.resolver_label,
     }
+    if option.observed_properties:
+        payload["observedSourceRef"] = option.observed_source_ref
+        payload["observedProperties"] = [
+            item.to_payload() for item in option.observed_properties
+        ]
+    return payload
 
 
 def _mapping(payload: Mapping[str, object], field: str) -> Mapping[str, object]:
@@ -328,6 +320,7 @@ def parse_clarification_response(
                 clarification_id=clarification.id,
                 requested_fact_id=clarification.requested_fact_id,
                 known_input_id=continuation.known_input_id,
+                reference_operand=continuation.reference_operand,
                 option=selected,
             )
         if not continuation.accepts_free_text:
@@ -346,15 +339,6 @@ def parse_clarification_response(
             response_id=response_id,
             clarification_id=clarification.id,
             requested_fact_id=continuation.requested_fact_id,
-            target=continuation.target,
-            value=_catalog_value(continuation.target, selected, response_text),
-        )
-    if isinstance(continuation, FactPlanningCatalogInputContinuation):
-        return FactPlanningCatalogInputResponse(
-            response_id=response_id,
-            clarification_id=clarification.id,
-            requested_fact_id=continuation.requested_fact_id,
-            planning_requirement_id=continuation.planning_requirement_id,
             target=continuation.target,
             value=_catalog_value(continuation.target, selected, response_text),
         )

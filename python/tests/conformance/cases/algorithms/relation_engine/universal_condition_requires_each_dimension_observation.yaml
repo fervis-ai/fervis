@@ -38,7 +38,7 @@ input:
           required_identity_fields: [obs_subject_id, obs_dimension_id]
         subject_keys: [{left: subject_id, right: obs_subject_id}]
         dimension_keys: [{left: dimension_id, right: obs_dimension_id}]
-        predicate: {left: qty, operator: lte, right_scalar: zero}
+        condition: {left: qty, operator: lte, right_scalar: zero}
         output_fields: [{source: name}]
 expect:
   result_contains:

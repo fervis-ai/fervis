@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from .versions import FUNCTION_SEMANTIC_VERSION
 from fervis.types.enums import StrEnum
 
 from fervis.lookup.answer_program.values import (
@@ -10,7 +11,7 @@ from fervis.lookup.answer_program.values import (
     ParameterDeclaration,
     ParameterValueType,
 )
-from fervis.lookup.answer_program.operations import PredicateOperator
+from fervis.lookup.expression_operators import ExpressionBinaryOperator
 
 
 class CapabilityKind(StrEnum):
@@ -23,10 +24,10 @@ class NarrowPopulationCapability:
     parameter: ParameterDeclaration
     relation_id: str
     field_id: str
-    operator: PredicateOperator
+    operator: ExpressionBinaryOperator
     requested_fact_ids: tuple[str, ...]
     proof_refs: tuple[str, ...]
-    function_semantics_version: str = "1"
+    function_semantics_version: str = FUNCTION_SEMANTIC_VERSION
     kind: CapabilityKind = field(
         default=CapabilityKind.NARROW_COUNT,
         init=False,
@@ -41,8 +42,8 @@ class NarrowPopulationCapability:
             raise ValueError("capability requires id")
         if not isinstance(self.parameter, ParameterDeclaration):
             raise TypeError("capability parameter must be ParameterDeclaration")
-        if not isinstance(self.operator, PredicateOperator):
-            raise TypeError("capability operator must be PredicateOperator")
+        if not isinstance(self.operator, ExpressionBinaryOperator):
+            raise TypeError("capability operator must be ExpressionBinaryOperator")
         if (
             not isinstance(self.relation_id, str)
             or not self.relation_id
@@ -51,7 +52,7 @@ class NarrowPopulationCapability:
         ):
             raise ValueError("population capability requires relation and field")
         if (
-            self.operator is not PredicateOperator.IN
+            self.operator is not ExpressionBinaryOperator.IN
             or self.parameter.value_type is not ParameterValueType.STRING_SET
         ):
             raise ValueError("population capability requires string-set membership")

@@ -5,11 +5,10 @@ from fervis.memory.conversation_context.activation import (
     expand_activated_memory_cards,
 )
 from fervis.memory.conversation_context.model import (
-    ConversationAnswerShape,
+    ConversationCallableParameter,
     ConversationCallableSignature,
     ConversationContextFrame,
     ConversationContextSource,
-    ConversationFrameParameter,
     ConversationFramePart,
     ConversationFramePartKind,
     ConversationMeaningAnchor,
@@ -20,11 +19,10 @@ from fervis.memory.conversation_context.model import (
 )
 
 __all__ = [
-    "ConversationAnswerShape",
+    "ConversationCallableParameter",
     "ConversationCallableSignature",
     "ConversationContextFrame",
     "ConversationContextSource",
-    "ConversationFrameParameter",
     "ConversationFramePart",
     "ConversationFramePartKind",
     "ConversationMeaningAnchor",

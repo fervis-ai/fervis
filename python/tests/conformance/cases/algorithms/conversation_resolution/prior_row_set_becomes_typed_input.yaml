@@ -20,10 +20,11 @@ input:
     outcome:
       kind: resolved
       resolution_basis: Current meaning and retained prior meaning form the resolved question.
-      contextualized_question: Which of the five prior sales were completed?
       clauses:
         - current_clause_text: Which of those were completed?
           occurrence: 1
+          request_shape_basis: The current clause states the requested result and qualification; prior evidence resolves only the referenced rows.
+          request_shape_source: current_clause_supplies_request
           resolved_text: Which of the five prior sales were completed?
           retained_frame_parts: []
           values:

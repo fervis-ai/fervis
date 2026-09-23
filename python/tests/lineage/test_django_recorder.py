@@ -320,10 +320,10 @@ def test_django_lineage_recorder_rejects_artifact_model_call_from_other_step() -
             kind=RunStepKind.MODEL_TURN,
         ),
         RunStepWrite(
-            step_id="step_fact_planning",
+            step_id="step_plan_selection",
             run_id="run_1",
             sequence=2,
-            step_key=RunStepKey.FACT_PLANNING,
+            step_key=RunStepKey.PLAN_SELECTION,
             kind=RunStepKind.MODEL_TURN,
         ),
     ):
@@ -345,7 +345,7 @@ def test_django_lineage_recorder_rejects_artifact_model_call_from_other_step() -
             RunArtifactWrite(
                 artifact_id="artifact_wrong_step",
                 run_id="run_1",
-                step_id="step_fact_planning",
+                step_id="step_plan_selection",
                 model_call_id="call_1",
                 artifact_kind=ArtifactKind.PROMPT,
                 content_hash="sha256:prompt",
@@ -469,7 +469,14 @@ def test_django_lineage_recorder_persists_source_read_without_response_body() ->
     assert SourceRead.objects.filter(source_read_id="source_read_1").count() == 1
 
 
-def test_django_lineage_recorder_persists_read_eligibility_resolver_read() -> None:
+@pytest.mark.parametrize(
+    ("step_key", "kind"),
+    [
+        (RunStepKey.READ_ELIGIBILITY, RunStepKind.MODEL_TURN),
+        (RunStepKey.SOURCE_INSPECTION, RunStepKind.DETERMINISTIC),
+    ],
+)
+def test_django_lineage_recorder_persists_planning_read(step_key, kind) -> None:
     recorder: LineageRecorderPort = DjangoLineageRecorder()
     _record_run_spine(recorder)
     _record_catalog_endpoint(recorder)
@@ -478,8 +485,8 @@ def test_django_lineage_recorder_persists_read_eligibility_resolver_read() -> No
             step_id="step_read_eligibility",
             run_id="run_1",
             sequence=1,
-            step_key=RunStepKey.READ_ELIGIBILITY,
-            kind=RunStepKind.MODEL_TURN,
+            step_key=step_key,
+            kind=kind,
         )
     )
 
@@ -499,7 +506,7 @@ def test_django_lineage_recorder_persists_read_eligibility_resolver_read() -> No
     source_read = SourceRead.objects.select_related("step").get(
         source_read_id="source_read_resolver"
     )
-    assert source_read.step.step_key == RunStepKey.READ_ELIGIBILITY.value
+    assert source_read.step.step_key == step_key.value
 
 
 def test_django_lineage_recorder_rejects_source_read_endpoint_from_other_run() -> None:
@@ -743,9 +750,8 @@ def test_django_lineage_recorder_persists_answer_lineage_primitives_idempotently
         produced_by_step_id="step_contract",
         fact_key="fact_1",
         description="open store count",
-        answer_expression_family="scalar_aggregate",
         requested_fact_json={"description": "open store count"},
-        answer_requests_json={"outputs": ["answer_1"]},
+        inputs_json={"inputs": []},
     )
     fact_result = FactResultWrite(
         fact_result_id="fact_result_1",
@@ -864,7 +870,6 @@ def test_django_lineage_recorder_records_answered_result_atomically() -> None:
                     run_id="run_1",
                     produced_by_step_id="step_contract",
                     fact_key="fact_1",
-                    answer_expression_family="scalar_aggregate",
                 ),
             ),
             fact_results=(
@@ -978,7 +983,6 @@ def test_django_lineage_recorder_rolls_back_answered_result_on_late_failure() ->
                         run_id="run_1",
                         produced_by_step_id="step_contract",
                         fact_key="fact_1",
-                        answer_expression_family="scalar_aggregate",
                     ),
                 ),
                 fact_results=(
@@ -1046,7 +1050,6 @@ def test_django_lineage_recorder_preserves_no_data_terminal_proof() -> None:
                     run_id="run_1",
                     produced_by_step_id="step_contract",
                     fact_key="fact_1",
-                    answer_expression_family="scalar_aggregate",
                 ),
             ),
             fact_results=(
@@ -1203,7 +1206,6 @@ def test_django_lineage_recorder_rejects_cross_run_lineage_references() -> None:
                 run_id="run_1",
                 produced_by_step_id="step_other_run",
                 fact_key="fact_1",
-                answer_expression_family="scalar_aggregate",
             )
         )
 
@@ -1248,7 +1250,6 @@ def test_django_lineage_recorder_rejects_cross_run_memory_artifact_refs() -> Non
             run_id="run_2",
             produced_by_step_id="step_other_run",
             fact_key="fact_1",
-            answer_expression_family="scalar_aggregate",
         )
     )
     recorder.record_fact_result(
@@ -1445,7 +1446,6 @@ def test_django_lineage_recorder_rejects_answer_output_without_proof_graph() -> 
             run_id="run_1",
             produced_by_step_id="step_contract",
             fact_key="fact_1",
-            answer_expression_family="scalar_aggregate",
         )
     )
     recorder.record_fact_result(
@@ -1528,7 +1528,6 @@ def test_django_lineage_recorder_rejects_missing_source_read_proof_ref() -> None
             run_id="run_1",
             produced_by_step_id="step_contract",
             fact_key="fact_1",
-            answer_expression_family="scalar_aggregate",
         )
     )
     recorder.record_fact_result(
@@ -1712,7 +1711,6 @@ def _record_answered_lineage_prerequisites(recorder: LineageRecorderPort) -> Non
             run_id="run_1",
             produced_by_step_id="step_contract",
             fact_key="fact_1",
-            answer_expression_family="scalar_aggregate",
         )
     )
     recorder.record_fact_result(
@@ -1868,7 +1866,6 @@ def _answered_result_write() -> AnsweredRunResultWrite:
                 run_id="run_1",
                 produced_by_step_id="step_contract",
                 fact_key="fact_1",
-                answer_expression_family="scalar_aggregate",
             ),
         ),
         fact_results=(
@@ -1934,3 +1931,55 @@ def _answer_proof_graph_payload() -> dict[str, object]:
             },
         ),
     )
+
+
+def test_inspection_phases_have_distinct_immutable_lineage():
+    from fervis.lineage.enums import SourceInspectionPhase
+    from fervis.lookup.lineage.representation import RepresentationInspectionAudit
+    from fervis.lookup.lineage.steps import LineageRuntimeStepSink
+    from fervis.lookup.relation_catalog import EndpointRead, CatalogEndpointMetadata
+
+    recorder = DjangoLineageRecorder()
+    _record_run_spine(recorder)
+    sink = LineageRuntimeStepSink(run_id="run_1", recorder=recorder)
+    for phase, names in (
+        (SourceInspectionPhase.CONTINUATION, ("a",)),
+        (SourceInspectionPhase.SEMANTIC, ("b", "c")),
+    ):
+        audit = RepresentationInspectionAudit(run_id="run_1", sink=sink, phase=phase)
+        for name in names:
+            read = EndpointRead(
+                name,
+                name,
+                resource_names=("items",),
+                catalog_endpoint=CatalogEndpointMetadata(
+                    catalog_endpoint_key=name,
+                    endpoint_name=name,
+                    framework_kind="fastapi",
+                    source_namespace_kind="fastapi_app",
+                    source_namespace_path=("test",),
+                    route_method="GET",
+                    route_path_template=f"/{name}",
+                    handler_ref="test.items",
+                ),
+            )
+            audit.observe(
+                read,
+                {
+                    "responseStatus": 200,
+                    "responseFormat": "json",
+                    "responseBody": [{"name": name}],
+                },
+            )
+        audit.flush()
+    steps = list(
+        RunStep.objects.filter(
+            run_id="run_1", step_key=RunStepKey.SOURCE_INSPECTION.value
+        )
+    )
+    assert len(steps) == 2
+    assert sorted(step.output_summary_json["inspectedReadCount"] for step in steps) == [
+        1,
+        2,
+    ]
+    assert SourceRead.objects.filter(run_id="run_1").count() == 3

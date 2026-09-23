@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from dataclasses import replace
 
 from django.contrib.auth import get_user_model
 
@@ -10,10 +11,15 @@ from fervis.host_api.contracts.authority import ReadContextRef
 
 
 def capture_django_read_context(request: Any) -> ReadContextRef:
+    origin = (
+        f"{request.scheme}://{request.get_host()}"
+        if hasattr(request, "get_host")
+        else None
+    )
     user = getattr(request, "user", None)
     if user is None or not getattr(user, "is_authenticated", True):
-        return ReadContextRef(scheme="anonymous")
-    return django_read_context_ref(user)
+        return ReadContextRef(scheme="anonymous", origin=origin)
+    return replace(django_read_context_ref(user), origin=origin)
 
 
 def django_read_context_ref(principal: Any) -> ReadContextRef:

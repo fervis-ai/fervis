@@ -1,0 +1,439 @@
+[
+  {
+    "id": "shared_property_and_time",
+    "question": "How many in-person sales happened this month?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_for_population"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["count", "number", "how many"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "this month": {
+        "denotation": "scalar",
+        "value_type": "temporal_scope"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["this month"],
+      ["in-person", "this month"]
+    ],
+    "required_semantic_terms": ["in-person", "this month"]
+  },
+  {
+    "id": "worked_shift_count",
+    "question": "How many shifts were worked today?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_for_population"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["count", "number", "how many"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "today": {
+        "denotation": "scalar",
+        "value_type": "temporal_scope"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["today"]
+    ],
+    "required_semantic_terms": ["shift", "today"]
+  },
+  {
+    "id": "grouped_ranking_and_time",
+    "question": "Which salesperson made the most revenue today?",
+    "expected_request_count": 1,
+    "accepted_request_shapes": [
+      [
+        {
+          "result_kind": "one_per_group",
+          "grouping_kinds": ["related_entity_identity"]
+        }
+      ],
+      [
+        {
+          "result_kind": "one_per_candidate",
+          "grouping_kinds": []
+        }
+      ]
+    ],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["salesperson", "seller"]],
+    "expected_selections": ["first_rank_with_ties"],
+    "required_supplied_values": {
+      "today": {
+        "denotation": "scalar",
+        "value_type": "temporal_scope"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["today"]
+    ],
+    "required_semantic_terms": ["salesperson", "today"]
+  },
+  {
+    "id": "business_modifier_and_explicit_date",
+    "question": "How many completed sales happened on November 1, 2025?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_for_population"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["count", "number", "how many"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "November 1, 2025": {
+        "denotation": "scalar",
+        "value_type": "temporal_scope",
+        "accepted_operands": ["2025-11-01"]
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["November 1, 2025"],
+      ["completed", "November 1, 2025"],
+      ["2025-11-01"],
+      ["completed", "2025-11-01"]
+    ],
+    "required_semantic_terms": ["completed", "November 1, 2025"]
+  },
+  {
+    "id": "named_entity_identity",
+    "question": "How many stores are in Nairobi?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_for_population"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["count", "number", "how many"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "Nairobi": {
+        "denotation": "identity_reference",
+        "value_type": "identity_name_or_code"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["Nairobi"]
+    ],
+    "required_semantic_terms": ["store", "Nairobi"]
+  },
+  {
+    "id": "named_person_identity",
+    "question": "Which staff member is named Nadia Wanjiku?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_per_candidate"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["staff member", "staff"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "Nadia Wanjiku": {
+        "denotation": "identity_reference",
+        "value_type": "identity_name_or_code"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["Nadia Wanjiku"]
+    ],
+    "required_semantic_terms": ["staff member", "Nadia Wanjiku"]
+  },
+  {
+    "id": "related_staff_identity",
+    "question": "How many sales did the staff with staff_id: 51515151-0000-0000-0002-000000000001 sell today?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_for_population"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["count", "number", "how many"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "51515151-0000-0000-0002-000000000001": {
+        "denotation": "identity_reference",
+        "value_type": "identity_name_or_code"
+      },
+      "today": {
+        "denotation": "scalar",
+        "value_type": "temporal_scope"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["51515151-0000-0000-0002-000000000001", "today"]
+    ],
+    "required_semantic_terms": ["sale", "staff", "today"]
+  },
+  {
+    "id": "related_staff_identity_collection",
+    "question": "How many sales did the staff members with ids: 51515151-0000-0000-0002-000000000001 and 51515151-0000-0000-0002-000000000002 sell each today?",
+    "expected_request_count": 1,
+    "accepted_request_counts": [1, 2],
+    "accepted_request_shapes": [
+      [
+        {
+          "result_kind": "one_per_group",
+          "grouping_kinds": ["related_entity_identity"]
+        }
+      ],
+      [
+        {
+          "result_kind": "one_per_candidate",
+          "grouping_kinds": []
+        }
+      ],
+      [
+        {
+          "result_kind": "one_per_candidate",
+          "grouping_kinds": []
+        },
+        {
+          "result_kind": "one_per_candidate",
+          "grouping_kinds": []
+        }
+      ]
+    ],
+    "expected_output_counts": [2, 2],
+    "expected_output_contains_any": [["staff"]],
+    "expected_selections": ["all_results", "all_results"],
+    "required_supplied_values": {
+      "51515151-0000-0000-0002-000000000001": {
+        "denotation": "identity_reference",
+        "value_type": "identity_name_or_code"
+      },
+      "today": {
+        "denotation": "scalar",
+        "value_type": "temporal_scope"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      [
+        "51515151-0000-0000-0002-000000000001",
+        "51515151-0000-0000-0002-000000000002",
+        "today"
+      ]
+    ],
+    "required_entity_reference_operand_groups": [
+      [
+        "51515151-0000-0000-0002-000000000001",
+        "51515151-0000-0000-0002-000000000002"
+      ]
+    ],
+    "required_semantic_terms": ["sale", "staff", "today"]
+  },
+  {
+    "id": "candidate_entity_identity",
+    "question": "How many sales have sale ID 11111111-1111-4111-8111-111111111111?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_for_population"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["count", "number", "how many"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "11111111-1111-4111-8111-111111111111": {
+        "denotation": "identity_reference",
+        "value_type": "identity_name_or_code"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["11111111-1111-4111-8111-111111111111"]
+    ],
+    "required_semantic_terms": ["sale"]
+  },
+  {
+    "id": "categorical_property_value",
+    "question": "How many tasks have priority urgent?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_for_population"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["count", "number", "how many"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "urgent": {
+        "denotation": "scalar",
+        "value_type": "categorical_value"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["urgent"]
+    ],
+    "required_semantic_terms": ["task", "urgent"]
+  },
+  {
+    "id": "subject_is_not_a_supplied_value",
+    "question": "How many cash deposits were recorded this month?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_for_population"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["count", "number", "how many"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "this month": {
+        "denotation": "scalar",
+        "value_type": "temporal_scope"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["this month"]
+    ],
+    "required_semantic_terms": ["cash deposit", "this month"]
+  },
+  {
+    "id": "coverage_candidate_is_tested_entity",
+    "question": "Which workers completed a task in every required category during March 2026?",
+    "expected_request_count": 1,
+    "accepted_request_shapes": [
+      [
+        {
+          "result_kind": "one_per_candidate",
+          "grouping_kinds": []
+        }
+      ]
+    ],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["worker"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "March 2026": {
+        "denotation": "scalar",
+        "value_type": "temporal_scope"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["March 2026"]
+    ],
+    "required_semantic_terms": [
+      "worker",
+      "task",
+      "required category",
+      "March 2026"
+    ]
+  },
+  {
+    "id": "ranked_identity_with_explicit_metric",
+    "question": "Which salesperson made the most revenue today, and how much revenue did they make?",
+    "expected_request_count": 1,
+    "accepted_request_shapes": [
+      [
+        {
+          "result_kind": "one_per_group",
+          "grouping_kinds": ["related_entity_identity"]
+        }
+      ],
+      [
+        {
+          "result_kind": "one_per_candidate",
+          "grouping_kinds": []
+        }
+      ]
+    ],
+    "expected_output_counts": [2],
+    "expected_returned_value_kinds": [["value"]],
+    "expected_output_contains_any": [["salesperson", "seller"]],
+    "expected_selections": ["first_rank_with_ties"],
+    "required_supplied_values": {
+      "today": {
+        "denotation": "scalar",
+        "value_type": "temporal_scope"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["today"]
+    ],
+    "required_semantic_terms": ["salesperson", "revenue", "today"]
+  },
+  {
+    "id": "top_n_grouped_identities",
+    "question": "Which three products had the highest sales revenue this month?",
+    "expected_request_count": 1,
+    "accepted_request_shapes": [
+      [
+        {
+          "result_kind": "one_per_group",
+          "grouping_kinds": ["related_entity_identity"]
+        }
+      ],
+      [
+        {
+          "result_kind": "one_per_candidate",
+          "grouping_kinds": []
+        }
+      ]
+    ],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["product"]],
+    "expected_selections": ["take_with_boundary_ties"],
+    "required_supplied_values": {
+      "this month": {
+        "denotation": "scalar",
+        "value_type": "temporal_scope"
+      },
+      "3": {
+        "denotation": "scalar",
+        "value_type": "integer"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["this month", "3"],
+      ["this month", "three"]
+    ],
+    "required_semantic_terms": ["product", "revenue", "this month"]
+  },
+  {
+    "id": "numeric_qualification_value",
+    "question": "How many sales had an amount above 100 this month?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_for_population"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["count", "number", "how many"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "100": {"denotation": "scalar", "value_type": "integer"},
+      "this month": {"denotation": "scalar", "value_type": "temporal_scope"}
+    },
+    "accepted_supplied_value_inventories": [["100", "this month"]],
+    "required_semantic_terms": ["sale", "amount", "this month"]
+  },
+  {
+    "id": "numeric_computation_value",
+    "question": "What is 10% of sales revenue from March 2026?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_for_population"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_output_contains_any": [["10%", "ten percent", "percentage"]],
+    "expected_selections": ["all_results"],
+    "required_supplied_values": {
+      "10%": {"denotation": "scalar", "value_type": "number"},
+      "March 2026": {"denotation": "scalar", "value_type": "temporal_scope"}
+    },
+    "accepted_supplied_value_inventories": [["10%", "March 2026"]],
+    "required_semantic_terms": ["sales revenue", "March 2026"]
+  },
+  {
+    "id": "candidate_rows_return_related_identity",
+    "question": "Which work locations were associated with Nadia Wanjiku's first two shifts?",
+    "expected_request_count": 1,
+    "expected_result_kinds": ["one_per_candidate"],
+    "expected_grouping_counts": [0],
+    "expected_output_counts": [1],
+    "expected_returned_value_kinds": [["related_entity"]],
+    "expected_output_contains_any": [["workplace", "location", "place", "where"]],
+    "expected_selections": ["take_with_boundary_ties"],
+    "required_supplied_values": {
+      "Nadia Wanjiku": {
+        "denotation": "identity_reference",
+        "value_type": "identity_name_or_code"
+      },
+      "2": {
+        "denotation": "scalar",
+        "value_type": "integer"
+      }
+    },
+    "accepted_supplied_value_inventories": [
+      ["Nadia Wanjiku", "2"],
+      ["Nadia Wanjiku", "two"]
+    ],
+    "required_semantic_terms": ["Nadia Wanjiku", "shift"]
+  }
+]

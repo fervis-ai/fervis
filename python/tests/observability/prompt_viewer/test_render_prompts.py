@@ -70,7 +70,7 @@ def test_render_static_site_writes_run_page(tmp_path):
     site = _render_site(tmp_path)
 
     run_page = (site / "runs" / "run-a" / "index.html").read_text(encoding="utf-8")
-    assert "fact_plan" in run_page
+    assert "source_binding" in run_page
 
 
 def test_render_static_site_writes_call_page_schema_section(tmp_path):
@@ -102,17 +102,17 @@ def test_render_prompt_inspection_raw_writes_agent_readable_json(tmp_path):
                 run_id="run-a",
                 sequence=3,
                 event_type="model_turn.completed",
-                purpose="fact_plan",
+                purpose="source_binding",
                 provider="test_provider",
                 model_key="GPT_TEST",
                 raw_system_prompt="System <instructions>",
                 raw_prompt=_prompt_with_json_section(),
                 raw_schema={"type": "object"},
-                raw_tool_specs=[{"name": "FactPlan"}],
+                raw_tool_specs=[{"name": "SourceBinding"}],
                 arguments={"status": "needs_clarification"},
                 parsed_arguments={"status": "needs_clarification"},
                 usage={"inputTokens": 10},
-                prompt_frame={"phase": "fact_plan"},
+                prompt_frame={"phase": "source_binding"},
             )
         ],
     )
@@ -265,16 +265,16 @@ def _render_site(tmp_path):
         run_id="run-a",
         sequence=3,
         event_type="model_turn.completed",
-        purpose="fact_plan",
+        purpose="source_binding",
         provider="test_provider",
         model_key="GPT_TEST",
         raw_prompt="Question:\nWhat happened?",
         raw_schema={"type": "object"},
-        raw_tool_specs=[{"name": "FactPlan"}],
+        raw_tool_specs=[{"name": "SourceBinding"}],
         arguments={"status": "needs_clarification"},
         parsed_arguments={"status": "needs_clarification"},
         usage={"inputTokens": 10},
-        prompt_frame={"phase": "fact_plan"},
+        prompt_frame={"phase": "source_binding"},
     )
     site = tmp_path / "site"
     render_static_site(
@@ -287,4 +287,6 @@ def _render_site(tmp_path):
 
 
 def _call_page(site) -> str:
-    return (site / "runs" / "run-a" / "0003-fact-plan.html").read_text(encoding="utf-8")
+    return (site / "runs" / "run-a" / "0003-source-binding.html").read_text(
+        encoding="utf-8"
+    )

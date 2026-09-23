@@ -94,11 +94,6 @@ input:
           artifactId: memory_requested_fact_1
           sourceKind: requested_fact
           outcome: answered
-          provenance:
-            question_contract:
-              answer_requests:
-                - id: fact_1
-                  answer_fact: staff member who earned most
       - memory_artifact_id: memory_fact_result_1
         run_id: run_1
         produced_by_step_id: step_execute
@@ -198,7 +193,7 @@ input:
         compile_step_id: step_compile
         execute_step_id: step_execute
         payload_schema: fervis.execution_proof_graph
-        payload_schema_rev: 2
+        payload_schema_rev: 3
         payload_json:
           nodes:
             - id: relation:source_1

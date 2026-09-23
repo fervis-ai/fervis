@@ -1,0 +1,17 @@
+id: falsy_parameter_values_are_preserved
+kind: algorithm
+algorithm: source_binding.parameter_alternatives
+description: Valid false and zero parameter values remain present in the compiled binding set.
+input:
+  parameter_groups:
+    - target_id: include_archived
+      type: boolean
+      alternative_values: [false]
+    - target_id: offset
+      type: integer
+      alternative_values: [0]
+expect:
+  result_contains:
+    binding_sets:
+      - include_archived: {value: false}
+        offset: {value: 0}

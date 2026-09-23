@@ -1,9 +1,12 @@
-schema_revision: 6
+schema_revision: 27
 program:
   $type: AnswerProgram
   fields:
+    inputs: {$tuple: []}
+    input_denotations: {$tuple: []}
     fact_template: {$tuple: []}
     fulfillment: {$tuple: []}
+    relation_guarantees: {$tuple: []}
     parameters: {$tuple: []}
     capabilities: {$tuple: []}
     relations:
@@ -14,6 +17,8 @@ program:
             source:
               $type: RelationSource
               fields:
+                pagination_binding: null
+                argument_relation_id: ""
                 kind: {$enum: SourceKind, value: api_read}
                 read_id: sales
                 row_source_id: ""
@@ -73,7 +78,7 @@ program:
     compatibility:
       $type: ProgramCompatibility
       fields:
-        schema_revision: 6
+        schema_revision: 27
         compiler_version: ""
         function_semantics: {$tuple: []}
         source_contracts: {$tuple: []}

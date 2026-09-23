@@ -1,0 +1,21 @@
+id: catalog_selection_uses_exhaustive_recall
+description: A bounded shortlist selects a broadly useful source from the authoritative exhaustive recall ledger.
+kind: algorithm
+algorithm: semantic.query_enrichment
+input:
+  mode: select_catalog
+  max_reads_per_fact: 2
+  catalog:
+    reads:
+      - {id: payroll_partial, endpoint_name: list_payroll, resource_names: [payroll summary]}
+      - {id: payout_partial, endpoint_name: list_payout, resource_names: [payout]}
+      - {id: location_partial, endpoint_name: list_location, resource_names: [location]}
+      - {id: compensation_source, endpoint_name: list_shift_compensation, resource_names: [shift compensation, location]}
+  resource_matches:
+    - {bucket_ref: "fact_1:recall:population", exhaustive_resource_names: [payroll summary, shift compensation], matching_resource_names: [payroll summary]}
+    - {bucket_ref: "fact_1:recall:output_1", exhaustive_resource_names: [location], matching_resource_names: [location]}
+    - {bucket_ref: "fact_1:recall:output_2", exhaustive_resource_names: [payout, shift compensation], matching_resource_names: [payout]}
+expect:
+  result_contains:
+    selected_read_membership:
+      compensation_source: true

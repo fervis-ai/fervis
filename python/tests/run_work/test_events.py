@@ -105,3 +105,23 @@ def test_run_waiting_event_requires_actionable_clarifications():
             }
         ],
     }
+
+
+@pytest.mark.parametrize("code,retryable", [
+    ("provider_rate_limited", True), ("provider_timeout", True),
+    ("provider_bad_request", False), ("provider_authentication_failed", False),
+])
+def test_persisted_provider_failure_retains_its_code_and_retry_policy(code, retryable):
+    from types import SimpleNamespace
+    from fervis.questions.run_views import _run_error
+    from fervis.questions.contracts import AskResult
+    from fervis.evaluation.goldsets.runner import _is_retryable_provider_failure
+    run = SimpleNamespace(runtime_errors=(SimpleNamespace(error_kind="infrastructure_failed",
+        message=code + ': {"provider_metadata": {"statusCode": "429"}}'),))
+    work = SimpleNamespace(last_error=code)
+    projected = _run_error(run, work)
+    event = run_terminal_event(status="FAILED", run_id="run", error=projected)
+    assert event["error"]["code"] == code
+    assert event["error"]["retryable"] is retryable
+    result = AskResult(status="FAILED", conversation_id="conversation", question_id="question", run_id="run", error=projected)
+    assert _is_retryable_provider_failure(result) is retryable

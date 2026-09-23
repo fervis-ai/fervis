@@ -48,11 +48,14 @@ def generate_one_of_tool_output(
             tool_specs=tool_specs,
         )
     except Exception as exc:
+        context = provider_error_context(exc)
+        usage = context.pop("model_usage", None)
         raise RequiredToolOutputError(
             "provider tool output failed",
+            output={"usage": usage} if isinstance(usage, dict) else {},
             tool_specs=tool_specs,
             error_code=provider_error_code(exc),
-            error_context=provider_error_context(exc),
+            error_context=context,
         ) from exc
     try:
         payload = tool_payload(output.get("answer"))

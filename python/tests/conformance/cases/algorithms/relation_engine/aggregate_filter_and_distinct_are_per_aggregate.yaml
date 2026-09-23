@@ -1,0 +1,37 @@
+id: aggregate_filter_and_distinct_are_per_aggregate
+description: Each aggregate independently filters rows, counts rows or values, ignores null values, and applies explicit argument distinctness.
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: included, value: true, value_type: boolean}]
+  relations:
+    - id: observations
+      rows:
+        - {observation_id: a, amount: 10, included: true}
+        - {observation_id: b, amount: 10, included: true}
+        - {observation_id: c, amount: 20, included: false}
+        - {observation_id: d, amount: null, included: true}
+        - {observation_id: e, amount: 30, included: false}
+      grain_keys: [observation_id]
+      field_types: {observation_id: string, amount: decimal, included: boolean}
+      completeness: {status: complete, source_kind: api_read, set_kind: universe}
+  operations:
+    - id: aggregate
+      output_relation: result
+      spec:
+        kind: aggregate
+        input_relation: observations
+        group_by: []
+        aggregations:
+          - {function: count, output_field: row_count}
+          - {function: count, input_field: amount, output_field: value_count}
+          - {function: count, input_field: amount, output_field: distinct_value_count, distinct_argument: true}
+          - function: sum
+            input_field: amount
+            output_field: included_total
+            filter: {left: included, operator: equals, right_scalar: included}
+expect:
+  result_contains:
+    result:
+      rows:
+        - {row_count: 5, value_count: 4, distinct_value_count: 3, included_total: 20}

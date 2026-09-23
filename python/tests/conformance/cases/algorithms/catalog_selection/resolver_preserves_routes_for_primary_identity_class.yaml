@@ -1,0 +1,37 @@
+id: resolver_preserves_routes_for_primary_identity_class
+description: Resolver recall preserves viable routes for the first identity class before less-direct classes consume the cap.
+kind: algorithm
+algorithm: catalog_selection.resolver_select
+input:
+  catalog:
+    reads:
+      - id: staff_list
+        endpoint_name: list_staff_list
+        resource_names: [staff]
+        fields: [{ref: staff_list.field.staff_id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: staff, primary: true, components: [{id: staff_id, field_ref: staff_list.field.staff_id}]}]
+      - id: staff_detail
+        endpoint_name: get_staff_detail
+        resource_names: [staff]
+        params: [{ref: staff_detail.path.staff_id, name: staff_id, source: path, type: uuid, required: true}]
+        fields: [{ref: staff_detail.field.staff_id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: staff, primary: true, components: [{id: staff_id, field_ref: staff_detail.field.staff_id}]}]
+      - id: sale_detail
+        endpoint_name: get_sale_detail
+        resource_names: [sale, sales]
+        fields: [{ref: sale_detail.field.sale_id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: sale, primary: true, components: [{id: sale_id, field_ref: sale_detail.field.sale_id}]}]
+      - id: shift_list
+        endpoint_name: list_shift_record_list
+        resource_names: [shift record]
+        fields: [{ref: shift_list.field.shift_record_id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: shift_record, primary: true, components: [{id: shift_record_id, field_ref: shift_list.field.shift_record_id}]}]
+  entity_targets:
+    - target_id: entity_1
+      catalog_search_terms: [staff, staff sales, shift record]
+  max_reads_per_target: 3
+expect:
+  result_contains:
+    selected_read_membership:
+      staff_list: true
+      staff_detail: true
