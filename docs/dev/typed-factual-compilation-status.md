@@ -114,6 +114,13 @@ set cannot be substituted under an existing input ID.
   remains readable. Updated conformance fixtures and a stale-version regression
   pass. Full verification passed with 2,739 Python tests, Mypy over 635 source
   files, Ruff, distribution checks, 93 desktop tests and build.
+- Numeric question bindings no longer call context-sensitive
+  `Decimal.normalize()`. A 38-digit supplied value previously became a
+  rounded 6-digit value before planning when the caller's Decimal precision
+  was 6. Exact text canonicalization now preserves all digits, retains
+  equivalent-form normalization, and rejects an excessive decimal span.
+  Full verification passed with 2,754 Python tests, Mypy over 635 source
+  files, Ruff, distribution checks, 93 desktop tests and build.
 - A typed local-day regression now covers the New York spring DST transition:
   two instants within March 8 and the first instant of March 9 fall into their
   correct local-day buckets. This preserves a SQL-era factual obligation in

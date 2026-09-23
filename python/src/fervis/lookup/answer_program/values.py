@@ -456,7 +456,16 @@ def _normalize_decimal_text(value: str) -> str:
         raise ValueError("number must be finite")
     if parsed == 0:
         return "0"
-    return format(parsed.normalize(), "f")
+    digits = parsed.as_tuple().digits
+    exponent = int(parsed.as_tuple().exponent)
+    rendered_length = max(
+        len(digits) + max(exponent, 0),
+        1 + max(-exponent, 0),
+    ) + 2
+    if rendered_length > 10_000:
+        raise ValueError("number exceeds the supported exact decimal span")
+    rendered = format(parsed, "f")
+    return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
 
 
 def _parse_iso_boundary(value: str) -> tuple[str, date | datetime]:

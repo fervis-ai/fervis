@@ -83,3 +83,33 @@ def test_saved_program_with_previous_numeric_semantics_is_not_reused():
         verify_program_compatibility(
             stale, catalog=RelationCatalog(), memory_relations=(memory_relation,)
         )
+
+
+def test_supplied_numeric_binding_keeps_every_digit_under_low_caller_precision():
+    from fervis.lookup.answer_program.values import FactValue, LiteralType
+
+    supplied = "12345678901234567890.123456789012345678"
+    for precision in (6, 28, 50):
+        with localcontext() as context:
+            context.prec = precision
+            value = FactValue.literal(
+                id="supplied", literal_type=LiteralType.NUMBER, value=supplied
+            )
+            assert value.payload.value == supplied
+            assert value.payload.canonical_value() == Decimal(supplied)
+
+
+@pytest.mark.parametrize("raw,canonical", [
+    ("001.2300", "1.23"), ("1e3", "1000"), ("0.000", "0"),
+    ("-0.00", "0"), ("1E-4", "0.0001"),
+])
+def test_supplied_number_canonicalization_is_exact_and_context_free(raw, canonical):
+    from fervis.lookup.answer_program.values import FactValue, LiteralType
+
+    for precision in (6, 28, 50):
+        with localcontext() as context:
+            context.prec = precision
+            value = FactValue.literal(
+                id="supplied", literal_type=LiteralType.NUMBER, value=raw
+            )
+            assert value.payload.value == canonical
