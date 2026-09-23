@@ -31,14 +31,21 @@ set cannot be substituted under an existing input ID.
 - Independent Django/DRF and Flask: standard user and Todo counts passed.
 - Current CLI `doctor` passed on isolated FastAPI and Flask samples; a stale
   DRF quickstart mount was repaired by `fervis init --yes`, then `doctor` passed.
-- Isolated Ozana `supplies_01`: ordinary goldset CLI answered 5, matching the
+- Older isolated Ozana audit checkout, `supplies_01`: ordinary goldset CLI
+  answered 5, matching the
   independent oracle. The persisted run compiled and executed a typed plan in
   104 seconds with nine model calls, zero source-access turns and $0.079 of
   model spend. The host JWT was carried through the encrypted delegated-read
   contract and reauthenticated as the same Django principal.
 - The private Ozana suite's 281 oracles were computed offline against the
-  isolated fixture database with no exceptions or `oracle_failed` results.
+  merged current-main host checkout's isolated fixture database with no
+  exceptions or `oracle_failed` results.
   This checks fixture/oracle readiness, not assistant answers.
+- The merged host checkout passed 3,683 distinct Ozana/accounts/brands Docker
+  tests with no failures, and Fervis catalog inspection found 202 endpoints,
+  payment-request offset pagination and sales-summary response-shape controls.
+  A separate local evaluation worktree passes `fervis doctor` and an
+  authenticated Fervis read; it has no paid model receipt yet.
 - Address-only FastAPI: integer, UUID and decimal path-addressed facility
   counts passed without a district-list endpoint.
 - Anonymous collection control: two named district alternatives counted all
