@@ -29,6 +29,8 @@ set cannot be substituted under an existing input ID.
   passed again through the ordinary CLI: four scans across numbered pages and
   three unpaginated measurements.
 - Independent Django/DRF and Flask: standard user and Todo counts passed.
+- Current CLI `doctor` passed on isolated FastAPI and Flask samples; a stale
+  DRF quickstart mount was repaired by `fervis init --yes`, then `doctor` passed.
 - Isolated Ozana `supplies_01`: ordinary goldset CLI answered 5, matching the
   independent oracle. The persisted run compiled and executed a typed plan in
   104 seconds with nine model calls, zero source-access turns and $0.079 of
@@ -50,15 +52,15 @@ set cannot be substituted under an existing input ID.
   average amount selects a different winner than ranking by sum, while returning
   the associated count. It also exercises duplicated observed parent rows.
 - Framework mount regressions now prove that Fervis routes remain reachable
-  ahead of host catch-all routes in Django and FastAPI. Django `doctor` rejects
+  ahead of host catch-all routes in Django, FastAPI and Flask. Django `doctor` rejects
   an existing shadowed mount, and `init` repairs its position.
-- The repository verifier passed after delegated Django reads and goldset
-  credential preparation: 2,715
+- The repository verifier passed after the three-framework mount conformance
+  check: 2,716
   Python tests, Mypy over 633 source files, Ruff, installed-package checks,
   93 desktop tests and the desktop build.
 - A pull-request workflow now runs that full repository verifier with a
-  placeholder model key and browser downloads disabled. Its remote check has
-  not yet reported on this PR revision.
+  placeholder model key and browser downloads disabled. Check the latest PR
+  head's remote result separately from these local results.
 
 ## Release gates still open
 

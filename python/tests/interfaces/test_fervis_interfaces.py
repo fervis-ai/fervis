@@ -1177,6 +1177,31 @@ def test_fervis_flask_blueprint_exposes_question_lifecycle_routes() -> None:
     }
 
 
+def test_fervis_flask_mount_is_reachable_after_host_catch_all() -> None:
+    from flask import Flask
+    from fervis import FervisConfig, HostConfig, ModelConfig, RuntimeRoutes
+    from fervis.integrations.flask import FlaskIntegration
+
+    app = Flask(__name__)
+
+    @app.get("/<path:rest>")
+    def host_catch_all(rest: str):
+        return {"owner": "host", "path": rest}
+
+    integration = FlaskIntegration(
+        config=FervisConfig(
+            host=HostConfig(timezone="UTC"),
+            routes=RuntimeRoutes(prefix="/fervis/"),
+            model=ModelConfig(default_provider="openai", default_model_key="gpt-5.4-mini"),
+            sources=[],
+        )
+    )
+    integration.init_app(app, question_interface=_FakeQuestionInterface())
+    client = app.test_client()
+    assert client.get("/fervis/").json == {"runtime": "fervis", "status": "ok"}
+    assert client.get("/unrelated").json == {"owner": "host", "path": "unrelated"}
+
+
 def test_fervis_flask_blueprint_uses_configured_common_question_interface() -> None:
     from flask import Flask
     from fervis.host_api.contracts.authority import ReadContextRef
